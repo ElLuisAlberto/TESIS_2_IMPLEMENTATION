@@ -46,6 +46,12 @@ def generate_launch_description():
         parameters=[robot_description]
     )
 
+    rviz_config = PathJoinSubstitution([
+        FindPackageShare('thesis_description'),
+        'rviz',
+        'jaco.rviz'
+    ])
+
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
