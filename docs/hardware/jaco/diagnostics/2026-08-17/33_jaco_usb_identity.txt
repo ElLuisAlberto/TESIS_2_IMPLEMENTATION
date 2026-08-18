@@ -1,0 +1,16 @@
+===== idVendor =====
+22cd
+===== idProduct =====
+0000
+===== manufacturer =====
+Kinova inc.
+===== product =====
+Jaco Robotic Arm
+===== serial =====
+Not available
+===== bcdDevice =====
+0000
+===== speed =====
+12
+===== version =====
+ 2.00

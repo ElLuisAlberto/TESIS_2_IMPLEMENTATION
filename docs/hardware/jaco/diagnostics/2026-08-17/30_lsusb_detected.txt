@@ -1,0 +1,8 @@
+Bus 004 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 003 Device 003: ID 1462:1563 Micro Star International MysticLight MS-1563 v0001
+Bus 003 Device 010: ID 22cd:0000 Kinova Robotics Inc. Jaco Robotic Arm
+Bus 003 Device 006: ID 8087:0026 Intel Corp. AX201 Bluetooth
+Bus 003 Device 005: ID 5986:211b Acer, Inc HD Webcam
+Bus 003 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
