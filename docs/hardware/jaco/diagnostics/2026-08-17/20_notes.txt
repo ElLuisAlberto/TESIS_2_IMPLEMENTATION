@@ -1,0 +1,16 @@
+Kinova JACO - Passive USB diagnostic test
+
+Test condition:
+- No robot movement was commanded.
+- 24 V robot power disconnected.
+- Robot power switch OFF.
+- Joystick was not used.
+- Only the USB-B connection between the JACO and Ubuntu laptop was tested.
+
+Initial result:
+- No new device appeared in lsusb after connecting the JACO while unpowered.
+- The lsusb before/after comparison produced no differences.
+
+Safety constraint:
+- The robot must not move during these identification tests.
+- No Kinova driver, ROS control node, MoveIt configuration, motion example, joint command, Cartesian command, or joystick command was executed.

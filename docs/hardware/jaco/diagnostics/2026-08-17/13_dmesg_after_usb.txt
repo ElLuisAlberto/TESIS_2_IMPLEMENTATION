@@ -1,0 +1,80 @@
+[Mon Aug 17 21:56:52 2026] Bluetooth: hci0: API lock is enabled
+[Mon Aug 17 21:56:52 2026] Bluetooth: hci0: Debug lock is disabled
+[Mon Aug 17 21:56:52 2026] Bluetooth: hci0: Minimum firmware build 1 week 10 2014
+[Mon Aug 17 21:56:52 2026] Bluetooth: hci0: Found device firmware: intel/ibt-19-0-4.sfi
+[Mon Aug 17 21:56:52 2026] Bluetooth: hci0: Boot Address: 0x24800
+[Mon Aug 17 21:56:52 2026] Bluetooth: hci0: Firmware Version: 206-22.23
+[Mon Aug 17 21:56:52 2026] rfkill: input handler disabled
+[Mon Aug 17 21:56:52 2026] audit: type=1107 audit(1787021813.410:552): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/login1" interface="org.freedesktop.login1.Manager" member="PrepareForSleep" name=":1.18" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=792 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 21:56:52 2026] audit: type=1107 audit(1787021813.411:553): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/NetworkManager" interface="org.freedesktop.NetworkManager" member="CheckPermissions" name=":1.8" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=761 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 21:56:52 2026] audit: type=1107 audit(1787021813.412:554): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/NetworkManager" interface="org.freedesktop.NetworkManager" member="CheckPermissions" name=":1.8" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=761 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 21:56:52 2026] audit: type=1107 audit(1787021813.424:555): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 21:56:52 2026] Generic FE-GE Realtek PHY r8169-0-300:00: attached PHY driver (mii_bus:phy_addr=r8169-0-300:00, irq=MAC)
+[Mon Aug 17 21:56:52 2026] r8169 0000:03:00.0 enp3s0: Link is Down
+[Mon Aug 17 21:56:52 2026] audit: type=1400 audit(1787021813.703:556): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/etc/vulkan/implicit_layer.d/" pid=23743 comm="brave" requested_mask="r" denied_mask="r" fsuid=1000 ouid=0
+[Mon Aug 17 21:56:52 2026] audit: type=1400 audit(1787021813.703:557): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/etc/vulkan/implicit_layer.d/" pid=23743 comm="brave" requested_mask="r" denied_mask="r" fsuid=1000 ouid=0
+[Mon Aug 17 21:56:52 2026] audit: type=1400 audit(1787021813.703:558): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/etc/vulkan/icd.d/" pid=23743 comm="brave" requested_mask="r" denied_mask="r" fsuid=1000 ouid=0
+[Mon Aug 17 21:56:52 2026] audit: type=1400 audit(1787021813.703:559): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/etc/vulkan/icd.d/" pid=23743 comm="brave" requested_mask="r" denied_mask="r" fsuid=1000 ouid=0
+[Mon Aug 17 21:56:52 2026] audit: type=1400 audit(1787021813.703:560): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/etc/vulkan/implicit_layer.d/" pid=23743 comm="brave" requested_mask="r" denied_mask="r" fsuid=1000 ouid=0
+[Mon Aug 17 21:56:52 2026] audit: type=1400 audit(1787021813.703:561): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/etc/vulkan/implicit_layer.d/" pid=23743 comm="brave" requested_mask="r" denied_mask="r" fsuid=1000 ouid=0
+[Mon Aug 17 21:56:53 2026] nvidia-modeset: WARNING: GPU:0: Correcting number of heads for current head configuration (0x00)
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Waiting for firmware download to complete
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Firmware loaded in 1598303 usecs
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Waiting for device to boot
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Device booted in 14611 usecs
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Found Intel DDC parameters: intel/ibt-19-0-4.ddc
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Applying Intel DDC parameters completed
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Firmware revision 0.4 build 206 week 22 2023
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: HCI LE Coded PHY feature bit is set, but its usage is not supported.
+[Mon Aug 17 21:56:53 2026] Bluetooth: MGMT ver 1.22
+[Mon Aug 17 21:56:53 2026] Bluetooth: hci0: Bad flag given (0x1) vs supported (0x0)
+[Mon Aug 17 21:56:55 2026] wlo1: authenticate with 24:d7:9c:dc:5e:0e (local address=84:14:4d:d0:fb:56)
+[Mon Aug 17 21:56:55 2026] wlo1: send auth to 24:d7:9c:dc:5e:0e (try 1/3)
+[Mon Aug 17 21:56:56 2026] wlo1: authenticated
+[Mon Aug 17 21:56:56 2026] wlo1: associate with 24:d7:9c:dc:5e:0e (try 1/3)
+[Mon Aug 17 21:56:56 2026] wlo1: RX AssocResp from 24:d7:9c:dc:5e:0e (capab=0x1111 status=0 aid=41)
+[Mon Aug 17 21:56:56 2026] wlo1: associated
+[Mon Aug 17 21:56:56 2026] iwlwifi 0000:00:14.3: Unhandled alg: 0x707
+[Mon Aug 17 21:56:56 2026] iwlwifi 0000:00:14.3: Unhandled alg: 0x707
+[Mon Aug 17 21:56:56 2026] wlo1: Limiting TX power to 24 (24 - 0) dBm as advertised by 24:d7:9c:dc:5e:0e
+[Mon Aug 17 21:57:01 2026] kauditd_printk_skb: 15 callbacks suppressed
+[Mon Aug 17 21:57:01 2026] audit: type=1107 audit(1787021822.291:577): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/NetworkManager" interface="org.freedesktop.NetworkManager" member="StateChanged" name=":1.8" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=761 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 21:57:13 2026] audit: type=1400 audit(1787021833.840:578): apparmor="DENIED" operation="mkdir" class="file" profile="snap.brave.brave" name="/etc/opt/chrome/" pid=23943 comm="brave" requested_mask="c" denied_mask="c" fsuid=1000 ouid=1000
+[Mon Aug 17 21:57:22 2026] audit: type=1400 audit(1787021843.695:579): apparmor="DENIED" operation="mkdir" class="file" profile="snap.brave.brave" name="/etc/opt/chrome/" pid=23970 comm="brave" requested_mask="c" denied_mask="c" fsuid=1000 ouid=1000
+[Mon Aug 17 21:57:34 2026] audit: type=1400 audit(1787021855.129:580): apparmor="DENIED" operation="mkdir" class="file" profile="snap.brave.brave" name="/etc/opt/chrome/" pid=24010 comm="brave" requested_mask="c" denied_mask="c" fsuid=1000 ouid=1000
+[Mon Aug 17 21:58:53 2026] audit: type=1107 audit(1787021933.899:581): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 21:59:10 2026] perf: interrupt took too long (2519 > 2500), lowering kernel.perf_event_max_sample_rate to 79000
+[Mon Aug 17 21:59:49 2026] audit: type=1107 audit(1787021990.132:582): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:01:50 2026] audit: type=1107 audit(1787022110.897:583): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:03:50 2026] audit: type=1107 audit(1787022230.898:584): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:05:50 2026] audit: type=1107 audit(1787022350.896:585): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:07:50 2026] audit: type=1107 audit(1787022470.894:586): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:09:50 2026] audit: type=1107 audit(1787022590.897:587): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:11:50 2026] audit: type=1107 audit(1787022710.896:588): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.741:589): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.741:590): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.741:591): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.744:592): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.745:593): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.747:594): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.747:595): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.749:596): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.749:597): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:12:51 2026] audit: type=1400 audit(1787022772.750:598): apparmor="DENIED" operation="open" class="file" profile="snap.brave.brave" name="/proc/3763/smaps_rollup" pid=3763 comm="MemoryInfra" requested_mask="r" denied_mask="r" fsuid=1000 ouid=1000
+[Mon Aug 17 22:13:50 2026] audit: type=1107 audit(1787022830.895:599): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
+[Mon Aug 17 22:15:50 2026] audit: type=1107 audit(1787022950.927:600): pid=760 uid=102 auid=4294967295 ses=4294967295 subj=unconfined msg='apparmor="DENIED" operation="dbus_signal"  bus="system" path="/org/freedesktop/UPower/devices/DisplayDevice" interface="org.freedesktop.DBus.Properties" member="PropertiesChanged" name=":1.23" mask="receive" pid=8663 label="snap.spotify.spotify" peer_pid=937 peer_label="unconfined"
+                            exe="/usr/bin/dbus-daemon" sauid=102 hostname=? addr=? terminal=?'
