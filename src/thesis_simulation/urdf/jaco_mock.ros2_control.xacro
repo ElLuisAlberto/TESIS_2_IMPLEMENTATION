@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+
+<robot
+    xmlns:xacro="http://www.ros.org/wiki/xacro"
+    name="j2n6s300_mock">
+
+  <!-- Modelo geometrico/cinematico comun del JACO -->
+  <xacro:include filename="$(find thesis_description)/urdf/j2n6s300.xacro"/>
+
+  <!-- Frame global -->
+  <link name="world"/>
+  <link name="root"/>
+
+  <joint name="connect_root_and_world" type="fixed">
+    <parent link="world"/>
+    <child link="root"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- JACO 6 DOF + gripper visual -->
+  <xacro:j2n6s300 base_parent="root"/>
+
+  <!-- Hardware virtual ROS 2 Control -->
+  <ros2_control name="JacoMockSystem" type="system">
+
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+
+    <joint name="j2n6s300_joint_1">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+
+    <joint name="j2n6s300_joint_2">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">3.141592653589793</param>
+      </state_interface>
+    </joint>
+
+    <joint name="j2n6s300_joint_3">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">3.141592653589793</param>
+      </state_interface>
+    </joint>
+
+    <joint name="j2n6s300_joint_4">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+
+    <joint name="j2n6s300_joint_5">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+
+    <joint name="j2n6s300_joint_6">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+
+  </ros2_control>
+
+</robot>
