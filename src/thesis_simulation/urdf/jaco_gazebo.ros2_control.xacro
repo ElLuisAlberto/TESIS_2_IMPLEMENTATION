@@ -1,0 +1,155 @@
+<?xml version="1.0"?>
+
+<robot
+    xmlns:xacro="http://www.ros.org/wiki/xacro"
+    name="j2n6s300_gazebo">
+
+  <!-- =========================================================
+       Common JACO geometry and kinematics
+       ========================================================= -->
+
+  <xacro:include
+      filename="$(find thesis_description)/urdf/j2n6s300.xacro"/>
+
+
+  <!-- =========================================================
+       Fixed base
+       ========================================================= -->
+
+  <link name="world"/>
+  <link name="root"/>
+
+  <joint name="connect_root_and_world" type="fixed">
+    <parent link="world"/>
+    <child link="root"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- =========================================================
+       Kinova JACO j2n6s300
+       ========================================================= -->
+
+  <xacro:j2n6s300 base_parent="root"/>
+
+
+  <!-- =========================================================
+       Gazebo ros2_control hardware
+       ========================================================= -->
+
+  <ros2_control name="GazeboSimSystem" type="system">
+
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+
+
+    <joint name="j2n6s300_joint_1">
+
+      <command_interface name="position"/>
+
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+
+    <joint name="j2n6s300_joint_2">
+
+      <command_interface name="position"/>
+
+      <state_interface name="position">
+        <param name="initial_value">3.141592653589793</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+
+    <joint name="j2n6s300_joint_3">
+
+      <command_interface name="position"/>
+
+      <state_interface name="position">
+        <param name="initial_value">3.141592653589793</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+
+    <joint name="j2n6s300_joint_4">
+
+      <command_interface name="position"/>
+
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+
+    <joint name="j2n6s300_joint_5">
+
+      <command_interface name="position"/>
+
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+
+    <joint name="j2n6s300_joint_6">
+
+      <command_interface name="position"/>
+
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+
+      <state_interface name="velocity"/>
+
+    </joint>
+
+  </ros2_control>
+
+
+  <!-- =========================================================
+       Gazebo -> ros2_control plugin
+       ========================================================= -->
+
+  <gazebo>
+
+    <plugin
+        filename="gz_ros2_control-system"
+        name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+
+      <robot_param>robot_description</robot_param>
+
+      <robot_param_node>
+        robot_state_publisher
+      </robot_param_node>
+
+      <parameters>
+        $(find thesis_simulation)/config/jaco_gazebo_controllers.yaml
+      </parameters>
+
+      <controller_manager_name>
+        controller_manager
+      </controller_manager_name>
+
+    </plugin>
+
+  </gazebo>
+
+</robot>
