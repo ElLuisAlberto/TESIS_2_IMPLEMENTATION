@@ -1,6 +1,9 @@
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import (
+    get_package_prefix,
+    get_package_share_directory,
+)
 
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess, TimerAction
@@ -18,6 +21,55 @@ def generate_launch_description():
 
     description_share = get_package_share_directory(
         'thesis_description'
+    )
+
+    # =========================================================
+    # Gazebo Fortress resource and plugin paths
+    # =========================================================
+
+    gz_ros2_control_prefix = get_package_prefix(
+        'gz_ros2_control'
+    )
+
+    system_plugin_paths = [
+        os.path.join(
+            gz_ros2_control_prefix,
+            'lib'
+        )
+    ]
+
+    existing_system_plugin_path = os.environ.get(
+        'IGN_GAZEBO_SYSTEM_PLUGIN_PATH',
+        ''
+    )
+
+    if existing_system_plugin_path:
+        system_plugin_paths.append(
+            existing_system_plugin_path
+        )
+
+    gazebo_system_plugin_path = os.pathsep.join(
+        system_plugin_paths
+    )
+
+
+    resource_paths = [
+        os.path.dirname(description_share),
+        os.path.dirname(simulation_share),
+    ]
+
+    existing_resource_path = os.environ.get(
+        'IGN_GAZEBO_RESOURCE_PATH',
+        ''
+    )
+
+    if existing_resource_path:
+        resource_paths.append(
+            existing_resource_path
+        )
+
+    gazebo_resource_path = os.pathsep.join(
+        resource_paths
     )
 
     xacro_file = os.path.join(
@@ -76,7 +128,14 @@ def generate_launch_description():
             '3',
             world_file
         ],
-        output='screen'
+        output='screen',
+        additional_env={
+            'IGN_GAZEBO_SYSTEM_PLUGIN_PATH':
+                gazebo_system_plugin_path,
+
+            'IGN_GAZEBO_RESOURCE_PATH':
+                gazebo_resource_path,
+        }
     )
 
 
