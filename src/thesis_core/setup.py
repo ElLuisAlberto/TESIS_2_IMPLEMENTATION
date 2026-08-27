@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'safety_supervisor = thesis_core.safety_supervisor_node:main',
         ],
     },
 )
