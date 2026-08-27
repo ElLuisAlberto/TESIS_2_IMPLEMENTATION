@@ -1596,3 +1596,806 @@ src/thesis_description/KINOVA_LICENSE
 ```
 
 para información de procedencia y licencia de los recursos originales.
+
+---
+
+# 33. Actualización de avance — 27/08/2026
+
+Esta sección registra únicamente los avances realizados después de la versión
+anterior del README. El contenido previo se conserva sin modificaciones.
+
+## 33.1 Digital twin reproducible
+
+Se completó la tarea pendiente de hacer que el launch de Gazebo sea
+autosuficiente.
+
+El archivo:
+
+```text
+src/thesis_simulation/launch/jaco_gazebo.launch.py
+```
+
+ahora configura internamente las rutas necesarias para que Gazebo Fortress
+encuentre:
+
+- los plugins de `gz_ros2_control`;
+- los recursos y meshes de `thesis_description`.
+
+Por tanto, ya no es necesario ejecutar manualmente:
+
+```bash
+export IGN_GAZEBO_SYSTEM_PLUGIN_PATH=...
+export IGN_GAZEBO_RESOURCE_PATH=...
+```
+
+antes del launch.
+
+La prueba fue realizada desde una terminal sin dichas variables exportadas y se
+verificó nuevamente:
+
+```text
+joint_state_broadcaster  active
+arm_controller           active
+GazeboSimSystem          active
+/joint_states            operativo
+```
+
+Commit asociado:
+
+```text
+f512425 Make JACO Gazebo launch self-contained
+```
+
+Estado:
+
+```text
+Reproducibilidad del digital twin: COMPLETADA
+```
+
+---
+
+## 33.2 Interfaz común de comandos candidatos
+
+Se implementó la primera interfaz propia de la arquitectura desacoplada:
+
+```text
+src/thesis_interfaces/msg/JointCommand.msg
+```
+
+Contenido:
+
+```text
+builtin_interfaces/Time stamp
+string command_id
+string[] joint_names
+float64[] positions
+builtin_interfaces/Duration duration
+```
+
+Esta interfaz permite representar un comando articular candidato sin acoplar
+`thesis_core` directamente a:
+
+```text
+trajectory_msgs/msg/JointTrajectory
+```
+
+o al controlador concreto utilizado actualmente.
+
+La separación queda:
+
+```text
+Fuente de comando
+      ↓
+JointCommand
+      ↓
+thesis_core
+      ↓
+adaptador específico
+      ↓
+controlador
+```
+
+Validación realizada:
+
+```bash
+ros2 interface show thesis_interfaces/msg/JointCommand
+```
+
+ROS 2 reconoció correctamente todos los campos del mensaje.
+
+Commit asociado:
+
+```text
+25ef660 Add candidate joint command interface and test publisher
+```
+
+---
+
+## 33.3 Nodo generador de comandos candidatos
+
+Se implementó:
+
+```text
+src/thesis_simulation/thesis_simulation/test_command_node.py
+```
+
+Ejecutable:
+
+```text
+thesis_simulation test_command
+```
+
+El nodo publica comandos de prueba en:
+
+```text
+/thesis/candidate_command
+```
+
+Prueba realizada:
+
+```bash
+ros2 run thesis_simulation test_command
+```
+
+Salida validada:
+
+```text
+Candidate command published:
+J1=0.200 rad
+duration=3.00 s
+```
+
+Ejemplo del mensaje recibido:
+
+```text
+command_id: test_<timestamp>
+
+joint_names:
+- j2n6s300_joint_1
+- j2n6s300_joint_2
+- j2n6s300_joint_3
+- j2n6s300_joint_4
+- j2n6s300_joint_5
+- j2n6s300_joint_6
+
+positions:
+- 0.2
+- 3.141592653589793
+- 3.141592653589793
+- 0.0
+- 0.0
+- 0.0
+
+duration:
+  sec: 3
+  nanosec: 0
+```
+
+El nodo puede recibir parámetros desde ROS 2, por ejemplo:
+
+```bash
+ros2 run thesis_simulation test_command \
+  --ros-args \
+  -p joint_1_target:=0.35 \
+  -p duration_sec:=4.0
+```
+
+Este nodo representa temporalmente una fuente externa de movimiento.
+
+Posteriormente podrá ser sustituido por:
+
+- GUI;
+- joystick;
+- MoveIt;
+- otro planificador;
+- otra fuente externa;
+
+sin cambiar la lógica central de supervisión.
+
+---
+
+## 33.4 Topic `/thesis/candidate_command`
+
+El topic:
+
+```text
+/thesis/candidate_command
+```
+
+ya se encuentra implementado y validado.
+
+Tipo:
+
+```text
+thesis_interfaces/msg/JointCommand
+```
+
+Prueba de recepción:
+
+```bash
+ros2 topic echo \
+/thesis/candidate_command \
+thesis_interfaces/msg/JointCommand
+```
+
+Estado:
+
+```text
+/thesis/candidate_command: OPERATIVO
+```
+
+---
+
+## 33.5 Supervisor pass-through inicial
+
+Se implementó el primer supervisor en:
+
+```text
+src/thesis_core/thesis_core/safety_supervisor_node.py
+```
+
+Ejecutable:
+
+```text
+thesis_core safety_supervisor
+```
+
+Entrada:
+
+```text
+/thesis/candidate_command
+```
+
+Salida:
+
+```text
+/thesis/supervised_command
+```
+
+La versión actual todavía no implementa la evaluación preventiva completa.
+
+Actualmente realiza:
+
+- validación de que exista al menos un joint;
+- validación de igualdad entre longitud de `joint_names` y `positions`;
+- rechazo de posiciones no finitas;
+- validación de duración mayor que cero;
+- cálculo inicial de latencia de recepción;
+- publicación de comandos válidos;
+- rechazo de comandos estructuralmente inválidos.
+
+El comportamiento actual es:
+
+```text
+comando válido
+      ↓
+ALLOW
+      ↓
+/thesis/supervised_command
+```
+
+y:
+
+```text
+comando inválido
+      ↓
+REJECTED
+      ↓
+no se publica salida supervisada
+```
+
+---
+
+## 33.6 Primera prueba ALLOW
+
+Se utilizó el comando candidato:
+
+```text
+J1 = 0.20 rad
+J2 = π rad
+J3 = π rad
+J4 = 0 rad
+J5 = 0 rad
+J6 = 0 rad
+
+duration = 3 s
+```
+
+Resultado del supervisor:
+
+```text
+ALLOW id=test_1787793366439802876 | joints=6 | input_latency=1.432 ms
+```
+
+El mismo comando fue observado correctamente en:
+
+```text
+/thesis/supervised_command
+```
+
+Por tanto, ya se verificó el flujo:
+
+```text
+test_command_node
+        ↓
+/thesis/candidate_command
+        ↓
+safety_supervisor_node
+        ↓
+ALLOW
+        ↓
+/thesis/supervised_command
+```
+
+---
+
+## 33.7 Primera medición de latencia
+
+La primera medición registrada fue:
+
+```text
+input_latency = 1.432 ms
+```
+
+Esta medición corresponde únicamente al intervalo entre:
+
+```text
+timestamp del comando candidato
+```
+
+y:
+
+```text
+recepción del mensaje por thesis_core
+```
+
+Todavía no representa la latencia preventiva total porque aún no se ejecutan:
+
+- modelado geométrico;
+- predicción;
+- distancia mínima;
+- TTC;
+- márgenes de incertidumbre;
+- clasificación de riesgo.
+
+Esta medición será utilizada como línea base para las futuras pruebas de
+latencia.
+
+Requisito experimental de referencia:
+
+```text
+latencia de decisión / procesamiento ≤ 100 ms
+```
+
+---
+
+## 33.8 Prueba de rechazo estructural
+
+Se publicó manualmente un comando inválido:
+
+```text
+command_id: invalid_test
+
+joint_names:
+- j2n6s300_joint_1
+- j2n6s300_joint_2
+
+positions:
+- 0.2
+
+duration:
+  sec: 3
+```
+
+El mensaje contenía:
+
+```text
+2 joint_names
+1 position
+```
+
+Resultado:
+
+```text
+REJECTED invalid_test:
+joint_names and positions have different sizes
+```
+
+El comando inválido no apareció en:
+
+```text
+/thesis/supervised_command
+```
+
+Esto confirma que el supervisor ya funciona como un punto real de
+intercepción y puede detener comandos antes de que continúen hacia el
+controlador.
+
+---
+
+## 33.9 Estado de `/thesis/supervised_command`
+
+El topic:
+
+```text
+/thesis/supervised_command
+```
+
+ya está implementado.
+
+Tipo:
+
+```text
+thesis_interfaces/msg/JointCommand
+```
+
+Estado:
+
+```text
+comando válido   → publicado
+comando inválido → no publicado
+```
+
+Prueba utilizada:
+
+```bash
+ros2 topic echo \
+/thesis/supervised_command \
+thesis_interfaces/msg/JointCommand
+```
+
+---
+
+## 33.10 Correspondencia con el flujo funcional de la tesis
+
+La implementación continúa siguiendo el flujo funcional definido para el
+subsistema computacional.
+
+| Función definida en el flujo de la tesis | Implementación actual | Estado |
+|---|---|---:|
+| Adquirir comandos candidatos externos | `test_command_node` como fuente de prueba | ✅ |
+| Normalizar comando candidato | `JointCommand.msg` | ✅ Inicial |
+| Comando candidato adquirido | `/thesis/candidate_command` | ✅ |
+| Evaluar condiciones preventivas | `safety_supervisor_node` | 🟡 Básico |
+| Clasificar / decidir | `ALLOW` / `REJECT` estructural | 🟡 Básico |
+| Generar comando supervisado | `/thesis/supervised_command` | ✅ |
+| Convertir y enviar comando supervisado al controlador | `trajectory_adapter_node` | ⏳ |
+| Controlador del manipulador | `arm_controller` | ✅ |
+| Manipulador | JACO digital twin en Gazebo | ✅ |
+
+La evaluación preventiva completa todavía deberá incorporar:
+
+```text
+estado cinemático del robot
+        ↓
+estimación del estado
+        ↓
+actualización de representación geométrica
+        ↓
+predicción cinemática de corto horizonte
+        ↓
+representación del entorno
+        ↓
+distancia robot-entorno
+        ↓
+métricas de riesgo
+        ↓
+TTC
+        ↓
+márgenes de incertidumbre
+        ↓
+restricciones cinemáticas y espaciales
+        ↓
+clasificación de zona de seguridad
+        ↓
+selección de acción preventiva
+```
+
+La señal de parada de emergencia permanecerá como una rama de prioridad
+independiente, coherente con el flujo funcional de la tesis.
+
+---
+
+## 33.11 Correspondencia con los paquetes ROS 2
+
+La separación actual es:
+
+| Función | Paquete |
+|---|---|
+| Mensajes comunes | `thesis_interfaces` |
+| Fuente de prueba | `thesis_simulation` |
+| Supervisor | `thesis_core` |
+| Digital twin | `thesis_simulation` |
+| Descripción del robot | `thesis_description` |
+| Adaptador al robot real | `thesis_hardware` — pendiente |
+| UI y métricas | `thesis_ui` — pendiente |
+
+Esta organización mantiene la regla de no duplicar los algoritmos preventivos
+entre simulación y hardware.
+
+---
+
+## 33.12 Estado actual de la cadena
+
+El flujo actualmente implementado es:
+
+```text
+test_command_node                ✅
+        ↓
+/thesis/candidate_command        ✅
+        ↓
+safety_supervisor_node           ✅
+        ↓
+validación estructural           ✅
+        ↓
+ALLOW / REJECT básico            ✅
+        ↓
+/thesis/supervised_command       ✅
+        ↓
+trajectory_adapter              ← SIGUIENTE
+        ↓
+/arm_controller/joint_trajectory
+        ↓
+JACO Gazebo
+```
+
+Por tanto, en este momento:
+
+```text
+ros2 run thesis_simulation test_command
+```
+
+todavía **no debe mover el JACO**.
+
+El comportamiento es correcto porque todavía falta el adaptador de salida.
+
+---
+
+## 33.13 Siguiente bloque: `trajectory_adapter_node`
+
+El siguiente nodo deberá recibir:
+
+```text
+/thesis/supervised_command
+```
+
+y convertir:
+
+```text
+thesis_interfaces/msg/JointCommand
+```
+
+a:
+
+```text
+trajectory_msgs/msg/JointTrajectory
+```
+
+para publicar posteriormente en:
+
+```text
+/arm_controller/joint_trajectory
+```
+
+Arquitectura objetivo inmediata:
+
+```text
+test_command_node
+        ↓
+/thesis/candidate_command
+        ↓
+safety_supervisor_node
+        ↓
+/thesis/supervised_command
+        ↓
+trajectory_adapter_node
+        ↓
+/arm_controller/joint_trajectory
+        ↓
+GazeboSimSystem
+        ↓
+JACO
+```
+
+Esta prueba permitirá demostrar por primera vez que el manipulador simulado
+recibe movimiento únicamente después de pasar por la capa de supervisión.
+
+Criterios de validación previstos:
+
+```text
+supervisor activo + ALLOW
+        → JACO se mueve
+
+comando REJECTED
+        → JACO no recibe movimiento
+
+supervisor apagado
+        → no existe supervised_command
+        → JACO no recibe movimiento desde la interfaz de tesis
+```
+
+---
+
+## 33.14 Siguiente entrada del supervisor: estado cinemático normalizado
+
+Después del adaptador de trayectorias se deberá incorporar el estado del robot
+al flujo del supervisor.
+
+No se recomienda que `thesis_core` dependa directamente de:
+
+```text
+/joint_states
+```
+
+producido por Gazebo.
+
+La arquitectura objetivo será:
+
+```text
+Gazebo
+  ↓
+/joint_states
+  ↓
+thesis_simulation adapter
+  ↓
+/thesis/joint_states
+  ↓
+thesis_core
+```
+
+Para el manipulador real:
+
+```text
+JACO real
+  ↓
+driver / API Kinova
+  ↓
+thesis_hardware adapter
+  ↓
+/thesis/joint_states
+  ↓
+thesis_core
+```
+
+De esta forma, `thesis_core` utilizará la misma interfaz normalizada sin saber
+si el origen es simulación o hardware.
+
+---
+
+## 33.15 Orden actualizado de implementación
+
+Desde el estado actual, el orden previsto es:
+
+```text
+1.  JointCommand.msg                          ✅
+2.  test_command_node                         ✅
+3.  /thesis/candidate_command                 ✅
+4.  supervisor pass-through                   ✅
+5.  ALLOW / REJECT estructural                ✅
+6.  /thesis/supervised_command                ✅
+7.  corregir cierre limpio del supervisor     ← ajuste menor
+8.  trajectory_adapter_node                   ← SIGUIENTE BLOQUE
+9.  movimiento JACO pasando por supervisor
+10. /thesis/joint_states
+11. estado cinemático normalizado
+12. obstáculo controlado en Gazebo
+13. /thesis/environment
+14. representación geométrica del robot
+15. distancia robot-entorno
+16. predicción cinemática
+17. distancia mínima proyectada
+18. TTC
+19. márgenes de incertidumbre
+20. restricciones cinemáticas y espaciales
+21. SAFE / WARNING / REDUCTION / CRITICAL
+22. intervención preventiva
+23. logging y métricas
+24. parada de emergencia
+25. RGB-D
+26. JACO real
+27. soft gripper + FSR
+28. validación experimental
+```
+
+---
+
+## 33.16 Observación pendiente del cierre del supervisor
+
+Durante la prueba funcional, el nodo operó correctamente, pero al cerrarlo con:
+
+```text
+Ctrl+C
+```
+
+se observó:
+
+```text
+RCLError:
+failed to shutdown:
+rcl_shutdown already called on the given context
+```
+
+Este error aparece únicamente durante el cierre del proceso y no invalida las
+pruebas de:
+
+```text
+ALLOW
+REJECT
+/thesis/supervised_command
+```
+
+La corrección prevista es proteger el shutdown mediante:
+
+```python
+if rclpy.ok():
+    rclpy.shutdown()
+```
+
+Esta corrección es menor y debe aplicarse antes de integrar el
+`trajectory_adapter_node`.
+
+---
+
+## 33.17 Estado actualizado resumido
+
+```text
+Robot description               ✅
+        ↓
+RViz                            ✅
+        ↓
+ros2_control mock               ✅
+        ↓
+control articular               ✅
+        ↓
+Gazebo Fortress                 ✅
+        ↓
+gz_ros2_control                 ✅
+        ↓
+GazeboSimSystem                 ✅
+        ↓
+feedback position + velocity    ✅
+        ↓
+trayectoria J1 validada         ✅
+        ↓
+launch reproducible             ✅
+        ↓
+JointCommand.msg                ✅
+        ↓
+test_command_node               ✅
+        ↓
+/thesis/candidate_command       ✅
+        ↓
+safety_supervisor pass-through  ✅
+        ↓
+ALLOW / REJECT estructural      ✅
+        ↓
+/thesis/supervised_command      ✅
+        ↓
+trajectory_adapter              ← SIGUIENTE
+        ↓
+movimiento supervisado JACO
+        ↓
+/thesis/joint_states
+        ↓
+obstáculo simulado
+        ↓
+/thesis/environment
+        ↓
+representación geométrica
+        ↓
+distancia mínima
+        ↓
+predicción
+        ↓
+TTC
+        ↓
+intervención preventiva
+        ↓
+RGB-D
+        ↓
+JACO real
+        ↓
+validación experimental
+```
+
+
