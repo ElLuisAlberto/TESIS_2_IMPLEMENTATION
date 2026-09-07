@@ -6,14 +6,18 @@ from ament_index_python.packages import (
 )
 
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, TimerAction
-from launch.substitutions import Command
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.substitutions import Command, LaunchConfiguration
 
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+
+    obstacle_x = LaunchConfiguration('obstacle_x')
+    obstacle_y = LaunchConfiguration('obstacle_y')
+    obstacle_z = LaunchConfiguration('obstacle_z')
 
     simulation_share = get_package_share_directory(
         'thesis_simulation'
@@ -82,6 +86,13 @@ def generate_launch_description():
         simulation_share,
         'worlds',
         'jaco_empty.sdf'
+    )
+
+    obstacle_file = os.path.join(
+        simulation_share,
+        'models',
+        'safety_obstacle',
+        'model.sdf'
     )
 
     rviz_config = os.path.join(
@@ -169,6 +180,25 @@ def generate_launch_description():
         ]
     )
 
+    spawn_obstacle = Node(
+        package='ros_gz_sim',
+        executable='create',
+        name='spawn_safety_obstacle',
+        output='screen',
+        arguments=[
+            '-name',
+            'safety_obstacle',
+            '-file',
+            obstacle_file,
+            '-x',
+            obstacle_x,
+            '-y',
+            obstacle_y,
+            '-z',
+            obstacle_z,
+        ]
+    )
+
 
     # =========================================================
     # Controllers
@@ -233,8 +263,49 @@ def generate_launch_description():
         ]
     )
 
+    proximity_monitor = Node(
+        package='thesis_core',
+        executable='proximity_monitor',
+        name='proximity_monitor',
+        output='screen',
+        parameters=[
+            capsule_config,
+            {
+                'use_sim_time': True,
+                'obstacle_x': ParameterValue(
+                    obstacle_x,
+                    value_type=float,
+                ),
+                'obstacle_y': ParameterValue(
+                    obstacle_y,
+                    value_type=float,
+                ),
+                'obstacle_z': ParameterValue(
+                    obstacle_z,
+                    value_type=float,
+                ),
+            }
+        ]
+    )
+
 
     return LaunchDescription([
+
+        DeclareLaunchArgument(
+            'obstacle_x',
+            default_value='0.60',
+            description='Gazebo safety obstacle X position in metres',
+        ),
+        DeclareLaunchArgument(
+            'obstacle_y',
+            default_value='0.0',
+            description='Gazebo safety obstacle Y position in metres',
+        ),
+        DeclareLaunchArgument(
+            'obstacle_z',
+            default_value='0.65',
+            description='Gazebo safety obstacle Z position in metres',
+        ),
 
         robot_state_publisher,
 
@@ -246,6 +317,13 @@ def generate_launch_description():
             period=2.0,
             actions=[
                 spawn_jaco
+            ]
+        ),
+
+        TimerAction(
+            period=2.5,
+            actions=[
+                spawn_obstacle
             ]
         ),
 
@@ -266,5 +344,6 @@ def generate_launch_description():
         ),
 
         rviz,
-        capsule_visualizer
+        capsule_visualizer,
+        proximity_monitor
     ])

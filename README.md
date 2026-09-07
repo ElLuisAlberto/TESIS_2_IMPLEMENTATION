@@ -1842,6 +1842,78 @@ validación experimental
 
 ---
 
+## 34. Estado actual: cápsulas y proximidad geométrica
+
+La simulación dispone de una interfaz gráfica de control articular supervisado
+y de seis cápsulas que siguen en tiempo real la cadena cinemática del JACO2.
+El siguiente bloque incorpora un obstáculo esférico virtual y calcula la
+separación mínima entre su superficie y la superficie de cada cápsula.
+
+El flujo implementado es:
+
+```text
+TF del JACO2 + parámetros de cápsulas + obstáculo físico de Gazebo
+                            ↓
+                   proximity_monitor
+                            ↓
+                /thesis/proximity_status
+                            ↓
+                  capsule_visualizer
+                            ↓
+     cápsulas + obstáculo + distancia + estado en RViz
+```
+
+El mensaje `thesis_interfaces/msg/ProximityStatus` informa:
+
+- distancia mínima superficial en metros;
+- segmento limitante;
+- punto más cercano del eje de la cápsula;
+- centro y radio del obstáculo;
+- estado `ALLOW`, `WARNING`, `REDUCTION` o `STOP`.
+
+Para un segmento de extremos `A` y `B`, primero se proyecta el centro del
+obstáculo sobre el segmento y se limita el factor de proyección al intervalo
+`[0, 1]`. La separación superficial utilizada es:
+
+```text
+clearance = distancia(centro_obstáculo, punto_segmento)
+            - radio_cápsula
+            - radio_obstáculo
+```
+
+Una separación negativa representa una intersección geométrica. Los umbrales
+iniciales configurados para simulación son:
+
+| Estado | Separación superficial |
+|---|---:|
+| `ALLOW` | mayor que 0.30 m |
+| `WARNING` | menor o igual que 0.30 m |
+| `REDUCTION` | menor o igual que 0.15 m |
+| `STOP` | menor o igual que 0.05 m |
+
+La posición inicial del obstáculo es `[0.60, 0.0, 0.65]` m. Gazebo es la
+fuente física del obstáculo y el lanzamiento entrega la misma posición al
+monitor geométrico. Para probar otra separación se reinicia la simulación con
+una posición controlada:
+
+```bash
+ros2 launch thesis_simulation jaco_gazebo.launch.py \
+  obstacle_x:=0.45 obstacle_y:=0.0 obstacle_z:=0.65
+```
+
+El resultado puede inspeccionarse mediante:
+
+```bash
+ros2 topic echo /thesis/proximity_status
+```
+
+En esta etapa el estado de proximidad es informativo y todavía no bloquea un
+comando. La integración de `ProximityStatus` con `safety_supervisor` se realiza
+en el siguiente bloque, conservando separadas la evaluación geométrica, la
+visualización y la decisión final de movimiento.
+
+---
+
 # 31. Nota de seguridad
 
 Durante la etapa actual:

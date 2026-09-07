@@ -10,6 +10,8 @@ from geometry_msgs.msg import Point, Quaternion
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
+from thesis_interfaces.msg import ProximityStatus
+
 
 def quaternion_from_z_axis(dx, dy, dz):
     """Return a quaternion that rotates the positive Z axis onto a vector."""
@@ -68,6 +70,13 @@ class CapsuleVisualizer(Node):
             float(value)
             for value in self.get_parameter('color_rgba').value
         ]
+        self.proximity_status = None
+        self.state_colors = {
+            'ALLOW': [0.05, 0.80, 0.35, 0.38],
+            'WARNING': [1.00, 0.82, 0.05, 0.70],
+            'REDUCTION': [1.00, 0.35, 0.02, 0.78],
+            'STOP': [1.00, 0.03, 0.03, 0.88],
+        }
 
         self._validate_configuration()
 
@@ -81,6 +90,12 @@ class CapsuleVisualizer(Node):
             MarkerArray,
             marker_topic,
             qos,
+        )
+        self.proximity_subscription = self.create_subscription(
+            ProximityStatus,
+            '/thesis/proximity_status',
+            self.proximity_callback,
+            10,
         )
 
         self.tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
@@ -134,27 +149,46 @@ class CapsuleVisualizer(Node):
             z=translation.z,
         )
 
-    def _base_marker(self, marker_id, marker_type, segment_name):
+    def proximity_callback(self, message):
+        self.proximity_status = message
+
+    def _base_marker(
+        self,
+        marker_id,
+        marker_type,
+        segment_name,
+        color=None,
+        namespace='robot_capsules',
+    ):
         marker = Marker()
         marker.header.frame_id = self.reference_frame
         marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = 'robot_capsules'
+        marker.ns = namespace
         marker.id = marker_id
         marker.type = marker_type
         marker.action = Marker.ADD
         marker.pose.orientation.w = 1.0
-        marker.color.r = self.color[0]
-        marker.color.g = self.color[1]
-        marker.color.b = self.color[2]
-        marker.color.a = self.color[3]
+        selected_color = self.color if color is None else color
+        marker.color.r = selected_color[0]
+        marker.color.g = selected_color[1]
+        marker.color.b = selected_color[2]
+        marker.color.a = selected_color[3]
         marker.text = segment_name
         return marker
 
-    def _sphere_marker(self, marker_id, point, radius, segment_name):
+    def _sphere_marker(
+        self,
+        marker_id,
+        point,
+        radius,
+        segment_name,
+        color=None,
+    ):
         marker = self._base_marker(
             marker_id,
             Marker.SPHERE,
             segment_name,
+            color=color,
         )
         marker.pose.position = point
         diameter = 2.0 * radius
@@ -173,10 +207,20 @@ class CapsuleVisualizer(Node):
 
         marker_id = index * 3
         segment_name = self.segment_names[index]
+        color = self.color
+        if (
+            self.proximity_status is not None
+            and self.proximity_status.limiting_segment == segment_name
+        ):
+            color = self.state_colors.get(
+                self.proximity_status.state,
+                self.color,
+            )
         cylinder = self._base_marker(
             marker_id,
             Marker.CYLINDER,
             segment_name,
+            color=color,
         )
         cylinder.pose.position = Point(
             x=(start.x + end.x) * 0.5,
@@ -195,14 +239,87 @@ class CapsuleVisualizer(Node):
                 start,
                 radius,
                 segment_name,
+                color=color,
             ),
             self._sphere_marker(
                 marker_id + 2,
                 end,
                 radius,
                 segment_name,
+                color=color,
             ),
         ]
+
+    def _proximity_markers(self):
+        if self.proximity_status is None:
+            return []
+
+        status = self.proximity_status
+        obstacle = self._base_marker(
+            1000,
+            Marker.SPHERE,
+            'virtual_obstacle',
+            color=[0.60, 0.15, 0.95, 0.68],
+            namespace='proximity',
+        )
+        obstacle.pose.position = status.obstacle_center
+        diameter = 2.0 * status.obstacle_radius
+        obstacle.scale.x = diameter
+        obstacle.scale.y = diameter
+        obstacle.scale.z = diameter
+
+        state_color = self.state_colors.get(status.state, self.color)
+        line = self._base_marker(
+            1001,
+            Marker.LINE_LIST,
+            'minimum_distance',
+            color=[
+                state_color[0],
+                state_color[1],
+                state_color[2],
+                1.0,
+            ],
+            namespace='proximity',
+        )
+        line.scale.x = 0.012
+        line.points = [
+            status.closest_robot_point,
+            status.obstacle_center,
+        ]
+
+        label = self._base_marker(
+            1002,
+            Marker.TEXT_VIEW_FACING,
+            'proximity_label',
+            color=[
+                state_color[0],
+                state_color[1],
+                state_color[2],
+                1.0,
+            ],
+            namespace='proximity',
+        )
+        label.pose.position = Point(
+            x=(
+                status.closest_robot_point.x
+                + status.obstacle_center.x
+            ) * 0.5,
+            y=(
+                status.closest_robot_point.y
+                + status.obstacle_center.y
+            ) * 0.5,
+            z=(
+                status.closest_robot_point.z
+                + status.obstacle_center.z
+            ) * 0.5 + 0.08,
+        )
+        label.scale.z = 0.055
+        label.text = (
+            f'{status.state} | d={status.minimum_clearance:.3f} m | '
+            f'{status.limiting_segment}'
+        )
+
+        return [obstacle, line, label]
 
     def publish_capsules(self):
         markers = []
@@ -236,6 +353,7 @@ class CapsuleVisualizer(Node):
             self.missing_frames = unavailable
 
         if markers:
+            markers.extend(self._proximity_markers())
             message = MarkerArray()
             message.markers = markers
             self.publisher.publish(message)

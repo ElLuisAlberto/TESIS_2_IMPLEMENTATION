@@ -37,3 +37,43 @@ capsule_visualizer:
       - 0.090
 
     color_rgba: [0.05, 0.80, 0.35, 0.38]
+
+proximity_monitor:
+  ros__parameters:
+    reference_frame: world
+    evaluation_rate_hz: 20.0
+    status_topic: /thesis/proximity_status
+
+    segment_names:
+      - base_to_shoulder
+      - shoulder_to_upper_arm
+      - upper_arm_to_forearm
+      - forearm_to_wrist_1
+      - wrist_1_to_wrist_2
+      - wrist_2_to_tool
+    segment_start_frames:
+      - j2n6s300_link_base
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+    segment_end_frames:
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+      - j2n6s300_end_effector
+    segment_radii: [0.105, 0.095, 0.085, 0.075, 0.070, 0.090]
+
+    # The launch file uses the same pose to spawn the physical Gazebo model.
+    obstacle_x: 0.60
+    obstacle_y: 0.0
+    obstacle_z: 0.65
+    obstacle_radius: 0.12
+
+    # Surface-to-surface clearance thresholds in metres.
+    warning_distance: 0.30
+    reduction_distance: 0.15
+    stop_distance: 0.05

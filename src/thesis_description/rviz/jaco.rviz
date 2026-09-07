@@ -226,6 +226,7 @@ Visualization Manager:
         Value: /thesis/robot_capsules
       Name: SafetyCapsules
       Namespaces:
+        proximity: true
         robot_capsules: true
       Value: true
   Enabled: true

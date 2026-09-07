@@ -25,6 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'safety_supervisor = thesis_core.safety_supervisor_node:main',
+            'proximity_monitor = '
+            'thesis_core.proximity_monitor_node:main',
         ],
     },
 )

@@ -32,6 +32,10 @@ setup(
             'share/' + package_name + '/worlds',
             glob('worlds/*.sdf')
         ),
+        (
+            'share/' + package_name + '/models/safety_obstacle',
+            glob('models/safety_obstacle/*.sdf')
+        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
