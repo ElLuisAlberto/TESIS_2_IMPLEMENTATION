@@ -2004,6 +2004,243 @@ publicar el diagnóstico y rechazar el comando antes de enviarlo a Gazebo.
 Esta primera versión supone que la base del manipulador coincide con el marco
 `world` y que el obstáculo permanece estático durante cada comando.
 
+---
+
+## 37. Estado de la tesis al 07/09/2026 y correspondencia con el cronograma
+
+### 37.1 Fecha de corte y posición en el cronograma
+
+El cronograma de TFC2 establece como fecha de inicio el **17/08/2026**. La
+fecha de corte de este README es el **07/09/2026**. Por tanto, el proyecto se
+encuentra en la semana correspondiente a la implementación y validación de la
+representación geométrica y del cálculo de distancia mínima.
+
+| Hito o tarea | Ventana del cronograma | Estado al 07/09/2026 |
+|---|---:|---|
+| Video TFC1 | 25/08 | Completado: modelo, simulación y arquitectura inicial |
+| Avance 0 | 01/09 | Completado: comandos pasando por el supervisor |
+| Tarea 5: cápsulas geométricas | 02/09–05/09 | Completada y validada en RViz |
+| Tarea 6: distancia mínima y SAFE/STOP | 06/09–12/09 | Implementada y validada; documentación en curso |
+| Tarea 7: casos y Avance 1 | 13/09–15/09 | Siguiente entrega inmediata |
+| Tarea 8: predicción cinemática | 16/09–19/09 | Adelantada parcialmente: 25 muestras y decisión preventiva |
+| Tarea 9: distancia proyectada, TTC e incertidumbre | 20/09–26/09 | Pendiente |
+| Avance 2 | 29/09 | Meta: predicción + TTC + decisión antes de ejecutar |
+
+El desarrollo se encuentra adelantado respecto a la tarea 8, pero eso no
+significa que la tarea 9 esté terminada. Actualmente la plataforma ya puede
+predecir la separación geométrica en una trayectoria discreta; todavía falta
+incorporar la velocidad relativa, el **Time-to-Collision (TTC)**, la
+incertidumbre y el registro formal de métricas.
+
+### 37.2 Componentes implementados y verificados
+
+La rama `setup/ubuntu22-humble` contiene el siguiente estado funcional:
+
+1. **Entorno ROS 2 Humble y gemelo digital**: descripción Xacro/URDF del
+   JACO2, TF, RViz, Gazebo, `ros2_control`, `joint_state_broadcaster` y
+   `arm_controller`.
+2. **Movimiento simulado**: el controlador acepta trayectorias mediante
+   `/arm_controller/follow_joint_trajectory` y el brazo se mueve en Gazebo.
+3. **Interfaz común**: `JointCommand.msg` normaliza seis joints, posiciones,
+   duración e identificador de comando.
+4. **Supervisor**: recibe `/thesis/candidate_command`, valida nombres, orden,
+   valores finitos, límites articulares, duración, velocidad y estado actual.
+5. **Salida protegida**: solo publica `/thesis/supervised_command` después de
+   la validación. El adaptador es el único componente que envía la trayectoria
+   al controlador de Gazebo.
+6. **Obstáculo controlado**: esfera conocida en Gazebo, con posición y radio
+   configurables para repetir escenarios de seguridad.
+7. **Cápsulas del manipulador**: seis segmentos simplificados, derivados de la
+   cinemática del JACO2, publicados como `MarkerArray` en
+   `/thesis/robot_capsules`.
+8. **Distancia mínima**: cálculo cápsula–esfera con identificación del segmento
+   limitante y publicación de `ProximityStatus` en
+   `/thesis/proximity_status`.
+9. **Política preventiva**: `ALLOW` reenvía, `WARNING` reenvía y advierte,
+   `REDUCTION` duplica la duración y `STOP` rechaza sin enviar un goal a
+   Gazebo.
+10. **Predicción de trayectoria**: interpolación de la postura actual al
+    objetivo en 25 muestras, cálculo de cápsulas por muestra y selección de la
+    menor separación. El resultado se publica como `TrajectoryPrediction`.
+11. **Visualización preventiva**: RViz muestra la cápsula futura crítica,
+    colores por estado y distancia etiquetada.
+12. **GUI PyQt5**: permite modificar joints, enviar comandos candidatos,
+    revisar estado, observar la predicción, conocer el segmento limitante y
+    visualizar el progreso real de ejecución a partir de `/joint_states`.
+
+### 37.3 Evidencia de pruebas en simulación
+
+Se verificó la cadena completa:
+
+```text
+GUI / test_command
+        ↓
+/thesis/candidate_command
+        ↓
+safety_supervisor
+        ↓
+/thesis/trajectory_prediction
+        ↓
+/thesis/supervised_command
+        ↓
+simulation_command_adapter
+        ↓
+/arm_controller/follow_joint_trajectory
+        ↓
+Gazebo + /joint_states
+```
+
+Los escenarios comprobados fueron:
+
+| Escenario | Resultado observado |
+|---|---|
+| Separación aproximada 0.395 m | `ALLOW`, trayectoria aceptada |
+| Separación aproximada 0.245 m | `WARNING`, trayectoria aceptada |
+| Separación aproximada 0.135 m | `REDUCTION`, duración de 3 s a 6 s |
+| Separación aproximada 0.045–0.049 m | `STOP`, sin goal enviado a Gazebo |
+| Riesgo únicamente en una configuración intermedia o final | Predicción preventiva antes del movimiento |
+| Velocidad articular superior al límite | Rechazo por velocidad, independiente de la geometría |
+
+Los comandos utilizados para validar la plataforma fueron:
+
+```bash
+# Preparar el entorno en cada terminal
+cd /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+# Iniciar la simulación y el pipeline supervisado
+ros2 launch thesis_simulation jaco_gazebo.launch.py
+ros2 launch thesis_simulation safety_pipeline.launch.py \
+  simulation_output_enabled:=true
+
+# Abrir la interfaz gráfica
+ros2 run thesis_ui joint_gui
+
+# Enviar una prueba simple sobre J1
+ros2 run thesis_simulation test_command \
+  --ros-args \
+  -p joint_1_target:=0.10 \
+  -p duration_sec:=3.0
+
+# Inspeccionar controladores y acciones
+ros2 control list_controllers
+ros2 action list | grep arm_controller
+
+# Comprobar el estado articular
+ros2 topic echo /joint_states --once
+
+# Observar la decisión geométrica actual
+ros2 topic echo /thesis/proximity_status --once
+
+# Observar la predicción de la trayectoria candidata
+ros2 topic echo /thesis/trajectory_prediction --once
+
+# Confirmar la salida efectivamente autorizada
+ros2 topic echo /thesis/supervised_command --once
+```
+
+Para probar un `STOP` preventivo con el obstáculo en aproximadamente
+`[0.60, 0.0, 0.65]` m, se puede cargar en la GUI una postura cercana al
+obstáculo o enviar una prueba equivalente. La confirmación correcta es:
+
+```text
+GEOMETRÍA PROYECTADA: STOP
+REJECTED ... STOP
+```
+
+y la ausencia de un nuevo goal en el adaptador de Gazebo. Para un caso
+`REDUCTION`, la confirmación incluye:
+
+```text
+REDUCTION FORWARDED ... duration=6.00 s
+Gazebo terminó la trayectoria: error_code=0
+```
+
+### 37.4 Qué está listo para el Avance 1 del 15/09
+
+El objetivo demostrable del Avance 1 es **cápsulas + distancia mínima +
+SAFE/STOP**. La base técnica ya está implementada. Antes de la presentación
+se debe cerrar la evidencia con una matriz reproducible que incluya, como
+mínimo:
+
+- una postura segura con estado `ALLOW`;
+- una aproximación con estado `WARNING`;
+- una aproximación con estado `REDUCTION`;
+- una postura bloqueada con estado `STOP`;
+- distancia mínima, segmento limitante y postura articular en cada caso;
+- captura de Gazebo y RViz para cada escenario;
+- registro de que `STOP` no produjo una trayectoria en el controlador;
+- latencia entre el comando candidato y la decisión del supervisor.
+
+La predicción de 25 muestras puede presentarse como una capacidad adelantada,
+pero debe explicarse que el entregable formal del Avance 1 se centra en la
+distancia mínima y la decisión `SAFE/STOP`. El TTC se reservará para el Avance
+2, conforme al cronograma.
+
+### 37.5 Siguientes pasos ordenados
+
+El orden recomendado para continuar es:
+
+1. **Cerrar Avance 1 (hasta el 15/09)**: congelar parámetros del obstáculo,
+   repetir la matriz de casos, guardar capturas y medir latencia.
+2. **Completar la predicción (16–19/09)**: documentar la cinemática directa,
+   justificar las 25 muestras y verificar límites articulares y casos de
+   riesgo en inicio, tramo intermedio y destino.
+3. **Implementar TTC (20–26/09)**: estimar velocidad relativa del obstáculo y
+   del segmento limitante, calcular el tiempo hasta alcanzar el margen de
+   seguridad y añadirlo al diagnóstico del supervisor.
+4. **Añadir incertidumbre**: incorporar un margen `Δ` configurable para
+   errores de modelo, discretización, TF y percepción.
+5. **Crear el registrador experimental**: guardar cada comando, postura
+   inicial/final, predicción, estado, distancia, TTC, duración solicitada,
+   duración supervisada, latencia y resultado del controlador.
+6. **Preparar Avance 2 (29/09)**: ejecutar casos seguros e inseguros, medir
+   frecuencia del ciclo y demostrar que la decisión ocurre antes del goal.
+7. **Integrar RGB-D (30/09–10/10)**: configurar profundidad, TF/calibración,
+   ROI, filtrado, downsampling y obstáculos como primitivas.
+8. **Integrar el JACO físico en lectura (11–13/10)**: comparar posiciones,
+   frecuencia y coherencia TF/modelo con el gemelo digital.
+9. **Movimiento físico controlado (14–17/10)**: solo después de completar la
+   ruta de seguridad, realizar pruebas a baja velocidad y con parada física
+   disponible.
+10. **Integración y Avance 3 (20/10)**: RGB-D, supervisor y JACO físico en
+    escenarios controlados.
+
+### 37.6 Escalabilidad alcanzada
+
+La implementación ya posee una separación que permite crecer sin reescribir
+la lógica principal:
+
+```text
+fuente de comando
+        ↓
+JointCommand normalizado
+        ↓
+supervisor independiente del hardware
+        ↓
+adaptador de simulación o adaptador Kinova
+        ↓
+controlador correspondiente
+```
+
+Esto permite:
+
+- cambiar Gazebo por el JACO real conservando el supervisor;
+- reemplazar la esfera por varios obstáculos o obstáculos móviles;
+- alimentar el mismo cálculo con obstáculos provenientes de RGB-D;
+- cambiar cápsulas, radios y umbrales mediante configuración;
+- incorporar TTC, incertidumbre y nuevas políticas sin modificar la GUI;
+- registrar resultados para comparar simulación, percepción y hardware;
+- añadir otros manipuladores si se implementan sus parámetros cinemáticos;
+- mantener la salida física desactivada durante pruebas de software.
+
+La limitación actual es que la garantía geométrica se basa en una esfera
+estática y en 25 muestras discretas de una interpolación articular. Todavía no
+representa obstáculos dinámicos, incertidumbre de percepción ni una garantía
+continua entre muestras. Esas son precisamente las ampliaciones previstas en
+las tareas 9–15 del cronograma.
+
 La GUI presenta dos evaluaciones deliberadamente separadas:
 
 - `VELOCIDAD`: comprobación local e informativa de límites articulares.
