@@ -42,9 +42,12 @@ class SimulationCommandAdapter(Node):
 
         self.goal_active = False
 
+        output_enabled = bool(
+            self.get_parameter('simulation_output_enabled').value
+        )
+        output_state = 'habilitada' if output_enabled else 'desactivada'
         self.get_logger().info(
-            'Adaptador Gazebo preparado; '
-            'salida simulada desactivada por defecto'
+            f'Adaptador Gazebo preparado; salida simulada {output_state}'
         )
 
     def command_callback(self, msg):

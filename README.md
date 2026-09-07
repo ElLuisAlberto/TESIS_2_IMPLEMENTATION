@@ -1914,6 +1914,36 @@ visualización y la decisión final de movimiento.
 
 ---
 
+## 35. Política reactiva de proximidad en el supervisor
+
+El `safety_supervisor` consume `/thesis/proximity_status` antes de publicar un
+comando supervisado. La política inicial es:
+
+| Estado | Acción sobre el comando candidato |
+|---|---|
+| `ALLOW` | Publicación sin modificación |
+| `WARNING` | Publicación sin modificación y advertencia registrada |
+| `REDUCTION` | Duración multiplicada por 2 para reducir la velocidad |
+| `STOP` | Rechazo; no se publica `/thesis/supervised_command` |
+
+El supervisor opera en modo seguro ante fallas: si el estado de proximidad no
+existe, está desactualizado o contiene un valor desconocido, el comando se
+rechaza. Para pruebas estructurales sin el monitor se puede desactivar este
+requisito de manera explícita:
+
+```bash
+ros2 launch thesis_simulation safety_pipeline.launch.py \
+  simulation_output_enabled:=true \
+  require_proximity_status:=false
+```
+
+Esta política utiliza la separación actual como interbloqueo reactivo. No se
+considera todavía validación preventiva de la trayectoria completa: el bloque
+siguiente estimará configuraciones intermedias del comando candidato y
+evaluará la distancia proyectada antes de autorizar el movimiento.
+
+---
+
 # 31. Nota de seguridad
 
 Durante la etapa actual:
