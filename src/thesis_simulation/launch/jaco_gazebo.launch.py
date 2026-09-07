@@ -90,6 +90,12 @@ def generate_launch_description():
         'jaco.rviz'
     )
 
+    capsule_config = os.path.join(
+        simulation_share,
+        'config',
+        'jaco_capsules.yaml'
+    )
+
     robot_description = {
         'robot_description': ParameterValue(
             Command([
@@ -216,6 +222,17 @@ def generate_launch_description():
         ]
     )
 
+    capsule_visualizer = Node(
+        package='thesis_simulation',
+        executable='capsule_visualizer',
+        name='capsule_visualizer',
+        output='screen',
+        parameters=[
+            capsule_config,
+            {'use_sim_time': True}
+        ]
+    )
+
 
     return LaunchDescription([
 
@@ -248,5 +265,6 @@ def generate_launch_description():
             ]
         ),
 
-        rviz
+        rviz,
+        capsule_visualizer
     ])
