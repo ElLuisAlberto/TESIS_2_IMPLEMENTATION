@@ -110,7 +110,8 @@ def generate_launch_description():
         executable='robot_state_publisher',
         output='screen',
         parameters=[
-            robot_description
+            robot_description,
+            {'use_sim_time': True}
         ]
     )
 
@@ -194,9 +195,20 @@ def generate_launch_description():
     # RViz
     # =========================================================
 
+    clock_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='gazebo_clock_bridge',
+        output='screen',
+        arguments=[
+            '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock'
+        ]
+    )
+
     rviz = Node(
         package='rviz2',
         executable='rviz2',
+        parameters=[{'use_sim_time': True}],
         output='screen',
         arguments=[
             '-d',
@@ -210,6 +222,7 @@ def generate_launch_description():
         robot_state_publisher,
 
         gazebo,
+        clock_bridge,
 
         # Wait for Gazebo server before spawning robot
         TimerAction(
