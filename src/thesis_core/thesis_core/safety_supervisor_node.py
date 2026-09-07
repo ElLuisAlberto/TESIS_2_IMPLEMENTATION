@@ -4,7 +4,16 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import JointState
-from thesis_interfaces.msg import JointCommand, ProximityStatus
+from thesis_interfaces.msg import (
+    JointCommand,
+    ProximityStatus,
+    TrajectoryPrediction,
+)
+
+from thesis_core.jaco_kinematics import (
+    CAPSULE_RADII,
+    minimum_sphere_clearance,
+)
 
 
 EXPECTED_ARM_JOINTS = [
@@ -91,6 +100,20 @@ class SafetySupervisorNode(Node):
             2.0,
         )
 
+        self.declare_parameter(
+            'prediction_enabled',
+            True,
+        )
+
+        self.declare_parameter(
+            'prediction_samples',
+            25,
+        )
+
+        self.declare_parameter('warning_distance', 0.30)
+        self.declare_parameter('reduction_distance', 0.15)
+        self.declare_parameter('stop_distance', 0.05)
+
         state_topic = self.get_parameter(
             'state_topic'
         ).value
@@ -128,6 +151,12 @@ class SafetySupervisorNode(Node):
             10,
         )
 
+        self.prediction_publisher = self.create_publisher(
+            TrajectoryPrediction,
+            '/thesis/trajectory_prediction',
+            10,
+        )
+
         self.get_logger().info(
             'Safety supervisor started in validation/pass-through mode'
         )
@@ -138,6 +167,10 @@ class SafetySupervisorNode(Node):
 
         self.get_logger().info(
             'Proximity policy enabled on /thesis/proximity_status'
+        )
+
+        self.get_logger().info(
+            'Preventive trajectory prediction enabled'
         )
 
     def joint_state_callback(self, msg):
@@ -179,6 +212,125 @@ class SafetySupervisorNode(Node):
         output.duration.sec = whole_seconds
         output.duration.nanosec = nanoseconds
         return output
+
+    def state_for_clearance(self, clearance):
+        if clearance <= float(self.get_parameter('stop_distance').value):
+            return 'STOP'
+        if clearance <= float(
+                self.get_parameter('reduction_distance').value):
+            return 'REDUCTION'
+        if clearance <= float(
+                self.get_parameter('warning_distance').value):
+            return 'WARNING'
+        return 'ALLOW'
+
+    def predict_candidate(self, msg):
+        if not bool(self.get_parameter('prediction_enabled').value):
+            return None
+
+        if not all(
+            joint_name in self.current_positions
+            for joint_name in EXPECTED_ARM_JOINTS
+        ):
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: '
+                'current state unavailable for prediction'
+            )
+            return False
+
+        max_state_age_sec = float(
+            self.get_parameter('max_state_age_sec').value
+        )
+        state_age_sec = (
+            self.get_clock().now().nanoseconds
+            - self.last_state_receive_ns
+        ) / 1e9
+        if state_age_sec > max_state_age_sec:
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: state stale for prediction '
+                f'({state_age_sec:.3f} s)'
+            )
+            return False
+
+        sample_count = int(
+            self.get_parameter('prediction_samples').value
+        )
+        if sample_count < 2:
+            self.get_logger().error(
+                'prediction_samples must be at least 2'
+            )
+            return False
+
+        current = tuple(
+            self.current_positions[name]
+            for name in EXPECTED_ARM_JOINTS
+        )
+        target = tuple(float(value) for value in msg.positions)
+        deltas = tuple(
+            self.shortest_joint_delta(name, target_value, current_value)
+            for name, target_value, current_value in zip(
+                EXPECTED_ARM_JOINTS,
+                target,
+                current,
+            )
+        )
+        obstacle = (
+            self.proximity_status.obstacle_center.x,
+            self.proximity_status.obstacle_center.y,
+            self.proximity_status.obstacle_center.z,
+        )
+        obstacle_radius = self.proximity_status.obstacle_radius
+
+        best = None
+        best_index = 0
+        for sample_index in range(sample_count):
+            fraction = sample_index / float(sample_count - 1)
+            sample = tuple(
+                current_value + fraction * delta
+                for current_value, delta in zip(current, deltas)
+            )
+            result = minimum_sphere_clearance(
+                sample,
+                obstacle,
+                obstacle_radius,
+            )
+            if best is None or result[0] < best[0]:
+                best = result
+                best_index = sample_index
+
+        clearance, segment, segment_index, start, end = best
+        state = self.state_for_clearance(clearance)
+
+        prediction = TrajectoryPrediction()
+        prediction.stamp = self.get_clock().now().to_msg()
+        prediction.command_id = msg.command_id
+        prediction.reference_frame = (
+            self.proximity_status.reference_frame
+        )
+        prediction.state = state
+        prediction.minimum_clearance = clearance
+        prediction.limiting_segment = segment
+        prediction.sample_index = best_index
+        prediction.sample_count = sample_count
+        prediction.trajectory_fraction = (
+            best_index / float(sample_count - 1)
+        )
+        prediction.capsule_start.x = start[0]
+        prediction.capsule_start.y = start[1]
+        prediction.capsule_start.z = start[2]
+        prediction.capsule_end.x = end[0]
+        prediction.capsule_end.y = end[1]
+        prediction.capsule_end.z = end[2]
+        prediction.capsule_radius = CAPSULE_RADII[segment_index]
+        self.prediction_publisher.publish(prediction)
+
+        self.get_logger().info(
+            f'PREDICTION {msg.command_id}: {state}, '
+            f'min_clearance={clearance:.3f} m, '
+            f'path={prediction.trajectory_fraction:.2f}, '
+            f'segment={segment}'
+        )
+        return prediction
 
     def apply_proximity_policy(self, msg, duration_sec):
         require_status = bool(
@@ -227,7 +379,6 @@ class SafetySupervisorNode(Node):
             return self.copy_command_with_duration(msg, duration_sec)
 
         state = self.proximity_status.state.upper()
-        self.last_proximity_decision = state
         clearance = self.proximity_status.minimum_clearance
         segment = self.proximity_status.limiting_segment
 
@@ -237,6 +388,16 @@ class SafetySupervisorNode(Node):
                 'non-finite proximity clearance'
             )
             return None
+
+        prediction = self.predict_candidate(msg)
+        if prediction is False:
+            return None
+        if prediction is not None:
+            state = prediction.state
+            clearance = prediction.minimum_clearance
+            segment = prediction.limiting_segment
+
+        self.last_proximity_decision = state
 
         if state == 'STOP':
             self.get_logger().warning(

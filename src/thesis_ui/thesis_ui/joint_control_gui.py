@@ -27,7 +27,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
-from thesis_interfaces.msg import JointCommand
+from thesis_interfaces.msg import JointCommand, TrajectoryPrediction
 import tf2_ros
 
 
@@ -93,6 +93,8 @@ class JointGuiNode(Node):
         self.last_state_time = None
         self.last_command_id = None
         self.last_allowed_id = None
+        self.last_supervised_duration = None
+        self.last_prediction = None
         self.end_effector_pose = None
 
         self.tf_buffer = tf2_ros.Buffer()
@@ -121,6 +123,13 @@ class JointGuiNode(Node):
             10,
         )
 
+        self.prediction_subscription = self.create_subscription(
+            TrajectoryPrediction,
+            '/thesis/trajectory_prediction',
+            self.prediction_callback,
+            10,
+        )
+
     def state_callback(self, msg):
         for name, position in zip(msg.name, msg.position):
             if name in JOINT_NAMES and math.isfinite(position):
@@ -132,6 +141,14 @@ class JointGuiNode(Node):
     def supervised_callback(self, msg):
         if msg.command_id == self.last_command_id:
             self.last_allowed_id = msg.command_id
+            self.last_supervised_duration = (
+                float(msg.duration.sec)
+                + float(msg.duration.nanosec) * 1e-9
+            )
+
+    def prediction_callback(self, msg):
+        if msg.command_id == self.last_command_id:
+            self.last_prediction = msg
 
     def state_is_ready(self):
         if self.last_state_time is None:
@@ -178,6 +195,11 @@ class JointGuiNode(Node):
             'Salida supervisada': (
                 self.count_publishers('/thesis/supervised_command') > 0
             ),
+            'Predicción geométrica': (
+                self.count_publishers(
+                    '/thesis/trajectory_prediction'
+                ) > 0
+            ),
         }
 
     def publish_candidate(self, positions, duration_sec):
@@ -196,6 +218,8 @@ class JointGuiNode(Node):
 
         self.last_command_id = msg.command_id
         self.last_allowed_id = None
+        self.last_supervised_duration = None
+        self.last_prediction = None
         self.candidate_publisher.publish(msg)
 
         return (
@@ -220,6 +244,7 @@ class JointControlWindow(QMainWindow):
         self.connection_indicators = {}
         self.pose_labels = []
         self.minimum_safe_duration = None
+        self.prediction_is_stale = False
 
         self.setWindowTitle('Tesis 2 - Control articular JACO2')
         self.resize(1050, 760)
@@ -352,6 +377,7 @@ class JointControlWindow(QMainWindow):
             '/joint_states',
             'Supervisor',
             'Salida supervisada',
+            'Predicción geométrica',
         ]:
             indicator = QLabel(f'● {name}')
             indicator.setStyleSheet('color: #b91c1c; font-weight: bold;')
@@ -452,6 +478,20 @@ class JointControlWindow(QMainWindow):
 
         main_layout.addWidget(preview_group)
 
+        prediction_group = QGroupBox(
+            'Evaluación geométrica preventiva del supervisor'
+        )
+        prediction_layout = QVBoxLayout(prediction_group)
+        self.prediction_state_label = QLabel('SIN EVALUAR')
+        self.prediction_state_label.setObjectName('predictionState')
+        self.prediction_detail_label = QLabel(
+            'Envíe un comando candidato para evaluar sus 25 muestras.'
+        )
+        self.prediction_detail_label.setWordWrap(True)
+        prediction_layout.addWidget(self.prediction_state_label)
+        prediction_layout.addWidget(self.prediction_detail_label)
+        main_layout.addWidget(prediction_group)
+
         self.send_button = QPushButton('ENVIAR COMANDO CANDIDATO')
         self.send_button.setObjectName('sendButton')
         self.send_button.clicked.connect(self.send_candidate)
@@ -520,6 +560,9 @@ class JointControlWindow(QMainWindow):
             '#velocitySummary {'
             '  font-size: 14px; font-weight: bold; padding: 6px;'
             '}'
+            '#predictionState {'
+            '  font-size: 18px; font-weight: bold; padding: 6px;'
+            '}'
             '#sendButton {'
             '  background-color: #166534; color: white;'
             '  padding: 10px; font-weight: bold; border-radius: 5px;'
@@ -570,6 +613,7 @@ class JointControlWindow(QMainWindow):
         self.refresh_connections()
         self.refresh_end_effector_pose()
         self.refresh_velocity_preview()
+        self.refresh_prediction_status()
         self.refresh_command_status()
 
     def shortest_delta_degrees(
@@ -650,7 +694,7 @@ class JointControlWindow(QMainWindow):
 
         if predicted_allow:
             self.velocity_summary_label.setText(
-                'PROBABLE ALLOW | '
+                'VELOCIDAD: PROBABLE ALLOW | '
                 f'Joint limitante: {limiting_joint} | '
                 f'Duración mínima estimada: {minimum_duration:.2f} s'
             )
@@ -659,7 +703,7 @@ class JointControlWindow(QMainWindow):
             )
         else:
             self.velocity_summary_label.setText(
-                'PROBABLE REJECT | '
+                'VELOCIDAD: PROBABLE REJECT | '
                 f'Joint limitante: {limiting_joint} | '
                 f'Duración mínima estimada: {minimum_duration:.2f} s'
             )
@@ -716,19 +760,96 @@ class JointControlWindow(QMainWindow):
         for label, value in zip(self.pose_labels, values):
             label.setText(value)
 
+    def refresh_prediction_status(self):
+        if self.prediction_is_stale:
+            self.prediction_state_label.setText(
+                'GEOMETRÍA PROYECTADA: OBJETIVO SIN EVALUAR'
+            )
+            self.prediction_state_label.setStyleSheet(
+                'color: #92400e;'
+            )
+            self.prediction_detail_label.setText(
+                'El objetivo articular cambió. Envíe el comando candidato '
+                'para calcular una nueva predicción geométrica.'
+            )
+            return
+
+        prediction = self.ros_node.last_prediction
+
+        if prediction is None:
+            return
+
+        colors = {
+            'ALLOW': '#166534',
+            'WARNING': '#a16207',
+            'REDUCTION': '#c2410c',
+            'STOP': '#b91c1c',
+        }
+        state = prediction.state
+        color = colors.get(state, '#334155')
+        sample_number = min(
+            prediction.sample_index + 1,
+            prediction.sample_count,
+        )
+
+        self.prediction_state_label.setText(
+            f'GEOMETRÍA PROYECTADA: {state}'
+        )
+        self.prediction_state_label.setStyleSheet(f'color: {color};')
+        self.prediction_detail_label.setText(
+            f'Distancia mínima: {prediction.minimum_clearance:.3f} m | '
+            f'Segmento: {prediction.limiting_segment} | '
+            f'Muestra: {sample_number}/{prediction.sample_count} | '
+            f'Avance: {prediction.trajectory_fraction:.0%}'
+        )
+
     def refresh_command_status(self):
         if self.pending_command_id is None:
             return
 
-        if self.ros_node.last_allowed_id == self.pending_command_id:
+        prediction = self.ros_node.last_prediction
+        prediction_matches = (
+            prediction is not None
+            and prediction.command_id == self.pending_command_id
+        )
+
+        if prediction_matches and prediction.state == 'STOP':
             self.status_label.setText(
-                f'ALLOW: {self.pending_command_id} fue reenviado por '
-                'el supervisor al adaptador de simulación.'
+                f'STOP PREDICTIVO: {self.pending_command_id} rechazado. '
+                f'Distancia mínima '
+                f'{prediction.minimum_clearance:.3f} m en '
+                f'{prediction.limiting_segment}.'
             )
-            self.status_label.setStyleSheet('color: #166534;')
+            self.status_label.setStyleSheet('color: #b91c1c;')
             self.update_history_state(
                 self.pending_command_id,
-                'ALLOW',
+                'STOP PREDICTIVO',
+            )
+            self.pending_command_id = None
+            return
+
+        if self.ros_node.last_allowed_id == self.pending_command_id:
+            state = prediction.state if prediction_matches else 'ALLOW'
+            color = {
+                'ALLOW': '#166534',
+                'WARNING': '#a16207',
+                'REDUCTION': '#c2410c',
+            }.get(state, '#166534')
+            duration = self.ros_node.last_supervised_duration
+            duration_text = (
+                f' Duración supervisada: {duration:.2f} s.'
+                if duration is not None
+                else ''
+            )
+            self.status_label.setText(
+                f'{state}: {self.pending_command_id} fue reenviado por '
+                f'el supervisor al adaptador de simulación.'
+                f'{duration_text}'
+            )
+            self.status_label.setStyleSheet(f'color: {color};')
+            self.update_history_state(
+                self.pending_command_id,
+                state,
             )
             self.pending_command_id = None
             return
@@ -747,6 +868,7 @@ class JointControlWindow(QMainWindow):
             self.pending_command_id = None
 
     def target_spin_changed(self, index, degrees):
+        self.prediction_is_stale = True
         blocker = QSignalBlocker(self.target_sliders[index])
         self.target_sliders[index].setValue(
             int(round(degrees * 10.0))
@@ -868,6 +990,14 @@ class JointControlWindow(QMainWindow):
 
         self.pending_command_id = command_id
         self.pending_since = time.monotonic()
+        self.prediction_is_stale = False
+        self.prediction_state_label.setText(
+            'GEOMETRÍA PROYECTADA: EVALUANDO...'
+        )
+        self.prediction_state_label.setStyleSheet('color: #92400e;')
+        self.prediction_detail_label.setText(
+            f'Esperando la predicción para {command_id}.'
+        )
         self.add_history_row(
             command_id,
             self.target_inputs[0].value(),

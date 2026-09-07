@@ -10,7 +10,7 @@ from geometry_msgs.msg import Point, Quaternion
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
-from thesis_interfaces.msg import ProximityStatus
+from thesis_interfaces.msg import ProximityStatus, TrajectoryPrediction
 
 
 def quaternion_from_z_axis(dx, dy, dz):
@@ -71,6 +71,7 @@ class CapsuleVisualizer(Node):
             for value in self.get_parameter('color_rgba').value
         ]
         self.proximity_status = None
+        self.trajectory_prediction = None
         self.state_colors = {
             'ALLOW': [0.05, 0.80, 0.35, 0.38],
             'WARNING': [1.00, 0.82, 0.05, 0.70],
@@ -95,6 +96,12 @@ class CapsuleVisualizer(Node):
             ProximityStatus,
             '/thesis/proximity_status',
             self.proximity_callback,
+            10,
+        )
+        self.prediction_subscription = self.create_subscription(
+            TrajectoryPrediction,
+            '/thesis/trajectory_prediction',
+            self.prediction_callback,
             10,
         )
 
@@ -151,6 +158,9 @@ class CapsuleVisualizer(Node):
 
     def proximity_callback(self, message):
         self.proximity_status = message
+
+    def prediction_callback(self, message):
+        self.trajectory_prediction = message
 
     def _base_marker(
         self,
@@ -321,6 +331,85 @@ class CapsuleVisualizer(Node):
 
         return [obstacle, line, label]
 
+    def _prediction_markers(self):
+        if self.trajectory_prediction is None:
+            return []
+
+        prediction = self.trajectory_prediction
+        start = prediction.capsule_start
+        end = prediction.capsule_end
+        radius = prediction.capsule_radius
+        dx = end.x - start.x
+        dy = end.y - start.y
+        dz = end.z - start.z
+        length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if length <= 1.0e-6:
+            return []
+
+        base_color = self.state_colors.get(
+            prediction.state,
+            self.color,
+        )
+        color = [
+            base_color[0],
+            base_color[1],
+            base_color[2],
+            0.48,
+        ]
+
+        cylinder = self._base_marker(
+            2000,
+            Marker.CYLINDER,
+            'predicted_limiting_capsule',
+            color=color,
+            namespace='prediction',
+        )
+        cylinder.pose.position = Point(
+            x=(start.x + end.x) * 0.5,
+            y=(start.y + end.y) * 0.5,
+            z=(start.z + end.z) * 0.5,
+        )
+        cylinder.pose.orientation = quaternion_from_z_axis(dx, dy, dz)
+        cylinder.scale.x = 2.0 * radius
+        cylinder.scale.y = 2.0 * radius
+        cylinder.scale.z = length
+
+        spheres = []
+        for marker_id, point in ((2001, start), (2002, end)):
+            sphere = self._base_marker(
+                marker_id,
+                Marker.SPHERE,
+                'predicted_limiting_capsule',
+                color=color,
+                namespace='prediction',
+            )
+            sphere.pose.position = point
+            sphere.scale.x = 2.0 * radius
+            sphere.scale.y = 2.0 * radius
+            sphere.scale.z = 2.0 * radius
+            spheres.append(sphere)
+
+        label = self._base_marker(
+            2003,
+            Marker.TEXT_VIEW_FACING,
+            'prediction_label',
+            color=[color[0], color[1], color[2], 1.0],
+            namespace='prediction',
+        )
+        label.pose.position = Point(
+            x=(start.x + end.x) * 0.5,
+            y=(start.y + end.y) * 0.5,
+            z=(start.z + end.z) * 0.5 + 0.12,
+        )
+        label.scale.z = 0.055
+        label.text = (
+            f'PRED {prediction.state} | '
+            f'd={prediction.minimum_clearance:.3f} m | '
+            f'{prediction.trajectory_fraction * 100.0:.0f}% trayectoria'
+        )
+
+        return [cylinder, *spheres, label]
+
     def publish_capsules(self):
         markers = []
         unavailable = set()
@@ -354,6 +443,7 @@ class CapsuleVisualizer(Node):
 
         if markers:
             markers.extend(self._proximity_markers())
+            markers.extend(self._prediction_markers())
             message = MarkerArray()
             message.markers = markers
             self.publisher.publish(message)

@@ -1944,6 +1944,80 @@ evaluará la distancia proyectada antes de autorizar el movimiento.
 
 ---
 
+## 36. Predicción geométrica de la trayectoria candidata
+
+Antes de aplicar la política de proximidad, el supervisor interpola el comando
+desde el estado articular actual hasta el objetivo solicitado. Por defecto se
+evalúan 25 configuraciones, incluyendo ambos extremos de la trayectoria.
+
+Para cada muestra se realiza la cinemática directa del JACO2, se reconstruyen
+las seis cápsulas y se calcula su separación respecto al obstáculo. La menor
+distancia de todas las muestras determina la decisión preventiva.
+
+```text
+JointCommand + joint_states + obstáculo
+                   ↓
+        interpolación articular
+              25 muestras
+                   ↓
+       cinemática directa JACO2
+                   ↓
+ distancia cápsula-obstáculo por muestra
+                   ↓
+      peor configuración proyectada
+                   ↓
+ /thesis/trajectory_prediction
+                   ↓
+       política del supervisor
+```
+
+La cinemática utiliza directamente los orígenes y orientaciones articulares
+del modelo `j2n6s300.xacro`. Una prueba automatizada comprueba que para la
+postura inicial reproduce la distancia observada mediante TF:
+
+```text
+distancia esperada: 0.395002 m
+segmento esperado:  upper_arm_to_forearm
+```
+
+El mensaje `TrajectoryPrediction` contiene la distancia proyectada mínima, el
+estado preventivo, la fracción de trayectoria crítica y los extremos de la
+cápsula limitante. RViz muestra esta cápsula futura como una envolvente
+transparente con la etiqueta `PRED`.
+
+Para comprobar un rechazo preventivo con el obstáculo inicialmente seguro en
+`[0.60, 0.0, 0.65]` m puede enviarse una postura cuyo extremo atraviesa la zona
+del obstáculo:
+
+```text
+J1 =   0.0 grados
+J2 = 123.0 grados
+J3 = 183.0 grados
+J4 =   0.0 grados
+J5 =   0.0 grados
+J6 =   0.0 grados
+duración = 6.0 segundos
+```
+
+Aunque la separación actual sea `ALLOW`, la predicción debe producir `STOP`,
+publicar el diagnóstico y rechazar el comando antes de enviarlo a Gazebo.
+Esta primera versión supone que la base del manipulador coincide con el marco
+`world` y que el obstáculo permanece estático durante cada comando.
+
+La GUI presenta dos evaluaciones deliberadamente separadas:
+
+- `VELOCIDAD`: comprobación local e informativa de límites articulares.
+- `GEOMETRÍA PROYECTADA`: resultado publicado por el supervisor después de
+  evaluar las cápsulas a lo largo de la trayectoria.
+
+La segunda es la decisión geométrica autoritativa. Para cada comando muestra
+`ALLOW`, `WARNING`, `REDUCTION` o `STOP`, además de la distancia mínima, el
+segmento limitante, la muestra crítica y el porcentaje recorrido. Si el
+supervisor aplica `REDUCTION`, la GUI también informa la duración finalmente
+enviada al adaptador.
+
+---
+
 # 31. Nota de seguridad
 
 Durante la etapa actual:
