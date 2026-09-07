@@ -285,8 +285,8 @@ int main(int argc, char ** argv)
   initialize_zero_velocity_point(
     velocity_point,
     kVelocityDegPerSec);
-    
-    
+
+
   const auto start_time = std::chrono::steady_clock::now();
   const auto end_time =
     start_time + std::chrono::milliseconds(15000);
@@ -347,4 +347,3 @@ int main(int argc, char ** argv)
   return (send_error ||
           stop_result != NO_ERROR_KINOVA) ? 1 : 0;
 }
-    
