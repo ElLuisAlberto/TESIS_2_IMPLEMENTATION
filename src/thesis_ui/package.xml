@@ -7,6 +7,12 @@
   <maintainer email="luisito@todo.todo">luisito</maintainer>
   <license>TODO: License declaration</license>
 
+  <exec_depend>python3-pyqt5</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>thesis_interfaces</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
