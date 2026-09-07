@@ -51,6 +51,279 @@ Clasificación de riesgo
 Controlador del manipulador
 ```
 
+---
+
+## Actualización de avance — sesión de integración 06/09/2026
+
+Esta sección complementa el estado histórico de las secciones anteriores sin
+reemplazarlo. Durante esta sesión se integraron y verificaron los primeros
+adaptadores ROS 2 para conectar la arquitectura preventiva con Gazebo y con el
+estado de lectura del JACO físico.
+
+## 34.1 Tiempo simulado y sincronización ROS 2–Gazebo
+
+Se añadió el puente de `/clock` desde Gazebo hacia ROS 2 mediante
+`ros_gz_bridge`. La configuración activa utiliza:
+
+```text
+/clock: rosgraph_msgs/msg/Clock
+Publisher count: 1
+```
+
+También se configuró `use_sim_time: true` para `robot_state_publisher` y
+RViz. La recepción de `/clock` se comprobó mediante:
+
+```bash
+ros2 topic echo /clock --once
+```
+
+Esto evita que la descripción del robot, TF y la visualización utilicen relojes
+incompatibles durante la simulación.
+
+## 34.2 Puente de lectura del JACO físico
+
+Se incorporó el paquete `thesis_hardware_bridge`, implementado en C++ sobre la
+API USB de Kinova. El nodo:
+
+```text
+jaco_readonly_node
+```
+
+realiza únicamente la siguiente secuencia de lectura:
+
+```text
+InitAPI
+GetDevices
+SetActiveDevice
+GetAngularPosition
+CloseAPI
+```
+
+No utiliza `StartControlAPI`, `SendBasicTrajectory`, `MoveHome`, `InitFingers`
+ni ninguna función de envío de movimiento. Por diseño, este puente no puede
+ordenar movimiento al brazo.
+
+El estado se publica en:
+
+```text
+/jaco/joint_states
+```
+
+con las seis articulaciones del brazo, posiciones en radianes, `frame_id:
+base_link` y una frecuencia verificada de aproximadamente 20 Hz. Los joints
+del gripper se publican como posiciones independientes y permanecen en cero
+mientras no exista un adaptador específico para los dedos.
+
+La conexión USB se identificó como:
+
+```text
+Vendor ID:  22cd
+Product ID: 0000
+Kinova Robotics Inc. Jaco Robotic Arm
+```
+
+También se añadió la regla udev:
+
+```text
+src/thesis_hardware/udev/70-thesis-kinova.rules
+```
+
+para permitir el acceso del usuario perteneciente al grupo `plugdev`, sin
+requerir `sudo` para cada lectura.
+
+## 34.3 Visualización del estado físico en RViz
+
+Se añadió:
+
+```text
+src/thesis_description/launch/view_jaco_hardware.launch.py
+```
+
+Este launch reutiliza el URDF/Xacro del digital twin, inicia
+`robot_state_publisher` y RViz, y conecta el modelo al tópico
+`/jaco/joint_states`. La cadena fue verificada con:
+
+```text
+/jaco/joint_states
+        ↓
+robot_state_publisher
+        ↓
+/tf y /tf_static
+        ↓
+RViz RobotModel
+```
+
+El modelo se visualizó correctamente y el estado `RobotModel` de RViz quedó en
+`OK`. Esta visualización representa el estado medido por la API; no genera
+comandos para el brazo.
+
+## 34.4 Supervisor preventivo: validaciones incorporadas
+
+`thesis_core/safety_supervisor_node.py` dejó de ser un pass-through puramente
+estructural y ahora valida, antes de publicar en
+`/thesis/supervised_command`:
+
+1. presencia de exactamente las seis articulaciones del brazo;
+2. orden canónico de los nombres de joints;
+3. correspondencia entre `joint_names` y `positions`;
+4. valores finitos;
+5. límites articulares configurados para J1–J6;
+6. duración entre `0.1` y `30.0` segundos;
+7. velocidad solicitada por joint dentro del máximo configurado
+   (`0.3142 rad/s` en la validación actual);
+8. disponibilidad del estado articular actual cuando
+   `require_current_state:=true`.
+
+El estado actual se puede configurar mediante:
+
+```bash
+ros2 run thesis_core safety_supervisor \
+  --ros-args \
+  -p state_topic:=/jaco/joint_states \
+  -p require_current_state:=true
+```
+
+Se verificaron tanto comandos permitidos como rechazos por joint fuera de
+rango, duración inválida, orden incorrecto, velocidad excesiva y ausencia de
+estado actual. La salida continúa siendo pass-through después de la
+validación; todavía no se han integrado distancia al entorno, predicción,
+TTC ni clasificación geométrica de riesgo.
+
+## 34.5 Adaptadores de prueba sin salida física
+
+Se añadieron dos adaptadores para probar la arquitectura sin energizar ni
+controlar el JACO físico:
+
+```text
+thesis_simulation/dry_run_adapter.py
+thesis_simulation/simulation_command_adapter.py
+```
+
+El adaptador dry-run registra los comandos supervisados y rechaza de forma
+explícita cualquier intento de habilitar una salida física todavía no
+implementada.
+
+El adaptador de simulación utiliza la acción:
+
+```text
+/arm_controller/follow_joint_trajectory
+control_msgs/action/FollowJointTrajectory
+```
+
+La salida a Gazebo está desactivada por defecto y solo se habilita mediante:
+
+```bash
+-p simulation_output_enabled:=true
+```
+
+## 34.6 Pipeline unificado de validación en Gazebo
+
+Se añadió:
+
+```text
+src/thesis_simulation/launch/safety_pipeline.launch.py
+```
+
+El launch inicia el supervisor y el adaptador de simulación. Gazebo debe estar
+ejecutándose previamente con el controlador activo.
+
+Ejecución en modo seguro, sin enviar la trayectoria a Gazebo:
+
+```bash
+ros2 launch thesis_simulation safety_pipeline.launch.py
+```
+
+Ejecución con salida exclusivamente al digital twin:
+
+```bash
+ros2 launch thesis_simulation safety_pipeline.launch.py \
+  simulation_output_enabled:=true
+```
+
+La cadena se verificó con el nodo de prueba:
+
+```bash
+ros2 run thesis_simulation test_command
+```
+
+Resultado validado:
+
+```text
+comando J1 = 0.20 rad
+duración = 3 s
+Gazebo aceptó la trayectoria
+error_code = 0
+Goal successfully reached
+```
+
+También se comprobó que una solicitud como `J1 = 7.0 rad` es rechazada por el
+supervisor antes de alcanzar el action server de Gazebo.
+
+## 34.7 Prueba de lectura y ensayo físico controlado
+
+El programa:
+
+```text
+src/thesis_hardware/tools/jaco_read_probe.cpp
+```
+
+se compiló y ejecutó para comprobar que la API detecta un único dispositivo y
+puede leer sus posiciones sin producir movimiento.
+
+Además, se creó el programa separado:
+
+```text
+src/thesis_hardware/tools/jaco_j6_move_probe.cpp
+```
+
+Este programa tiene dry-run por defecto, requiere `--execute` y un token de
+confirmación explícito, muestra una cuenta regresiva y fuerza `HAND_NOMOVEMENT`
+para los dedos. No forma parte del pipeline ROS 2 de comandos.
+
+Durante la sesión se realizaron dos ensayos físicos autorizados únicamente
+sobre J6:
+
+| Ensayo | Estado inicial | Objetivo | Resultado registrado |
+|---|---:|---:|---:|
+| J6, 15 s | `1.140131 rad` | `1.105225 rad` | `1.106097 rad` |
+| J6, 10 s | `1.106097 rad` | `1.018830 rad` | `≈0.969960 rad` |
+
+El segundo ensayo utilizó un envío de velocidad de lazo abierto y terminó con
+un desplazamiento mayor al objetivo. No se observaron cambios en J1–J5 ni en
+los dedos, pero el resultado demuestra que este método no debe utilizarse como
+controlador físico definitivo.
+
+Por seguridad, el puente de lectura se detuvo al finalizar la sesión y no se
+deben ejecutar nuevos ensayos físicos con este probe hasta reemplazarlo por un
+adaptador cerrado que supervise el estado medido, el error de posición, la
+velocidad y la condición de parada.
+
+## 34.8 Estado actualizado después de la sesión
+
+```text
+Tiempo simulado /clock                         ✅
+Puente JACO ROS 2 de solo lectura             ✅
+Estado físico en /jaco/joint_states           ✅
+Visualización física en RViz                   ✅
+Validación estructural de comandos             ✅
+Límites articulares y duración                 ✅
+Límite de velocidad                            ✅
+Validación contra estado actual                ✅
+Adaptador dry-run                              ✅
+Adaptador de trayectoria para Gazebo           ✅
+Pipeline unificado supervisor–Gazebo           ✅
+Salida ROS 2 hacia JACO físico                 ⏳ intencionalmente deshabilitada
+Adaptador físico cerrado                       ⏳ pendiente
+Distancia, predicción y TTC                    ⏳ pendiente
+Percepción RGB-D                               ⏳ pendiente
+Validación experimental completa                ⏳ pendiente
+```
+
+La separación entre lectura del estado físico, supervisión preventiva y
+adaptación de comandos queda establecida. El siguiente bloque técnico debe
+ser el diseño de un adaptador físico cerrado y limitado, independiente del
+probe experimental utilizado durante esta sesión.
+
 El sistema preventivo **no reemplaza el controlador interno del manipulador** ni pretende implementar un nuevo controlador de bajo nivel. Su función es validar o modificar comandos antes de permitir que lleguen al robot.
 
 ---
@@ -2397,5 +2670,3 @@ JACO real
         ↓
 validación experimental
 ```
-
-
