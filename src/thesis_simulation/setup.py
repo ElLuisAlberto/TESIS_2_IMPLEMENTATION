@@ -47,6 +47,7 @@ setup(
     entry_points={
         'console_scripts': [
             'test_command = thesis_simulation.test_command_node:main',
+            'dry_run_adapter = thesis_simulation.dry_run_adapter:main',
         ],
     },
 )
