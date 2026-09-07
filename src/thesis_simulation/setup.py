@@ -48,6 +48,8 @@ setup(
         'console_scripts': [
             'test_command = thesis_simulation.test_command_node:main',
             'dry_run_adapter = thesis_simulation.dry_run_adapter:main',
+            'simulation_command_adapter = '
+            'thesis_simulation.simulation_command_adapter:main',
         ],
     },
 )

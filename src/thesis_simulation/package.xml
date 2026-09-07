@@ -34,6 +34,8 @@
   <exec_depend>ros2controlcli</exec_depend>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
 
   <exec_depend>thesis_interfaces</exec_depend>
 
