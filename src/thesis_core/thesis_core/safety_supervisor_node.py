@@ -224,6 +224,16 @@ class SafetySupervisorNode(Node):
             return 'WARNING'
         return 'ALLOW'
 
+    def joint_limit_violation(self, joint_positions):
+        """Return the first joint-limit violation in a configuration."""
+        for joint_name, position in zip(
+                EXPECTED_ARM_JOINTS,
+                joint_positions):
+            lower, upper = JOINT_LIMITS[joint_name]
+            if not math.isfinite(position) or not lower <= position <= upper:
+                return joint_name, position, lower, upper
+        return None
+
     def predict_candidate(self, msg):
         if not bool(self.get_parameter('prediction_enabled').value):
             return None
@@ -289,6 +299,16 @@ class SafetySupervisorNode(Node):
                 current_value + fraction * delta
                 for current_value, delta in zip(current, deltas)
             )
+            violation = self.joint_limit_violation(sample)
+            if violation is not None:
+                joint_name, position, lower, upper = violation
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: sampled configuration '
+                    f'exceeds {joint_name}={position:.4f} rad; '
+                    f'limits=[{lower:.4f}, {upper:.4f}] at sample '
+                    f'{sample_index + 1}/{sample_count}'
+                )
+                return False
             result = minimum_sphere_clearance(
                 sample,
                 obstacle,

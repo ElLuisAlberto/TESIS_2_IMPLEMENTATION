@@ -56,7 +56,6 @@ def generate_launch_description():
         system_plugin_paths
     )
 
-
     resource_paths = [
         os.path.dirname(description_share),
         os.path.dirname(simulation_share),
@@ -117,7 +116,6 @@ def generate_launch_description():
         )
     }
 
-
     # =========================================================
     # Robot description
     # =========================================================
@@ -131,7 +129,6 @@ def generate_launch_description():
             {'use_sim_time': True}
         ]
     )
-
 
     # =========================================================
     # Gazebo Fortress
@@ -155,7 +152,6 @@ def generate_launch_description():
                 gazebo_resource_path,
         }
     )
-
 
     # =========================================================
     # Spawn JACO from /robot_description
@@ -199,7 +195,6 @@ def generate_launch_description():
         ]
     )
 
-
     # =========================================================
     # Controllers
     # =========================================================
@@ -225,7 +220,6 @@ def generate_launch_description():
             '/controller_manager'
         ]
     )
-
 
     # =========================================================
     # RViz
@@ -287,7 +281,6 @@ def generate_launch_description():
             }
         ]
     )
-
 
     return LaunchDescription([
 
