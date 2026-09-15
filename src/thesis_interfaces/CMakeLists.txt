@@ -14,6 +14,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/JointCommand.msg"
   "msg/ProximityStatus.msg"
   "msg/TrajectoryPrediction.msg"
+  "msg/CommandDecision.msg"
+  "msg/ExecutionTrajectory.msg"
+  "msg/ExecutionControl.msg"
   DEPENDENCIES
     builtin_interfaces
     geometry_msgs

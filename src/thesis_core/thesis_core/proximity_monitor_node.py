@@ -1,4 +1,5 @@
 import math
+import time
 
 import rclpy
 from rclpy.duration import Duration
@@ -7,6 +8,7 @@ from rclpy.time import Time
 
 from geometry_msgs.msg import Point
 from tf2_ros import Buffer, TransformException, TransformListener
+from tf2_msgs.msg import TFMessage
 
 from thesis_interfaces.msg import ProximityStatus
 
@@ -62,6 +64,12 @@ class ProximityMonitorNode(Node):
         self.declare_parameter('obstacle_y', 0.0)
         self.declare_parameter('obstacle_z', 0.65)
         self.declare_parameter('obstacle_radius', 0.12)
+        self.declare_parameter(
+            'obstacle_pose_topic',
+            '/world/jaco_world/pose/info',
+        )
+        self.declare_parameter('obstacle_frame', 'safety_obstacle')
+        self.declare_parameter('obstacle_pose_timeout_sec', 0.5)
         self.declare_parameter('warning_distance', 0.30)
         self.declare_parameter('reduction_distance', 0.15)
         self.declare_parameter('stop_distance', 0.05)
@@ -92,6 +100,30 @@ class ProximityMonitorNode(Node):
         )
         self.tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.obstacle_frame = str(
+            self.get_parameter('obstacle_frame').value
+        )
+        self.obstacle_pose_timeout_sec = float(
+            self.get_parameter('obstacle_pose_timeout_sec').value
+        )
+        if self.obstacle_pose_timeout_sec <= 0.0:
+            raise ValueError(
+                'obstacle_pose_timeout_sec must be greater than zero'
+            )
+        obstacle_pose_topic = str(
+            self.get_parameter('obstacle_pose_topic').value
+        )
+        self.dynamic_obstacle_center = None
+        self.dynamic_obstacle_velocity = (0.0, 0.0, 0.0)
+        self.previous_obstacle_center = None
+        self.previous_obstacle_time = None
+        self.last_obstacle_pose_time = None
+        self.obstacle_pose_subscription = self.create_subscription(
+            TFMessage,
+            obstacle_pose_topic,
+            self.obstacle_pose_callback,
+            10,
+        )
         self.missing_frames = set()
         self.previous_state = None
 
@@ -103,6 +135,45 @@ class ProximityMonitorNode(Node):
         self.get_logger().info(
             f'Proximity monitor ready: {len(self.segment_names)} capsules'
         )
+
+        self.get_logger().info(
+            f'Dynamic obstacle pose topic: {obstacle_pose_topic}; '
+            f'frame={self.obstacle_frame}'
+        )
+
+    def obstacle_pose_callback(self, msg):
+        """Track the obstacle pose bridged from Gazebo Pose_V."""
+        selected = None
+        for transform in msg.transforms:
+            child_frame = str(transform.child_frame_id)
+            root_frame = child_frame.replace('::', '/').split('/', 1)[0]
+            if child_frame == self.obstacle_frame or root_frame == (
+                    self.obstacle_frame):
+                selected = transform.transform.translation
+                break
+
+        if selected is None:
+            return
+
+        center = Point(
+            x=float(selected.x),
+            y=float(selected.y),
+            z=float(selected.z),
+        )
+        now = time.monotonic()
+        if self.previous_obstacle_center is not None:
+            elapsed = now - self.previous_obstacle_time
+            if elapsed > 1.0e-3:
+                self.dynamic_obstacle_velocity = (
+                    (center.x - self.previous_obstacle_center.x) / elapsed,
+                    (center.y - self.previous_obstacle_center.y) / elapsed,
+                    (center.z - self.previous_obstacle_center.z) / elapsed,
+                )
+
+        self.dynamic_obstacle_center = center
+        self.previous_obstacle_center = center
+        self.previous_obstacle_time = now
+        self.last_obstacle_pose_time = now
 
     def _validate_configuration(self):
         segment_count = len(self.segment_names)
@@ -149,7 +220,23 @@ class ProximityMonitorNode(Node):
         radius = float(self.get_parameter('obstacle_radius').value)
         if radius <= 0.0:
             raise ValueError('obstacle_radius must be greater than zero')
-        return Point(x=x_value, y=y_value, z=z_value), radius
+        if (
+            self.dynamic_obstacle_center is not None
+            and self.last_obstacle_pose_time is not None
+            and time.monotonic() - self.last_obstacle_pose_time
+            <= self.obstacle_pose_timeout_sec
+        ):
+            return (
+                self.dynamic_obstacle_center,
+                radius,
+                self.dynamic_obstacle_velocity,
+            )
+
+        return Point(x=x_value, y=y_value, z=z_value), radius, (
+            0.0,
+            0.0,
+            0.0,
+        )
 
     def _state_for_clearance(self, clearance):
         if clearance <= float(self.get_parameter('stop_distance').value):
@@ -163,7 +250,7 @@ class ProximityMonitorNode(Node):
         return 'ALLOW'
 
     def evaluate(self):
-        obstacle, obstacle_radius = self._obstacle()
+        obstacle, obstacle_radius, obstacle_velocity = self._obstacle()
         unavailable = set()
         best_result = None
 
@@ -214,6 +301,9 @@ class ProximityMonitorNode(Node):
         message.limiting_segment = limiting_segment
         message.closest_robot_point = closest
         message.obstacle_center = obstacle
+        message.obstacle_velocity.x = obstacle_velocity[0]
+        message.obstacle_velocity.y = obstacle_velocity[1]
+        message.obstacle_velocity.z = obstacle_velocity[2]
         message.obstacle_radius = obstacle_radius
         self.publisher.publish(message)
 

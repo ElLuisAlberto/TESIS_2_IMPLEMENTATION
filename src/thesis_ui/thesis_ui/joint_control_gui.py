@@ -25,9 +25,17 @@ from PyQt5.QtWidgets import QWidget
 
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
-from thesis_interfaces.msg import JointCommand, TrajectoryPrediction
+from thesis_interfaces.msg import (
+    CommandDecision,
+    ExecutionControl,
+    ExecutionTrajectory,
+    JointCommand,
+    ProximityStatus,
+    TrajectoryPrediction,
+)
 import tf2_ros
 
 
@@ -87,7 +95,12 @@ def quaternion_to_rpy(x, y, z, w):
 class JointGuiNode(Node):
 
     def __init__(self):
-        super().__init__('joint_control_gui_node')
+        super().__init__(
+            'joint_control_gui_node',
+            parameter_overrides=[
+                Parameter('use_sim_time', value=True),
+            ],
+        )
 
         self.current_positions = {}
         self.last_state_time = None
@@ -95,7 +108,23 @@ class JointGuiNode(Node):
         self.last_allowed_id = None
         self.last_supervised_duration = None
         self.last_prediction = None
+        self.last_execution = None
+        self.last_execution_control = None
+        self.execution_by_id = {}
+        self.last_proximity = None
+        self.proximity_received_at = None
+        self.control_received_at = None
         self.end_effector_pose = None
+        self.intent_publisher = self.create_publisher(
+            JointCommand, '/thesis/preview_intent', 10,
+        )
+        self.last_decision = None
+        self.decision_subscription = self.create_subscription(
+            CommandDecision,
+            '/thesis/command_decision',
+            self.decision_callback,
+            10,
+        )
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(
@@ -130,6 +159,34 @@ class JointGuiNode(Node):
             10,
         )
 
+        self.execution_subscription = self.create_subscription(
+            ExecutionTrajectory,
+            '/thesis/execution_trajectory',
+            self.execution_callback,
+            10,
+        )
+        self.execution_control_subscription = self.create_subscription(
+            ExecutionControl,
+            '/thesis/execution_control',
+            self.execution_control_callback,
+            10,
+        )
+
+        self.proximity_subscription = self.create_subscription(
+            ProximityStatus, '/thesis/proximity_status',
+            self.proximity_callback, 10,
+        )
+
+    def proximity_callback(self, msg):
+        self.last_proximity = msg
+        self.proximity_received_at = time.monotonic()
+
+    def execution_is_active(self):
+        return any(
+            msg.status in ('PENDING', 'ACCEPTED')
+            for msg in self.execution_by_id.values()
+        )
+
     def state_callback(self, msg):
         for name, position in zip(msg.name, msg.position):
             if name in JOINT_NAMES and math.isfinite(position):
@@ -146,9 +203,31 @@ class JointGuiNode(Node):
                 + float(msg.duration.nanosec) * 1e-9
             )
 
+    def decision_callback(self, msg):
+        if msg.command_id == self.last_command_id:
+            self.last_decision = msg
+
     def prediction_callback(self, msg):
         if msg.command_id == self.last_command_id:
             self.last_prediction = msg
+
+    def execution_callback(self, msg):
+        self.execution_by_id[msg.command_id] = msg
+        # Keep terminal history bounded, retaining every active execution.
+        if len(self.execution_by_id) > 100:
+            for command_id, execution in list(self.execution_by_id.items()):
+                if execution.status not in ('PENDING', 'ACCEPTED'):
+                    del self.execution_by_id[command_id]
+                    break
+        if (
+            msg.command_id == self.last_command_id
+            or self.last_command_id is None
+        ):
+            self.last_execution = msg
+
+    def execution_control_callback(self, msg):
+        self.last_execution_control = msg
+        self.control_received_at = time.monotonic()
 
     def state_is_ready(self):
         if self.last_state_time is None:
@@ -200,6 +279,16 @@ class JointGuiNode(Node):
                     '/thesis/trajectory_prediction'
                 ) > 0
             ),
+            'Referencia de ejecución': (
+                self.count_publishers(
+                    '/thesis/execution_trajectory'
+                ) > 0
+            ),
+            'Control preventivo': (
+                self.count_publishers(
+                    '/thesis/execution_control'
+                ) > 0
+            ),
         }
 
     def publish_candidate(self, positions, duration_sec):
@@ -220,6 +309,9 @@ class JointGuiNode(Node):
         self.last_allowed_id = None
         self.last_supervised_duration = None
         self.last_prediction = None
+        self.last_decision = None
+        self.last_execution = None
+        self.last_execution_control = None
         self.candidate_publisher.publish(msg)
 
         return (
@@ -370,7 +462,7 @@ class JointControlWindow(QMainWindow):
         main_layout.addWidget(state_group)
 
         connection_group = QGroupBox('Conexiones de la simulación')
-        connection_layout = QHBoxLayout(connection_group)
+        connection_layout = QGridLayout(connection_group)
 
         for name in [
             'Gazebo /clock',
@@ -378,11 +470,14 @@ class JointControlWindow(QMainWindow):
             'Supervisor',
             'Salida supervisada',
             'Predicción geométrica',
+            'Referencia de ejecución',
+            'Control preventivo',
         ]:
             indicator = QLabel(f'● {name}')
             indicator.setStyleSheet('color: #b91c1c; font-weight: bold;')
             self.connection_indicators[name] = indicator
-            connection_layout.addWidget(indicator)
+            index = len(self.connection_indicators) - 1
+            connection_layout.addWidget(indicator, index // 3, index % 3)
 
         main_layout.addWidget(connection_group)
 
@@ -485,12 +580,56 @@ class JointControlWindow(QMainWindow):
         self.prediction_state_label = QLabel('SIN EVALUAR')
         self.prediction_state_label.setObjectName('predictionState')
         self.prediction_detail_label = QLabel(
-            'Envíe un comando candidato para evaluar sus 25 muestras.'
+            'Envíe un comando candidato para evaluar su trayectoria.'
         )
         self.prediction_detail_label.setWordWrap(True)
         prediction_layout.addWidget(self.prediction_state_label)
         prediction_layout.addWidget(self.prediction_detail_label)
+        self.execution_status_label = QLabel(
+            'Ejecución: sin referencia aceptada por Gazebo.'
+        )
+        self.execution_status_label.setWordWrap(True)
+        prediction_layout.addWidget(self.execution_status_label)
         main_layout.addWidget(prediction_group)
+
+        metrics_group = QGroupBox('Distancias y horizonte durante la ejecución')
+        metrics_layout = QGridLayout(metrics_group)
+        self.metric_labels = {}
+        for index, name in enumerate([
+            'Distancia actual', 'Mínimo proyectado', 'Instante del mínimo',
+            'Decisión preventiva',
+        ]):
+            metrics_layout.addWidget(QLabel(name), 0, index)
+            label = QLabel('--')
+            label.setWordWrap(True)
+            label.setStyleSheet('font-size: 16px; font-weight: bold;')
+            self.metric_labels[name] = label
+            metrics_layout.addWidget(label, 1, index)
+        note = QLabel(
+            'Distancias entre superficies del modelo geométrico. '
+            't = 0: estado actual; t > 0: configuración futura. '
+            'Las mediciones llegan por separado; no son una pareja sincronizada.'
+        )
+        note.setWordWrap(True)
+        metrics_layout.addWidget(note, 2, 0, 1, 4)
+        main_layout.insertWidget(2, metrics_group)
+
+        self.preview_button = QPushButton(
+            'ACTIVAR VOLUMEN NOMINAL CONTINUO'
+        )
+        self.preview_button.setCheckable(True)
+        main_layout.addWidget(self.preview_button)
+        self.preview_note = QLabel(
+            'Volumen azul: intención nominal, horizonte 1 s y actualización '
+            'solicitada a 10 Hz. Durante la ejecución, el volumen cambia de '
+            'color y el supervisor puede reducir la velocidad o detener '
+            'el goal activo de Gazebo.'
+        )
+        self.preview_note.setWordWrap(True)
+        main_layout.addWidget(self.preview_note)
+        self.preview_timer = QTimer(self)
+        self.preview_timer.timeout.connect(self.publish_preview_intent)
+        self.preview_timer.start(100)
 
         self.send_button = QPushButton('ENVIAR COMANDO CANDIDATO')
         self.send_button.setObjectName('sendButton')
@@ -581,7 +720,16 @@ class JointControlWindow(QMainWindow):
 
     def refresh_ui(self):
         state_ready = self.ros_node.state_is_ready()
-        self.send_button.setEnabled(state_ready)
+        busy = (
+            self.pending_command_id is not None
+            or self.ros_node.execution_is_active()
+        )
+        connected = self.ros_node.candidate_publisher.get_subscription_count() > 0
+        self.send_button.setEnabled(state_ready and connected and not busy)
+        self.send_button.setText(
+            'ESPERANDO RESULTADO DEL COMANDO' if busy
+            else 'ENVIAR COMANDO CANDIDATO'
+        )
         self.copy_button.setEnabled(state_ready)
 
         if state_ready:
@@ -614,7 +762,9 @@ class JointControlWindow(QMainWindow):
         self.refresh_end_effector_pose()
         self.refresh_velocity_preview()
         self.refresh_prediction_status()
+        self.refresh_execution_status()
         self.refresh_command_status()
+        self.refresh_runtime_metrics()
 
     def shortest_delta_degrees(
         self,
@@ -731,12 +881,57 @@ class JointControlWindow(QMainWindow):
 
     def refresh_connections(self):
         for name, connected in self.ros_node.connection_status().items():
-            indicator = self.connection_indicators[name]
+            indicator = self.connection_indicators.get(name)
+            if indicator is None:
+                continue
             color = '#166534' if connected else '#b91c1c'
             text = '●' if connected else '○'
             indicator.setText(f'{text} {name}')
             indicator.setStyleSheet(
                 f'color: {color}; font-weight: bold;'
+            )
+
+    def refresh_runtime_metrics(self):
+        node = self.ros_node
+        now = time.monotonic()
+        proximity = node.last_proximity
+        if proximity is not None and now - node.proximity_received_at <= 1.0:
+            actual = f'{proximity.minimum_clearance:.3f} m'
+        else:
+            actual = 'Sin dato reciente'
+        self.metric_labels['Distancia actual'].setText(actual)
+        control = node.last_execution_control
+        active = node.execution_by_id.get(
+            control.command_id if control is not None else ''
+        )
+        fresh = (
+            control is not None
+            and node.control_received_at is not None
+            and now - node.control_received_at <= 1.0
+            and active is not None
+            and active.status in ('PENDING', 'ACCEPTED')
+        )
+        values = ['Sin evaluación activa', '--', '--']
+        color = '#475569'
+        if fresh:
+            values = [
+                f'{control.minimum_clearance:.3f} m',
+                (f'+{control.minimum_time_from_now:.2f} s | '
+                 f'{control.minimum_sample_index + 1}/'
+                 f'{control.minimum_sample_count}')
+                if control.minimum_sample_count >= 2 else 'Sin muestra válida',
+                f'{control.state} | escala {control.speed_scale:.2f}',
+            ]
+            color = {
+                'ALLOW': '#166534', 'WARNING': '#a16207',
+                'REDUCTION': '#c2410c', 'STOP': '#b91c1c',
+            }.get(control.state, '#475569')
+        for name, value in zip([
+            'Mínimo proyectado', 'Instante del mínimo', 'Decisión preventiva',
+        ], values):
+            self.metric_labels[name].setText(value)
+            self.metric_labels[name].setStyleSheet(
+                f'color: {color}; font-size: 16px; font-weight: bold;'
             )
 
     def refresh_end_effector_pose(self):
@@ -774,6 +969,19 @@ class JointControlWindow(QMainWindow):
             )
             return
 
+        decision = self.ros_node.last_decision
+        if (
+            decision is not None
+            and decision.command_id == self.ros_node.last_command_id
+            and not decision.accepted
+        ):
+            self.prediction_state_label.setText(
+                'COMANDO RECHAZADO POR EL SUPERVISOR'
+            )
+            self.prediction_state_label.setStyleSheet('color: #b91c1c;')
+            self.prediction_detail_label.setText(decision.reason)
+            return
+
         prediction = self.ros_node.last_prediction
 
         if prediction is None:
@@ -803,8 +1011,109 @@ class JointControlWindow(QMainWindow):
             f'Avance: {prediction.trajectory_fraction:.0%}'
         )
 
+    def refresh_execution_status(self):
+        execution = self.ros_node.last_execution
+        if execution is None:
+            self.execution_status_label.setText(
+                'Ejecución: sin referencia aceptada por Gazebo.'
+            )
+            self.execution_status_label.setStyleSheet('color: #92400e;')
+            return
+
+        colors = {
+            'PENDING': '#92400e',
+            'ACCEPTED': '#166534',
+            'SUCCEEDED': '#166534',
+            'FAILED': '#b91c1c',
+            'REJECTED': '#b91c1c',
+            'CANCELED': '#b91c1c',
+            'DRY_RUN': '#92400e',
+        }
+        color = colors.get(execution.status, '#334155')
+        duration = execution.duration_sec
+        control = self.ros_node.last_execution_control
+        control_text = ''
+        if (
+            control is not None
+            and control.command_id == execution.command_id
+        ):
+            control_color = {
+                'ALLOW': '#166534',
+                'WARNING': '#a16207',
+                'REDUCTION': '#c2410c',
+                'STOP': '#b91c1c',
+            }.get(control.state, '#334155')
+            minimum_text = ''
+            if control.minimum_sample_count >= 2:
+                sample_number = min(
+                    control.minimum_sample_index + 1,
+                    control.minimum_sample_count,
+                )
+                minimum_text = (
+                    f' Mínimo proyectado en t='
+                    f'{control.minimum_time_from_now:.2f} s '
+                    f'(muestra {sample_number}/'
+                    f'{control.minimum_sample_count}).'
+                )
+            ttc = (
+                f'{control.time_to_collision:.3f} s'
+                if control.time_to_collision >= 0.0
+                else 'sin solapamiento previsto'
+            )
+            control_text = (
+                f' Control: {control.state} '
+                f'(escala {control.speed_scale:.2f}, '
+                f'd_min {control.minimum_clearance:.3f} m, '
+                f'TTC: {ttc}).'
+                f'{minimum_text}'
+            )
+            if execution.status in (
+                'PENDING', 'ACCEPTED',
+            ):
+                color = control_color
+        self.execution_status_label.setText(
+            f'Ejecución {execution.status}: {execution.command_id}. '
+            f'{execution.detail} Duración: {duration:.2f} s.'
+            f'{control_text}'
+        )
+        self.execution_status_label.setStyleSheet(f'color: {color};')
+
     def refresh_command_status(self):
+        for execution in self.ros_node.execution_by_id.values():
+            self.update_history_state(execution.command_id, execution.status)
+        execution = self.ros_node.execution_by_id.get(
+            self.ros_node.last_command_id
+        )
+        if execution is not None:
+            self.status_label.setText(
+                f'{execution.status}: {execution.command_id}. {execution.detail}'
+            )
+            self.status_label.setStyleSheet(
+                'color: #b91c1c;' if execution.status in (
+                    'REJECTED', 'FAILED', 'CANCELED',
+                ) else 'color: #334155;'
+            )
+            if execution.command_id == self.pending_command_id:
+                self.pending_command_id = None
+            return
         if self.pending_command_id is None:
+            return
+
+        decision = self.ros_node.last_decision
+        if (
+            decision is not None
+            and decision.command_id == self.pending_command_id
+            and not decision.accepted
+        ):
+            self.status_label.setText(
+                f'RECHAZADO: {self.pending_command_id}. {decision.reason}'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            self.update_history_state(
+                self.pending_command_id,
+                f'RECHAZADO: {decision.reason_code}',
+            )
+            self.pending_command_id = None
             return
 
         prediction = self.ros_node.last_prediction
@@ -851,21 +1160,19 @@ class JointControlWindow(QMainWindow):
                 self.pending_command_id,
                 state,
             )
-            self.pending_command_id = None
             return
 
-        if time.monotonic() - self.pending_since > 1.5:
+        if time.monotonic() - self.pending_since > 5.0:
             self.status_label.setText(
                 f'SIN SALIDA SUPERVISADA: {self.pending_command_id}. '
-                'El comando pudo ser rechazado; revise el mensaje del '
-                'safety_supervisor para conocer la causa.'
+                'No hay confirmación; revise supervisor y adaptador antes '
+                'de reiniciar la interfaz.'
             )
             self.status_label.setStyleSheet('color: #b91c1c;')
             self.update_history_state(
                 self.pending_command_id,
-                'SIN SALIDA',
+                'SIN CONFIRMACIÓN',
             )
-            self.pending_command_id = None
 
     def target_spin_changed(self, index, degrees):
         self.prediction_is_stale = True
@@ -967,7 +1274,32 @@ class JointControlWindow(QMainWindow):
         )
         self.status_label.setStyleSheet('color: #334155;')
 
+    def publish_preview_intent(self):
+        if not self.preview_button.isChecked():
+            return
+        if not self.ros_node.state_is_ready():
+            return
+        msg = JointCommand()
+        msg.stamp = self.ros_node.get_clock().now().to_msg()
+        msg.command_id = 'continuous_preview'
+        msg.joint_names = list(JOINT_NAMES)
+        msg.positions = [
+            math.radians(item.value()) for item in self.target_inputs
+        ]
+        duration = self.duration_input.value()
+        msg.duration.sec = int(duration)
+        msg.duration.nanosec = int((duration - int(duration)) * 1e9)
+        self.ros_node.intent_publisher.publish(msg)
+
     def send_candidate(self):
+        if (
+            self.pending_command_id is not None
+            or self.ros_node.execution_is_active()
+        ):
+            return
+        if self.ros_node.candidate_publisher.get_subscription_count() == 0:
+            self.status_label.setText('Inicie el supervisor antes de enviar.')
+            return
         if not self.ros_node.state_is_ready():
             QMessageBox.warning(
                 self,

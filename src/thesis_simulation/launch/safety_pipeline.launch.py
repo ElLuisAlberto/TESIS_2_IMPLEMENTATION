@@ -12,6 +12,7 @@ def generate_launch_description():
     require_proximity_status = LaunchConfiguration(
         'require_proximity_status'
     )
+    use_sim_time = LaunchConfiguration('use_sim_time')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -30,11 +31,21 @@ def generate_launch_description():
             ),
         ),
 
+        DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='true',
+            description='Use the Gazebo simulation clock',
+        ),
+
         Node(
             package='thesis_core',
             executable='safety_supervisor',
             output='screen',
             parameters=[{
+                'use_sim_time': ParameterValue(
+                    use_sim_time,
+                    value_type=bool,
+                ),
                 'require_proximity_status': ParameterValue(
                     require_proximity_status,
                     value_type=bool,
@@ -47,6 +58,10 @@ def generate_launch_description():
             executable='simulation_command_adapter',
             output='screen',
             parameters=[{
+                'use_sim_time': ParameterValue(
+                    use_sim_time,
+                    value_type=bool,
+                ),
                 'simulation_output_enabled':
                     ParameterValue(
                         simulation_output_enabled,

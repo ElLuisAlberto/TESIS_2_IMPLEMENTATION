@@ -12,4 +12,5 @@ string limiting_segment
 # Geometric witnesses used for diagnostics and RViz rendering.
 geometry_msgs/Point closest_robot_point
 geometry_msgs/Point obstacle_center
+geometry_msgs/Vector3 obstacle_velocity
 float64 obstacle_radius

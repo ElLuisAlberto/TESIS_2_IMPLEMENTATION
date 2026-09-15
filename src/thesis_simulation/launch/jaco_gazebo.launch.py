@@ -235,6 +235,20 @@ def generate_launch_description():
         ]
     )
 
+    pose_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='gazebo_pose_bridge',
+        output='screen',
+        parameters=[{'use_sim_time': True}],
+        arguments=[
+            (
+                '/world/jaco_world/pose/info@'
+                'tf2_msgs/msg/TFMessage[ignition.msgs.Pose_V'
+            )
+        ],
+    )
+
     rviz = Node(
         package='rviz2',
         executable='rviz2',
@@ -304,6 +318,7 @@ def generate_launch_description():
 
         gazebo,
         clock_bridge,
+        pose_bridge,
 
         # Wait for Gazebo server before spawning robot
         TimerAction(

@@ -1,5 +1,147 @@
 # TESIS_2_IMPLEMENTATION
 
+Plataforma experimental desacoplada de supervisión preventiva para JACO2 en ROS 2 Humble y Gazebo. Esta sección describe la versión actual; el registro histórico completo se conserva más abajo.
+
+## Estado de integración — 15/09/2026
+
+- Comandos candidatos verificados por el supervisor antes de su envío al adaptador de Gazebo.
+- Supervisión durante la ejecución: horizonte configurado de 1 s, 21 muestras y decisiones `ALLOW`, `WARNING`, `REDUCTION` y `STOP`.
+- Trazabilidad del mínimo: distancia, segmento, tiempo relativo e índice de muestra.
+- Interfaz: distancia actual y proyectada separadas, resultado de ejecución por identificador, bloqueo de envíos mientras exista un comando pendiente o activo.
+- RViz: etiquetas `ACTUAL`, `CANDIDATO` y `d_futuro` para distinguir tres evaluaciones diferentes. El volumen nominal representa una intención, no una autorización de ejecución.
+
+**Evidencia disponible:** los registros compartidos muestran `SUCCEEDED`, cancelación por seguridad y mínimos futuros. El último registro de 178 mensajes contiene 101 mínimos con `t_min > 0`; solo incluye `ALLOW` y `WARNING`. Esto no equivale a una validación integral ni a una certificación de seguridad.
+
+**Corrección de interfaz:** faltaba crear el indicador `Control preventivo`. Su consulta causaba un `KeyError` dentro de `refresh_connections`, antes de actualizar pose, tabla y estados. Se incorpora el indicador y se toleran indicadores opcionales ausentes.
+
+## Criterio central de la investigación y brecha de implementación
+
+El objetivo es determinar la admisibilidad futura de un comando antes de ejecutarlo y durante su ejecución, utilizando la evolución prevista del manipulador y del entorno en un horizonte corto. La variación de velocidad debe justificarse por el riesgo asociado a ese movimiento previsto. La cercanía instantánea, por sí sola, no describe si el comando empeora o mejora la situación.
+
+La implementación actual calcula la separación entre cápsulas del robot y una esfera del entorno en configuraciones muestreadas, incluyendo t = 0. Después aplica umbrales al menor valor encontrado y una histéresis de recuperación. Por ello, un comando de alejamiento puede seguir reducido cuando su mínimo pertenece al estado inicial. Existe predicción, pero todavía no se discrimina suficientemente entre acercamiento y alejamiento admisible. Esta es una brecha del núcleo de decisión, no una preferencia visual de la interfaz.
+
+El siguiente desarrollo debe evaluar la evolución temporal de la separación y los riesgos de todos los segmentos, y volver a predecir a la velocidad que se pretende autorizar antes de recuperarla. No basta con omitir t = 0, comprobar solo la postura final o asumir que todo alejamiento permite velocidad nominal. Los márgenes, la discretización, la dinámica de detención y los plazos de procesamiento requieren definición y validación experimental.
+
+La geometría renderizada ayuda a interpretar las configuraciones previstas; los colores no constituyen por sí mismos una prueba de admisibilidad ni de ausencia de colisión entre muestras.
+
+## Evidencia de la sesión y correcciones integradas
+
+| Componente | Evidencia / estado |
+|---|---|
+| Compilación | Cinco paquetes finalizados en el equipo del autor después del parche de interfaz |
+| Inicialización ROS de la GUI | Se corrigieron dos argumentos extra introducidos en el parche v5; la compilación no detectaba ese error de ejecución |
+| Datos de la GUI | Capturas posteriores muestran pose, articulaciones, velocidades y distancia actual |
+| Ejecución | El historial muestra `SUCCEEDED`, `CANCELED`, `ACCEPTED` y rechazo por validación |
+| Respuestas del supervisor | v6 añade publicación de rechazo en 17 rutas de validación que antes solo registraban el motivo en terminal |
+| Mínimo futuro | El registro analizado contiene mínimos con t > 0; no se limita siempre al estado actual |
+| Alejamiento | La captura muestra reducción con mínimo en t = 0; confirma la necesidad de revisar el criterio de decisión |
+
+El parche v6 conserva las validaciones y hace visibles sus rechazos. No elimina toda posibilidad de `SIN CONFIRMACIÓN`: todavía deben auditarse las salidas tempranas de `predict_candidate`, las pérdidas de mensajes y la recuperación tras reiniciar nodos. No se desbloquea por timeout una ejecución cuyo estado es desconocido.
+
+## Entorno y compilación
+
+Entorno objetivo: Ubuntu 22.04, ROS 2 Humble, Gazebo Fortress, paquetes `ros_gz`, `ros2_control`, `ros2_controllers`, RViz, TF2 y PyQt5. El puente USB del robot físico requiere dependencias propias; no es necesario para esta prueba de simulación.
+
+Desde la raíz del repositorio, con las dependencias de simulación ya instaladas:
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-select \
+  thesis_interfaces thesis_description thesis_core thesis_simulation thesis_ui
+source install/setup.bash
+```
+
+## Arranque de simulación
+
+En **cada terminal nueva**, antes de ejecutar su comando:
+
+```bash
+cd ~/Escritorio/TESIS_2_IMPLEMENTATION
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+```
+
+| Terminal | Comando | Función |
+|---|---|---|
+| 1 | `ros2 launch thesis_simulation jaco_gazebo.launch.py` | Gazebo, RViz, estado y proximidad |
+| 2 | `ros2 launch thesis_simulation safety_pipeline.launch.py simulation_output_enabled:=true` | Supervisor y salida a Gazebo |
+| 3 | `ros2 run thesis_core horizon_preview --ros-args -p use_sim_time:=true` | Volumen del horizonte |
+| 4 | `ros2 run thesis_ui joint_gui` | Interfaz |
+
+El argumento `simulation_output_enabled` está desactivado por defecto. Activarlo habilita el adaptador de Gazebo. No iniciar simultáneamente otra copia de estos nodos.
+
+## Cómo interpretar las medidas
+
+| Dato | Fuente | Interpretación |
+|---|---|---|
+| Distancia actual | `/thesis/proximity_status` | Separación entre superficies del modelo en el estado medido |
+| Evaluación del candidato | `/thesis/trajectory_prediction` | Evaluación asociada al comando enviado |
+| Mínimo durante ejecución | `/thesis/execution_control` | Menor separación entre las muestras del horizonte |
+| `minimum_time_from_now` | `/thesis/execution_control` | 0: estado actual; positivo: instante futuro del mínimo |
+| `minimum_sample_index` | `/thesis/execution_control` | Índice desde cero; la GUI muestra índice + 1 |
+| `time_to_collision` | `/thesis/execution_control` | Primer solapamiento muestreado; -1 indica que no se encontró |
+| Resultado | `/thesis/execution_trajectory` | `PENDING`, `ACCEPTED` y resultado terminal |
+
+La distancia actual y el mínimo futuro llegan por tópicos separados; las tarjetas no son una comparación sincronizada de la misma muestra. La GUI deja de presentar como activa una evaluación sin mensajes recientes o cuya ejecución terminó. El detalle de ejecución conserva el último resultado para revisión.
+
+## Comprobación antes del commit
+
+1. Verificar que la pose y las seis filas de velocidad se actualizan sin traceback en la terminal de la GUI.
+2. Enviar un solo comando con espacio libre: el botón debe bloquearse durante `PENDING/ACCEPTED`, el historial debe terminar en `SUCCEEDED` y el botón debe habilitarse.
+3. En Gazebo, repetir el escenario conocido de aproximación: comprobar `REDUCTION` y el resultado `CANCELED` al producirse `STOP`. Registrar los tópicos de control y ejecución; el color por sí solo no demuestra una parada.
+4. Cerrar la fuente de estados: la GUI debe indicar que los datos no son recientes y bloquear el envío.
+
+```bash
+ros2 topic echo /thesis/execution_control
+# En otra terminal:
+ros2 topic echo /thesis/execution_trajectory
+```
+
+Pruebas incluidas:
+
+```bash
+python3 -m unittest discover -s src/thesis_core/test -p test_execution_reference.py -v
+QT_QPA_PLATFORM=offscreen python3 -m unittest discover \
+  -s src/thesis_ui/test -p test_gui_state.py -v
+```
+
+## Verificación realizada y límites pendientes
+
+La revisión ejecutó tres pruebas de referencia temporal y cinco pruebas de GUI con Qt real y datos controlados. Al no disponer de ROS en el entorno de revisión, estas últimas cargaron el código de la GUI aislando sus importaciones ROS. Se comprobó la sintaxis Python y se inspeccionó una captura de la ventana. La compilación de cinco paquetes y la actualización de la GUI se comprobaron posteriormente en el equipo del autor. Las pruebas locales no cubrieron la inicialización ROS: los dos argumentos extra se detectaron al ejecutar y se corrigieron después. TF/DDS, movimientos y supervisión requieren pruebas integradas repetibles; las capturas no sustituyen esa validación.
+
+La revisión corrige presentación y seguimiento de estados, sin modificar la política preventiva. Se mantienen estas limitaciones del código recibido:
+
+- El adaptador limita a 30 s la duración replanificada. Si la reducción exige más tiempo, ese límite puede impedir aplicar la escala solicitada; debe revisarse antes de afirmar que la escala se cumple en todos los casos.
+- El intervalo de 0.75 s limita la recuperación de velocidad, no todas las reducciones. No debe describirse como una separación mínima universal entre replanificaciones.
+- Un comando sin confirmación mantiene bloqueado el envío; revisar supervisor/adaptador antes de reiniciar la GUI. No se añade un desbloqueo automático por timeout.
+- El bloqueo de la GUI se basa en los mensajes que recibe; no reemplaza el rechazo de comandos concurrentes del adaptador ni reconstruye una ejecución iniciada antes de abrir la ventana.
+- La separación geométrica muestreada no demuestra por sí sola ausencia de contacto real, distancia de frenado suficiente ni cumplimiento de plazos de tiempo real.
+
+## Versionado del avance
+
+Los binarios locales `configuracion_inicial.bin`, `firmware_a23_compatible.img`, `mapa_hardware.txt`, copias `*~` y compilaciones están excluidos en `.gitignore`. Permanecen en el equipo; su procedencia no está documentada. El archivo `.img` recibido está vacío.
+
+Después de superar las comprobaciones de simulación, en la rama actual:
+
+```bash
+git diff --check
+git add .gitignore README.md src docs LEEME_*.md
+git diff --cached --stat
+git status --short
+git commit -m "feat: checkpoint predictive simulation and document current limitations"
+git push -u origin feat/avance2-prediccion-preventiva
+```
+
+Las notas `LEEME_*` se conservan en Git como registro de parches; las instrucciones vigentes están en esta sección. Revisar el contenido preparado antes del commit. Esta versión debe presentarse como avance experimental con las limitaciones indicadas.
+
+---
+
+## Registro histórico íntegro
+
+Lo siguiente conserva la documentación previa. Sus instrucciones y pendientes reflejan sesiones anteriores; para el arranque actual usar la sección superior.
+
+# TESIS_2_IMPLEMENTATION
+
 ## Plataforma desacoplada de validación preventiva de seguridad para manipuladores robóticos colaborativos
 
 Repositorio de implementación experimental de la tesis orientada al desarrollo de una **capa preventiva desacoplada en ROS 2** para validar comandos de movimiento antes de que lleguen al controlador del manipulador.

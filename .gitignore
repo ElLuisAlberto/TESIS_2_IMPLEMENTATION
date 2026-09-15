@@ -15,3 +15,18 @@ __pycache__/
 # ROS bags
 *.db3
 *.mcap
+
+# Local backups and session files
+*~
+*.~*~
+.env
+.env.*
+*.tar.gz
+
+# Unidentified local hardware files: preserve locally, exclude from commits
+/configuracion_inicial.bin
+/firmware_a23_compatible.img
+/mapa_hardware.txt
+
+# Backups made while applying GUI fixes
+*.bak*

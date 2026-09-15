@@ -72,6 +72,9 @@ proximity_monitor:
     obstacle_y: 0.0
     obstacle_z: 0.65
     obstacle_radius: 0.12
+    obstacle_pose_topic: /world/jaco_world/pose/info
+    obstacle_frame: safety_obstacle
+    obstacle_pose_timeout_sec: 0.5
 
     # Surface-to-surface clearance thresholds in metres.
     warning_distance: 0.30

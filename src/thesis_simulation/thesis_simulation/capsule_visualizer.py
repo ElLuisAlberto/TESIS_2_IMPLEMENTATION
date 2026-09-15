@@ -325,7 +325,7 @@ class CapsuleVisualizer(Node):
         )
         label.scale.z = 0.055
         label.text = (
-            f'{status.state} | d={status.minimum_clearance:.3f} m | '
+            f'ACTUAL {status.state} | d={status.minimum_clearance:.3f} m | '
             f'{status.limiting_segment}'
         )
 
@@ -403,7 +403,7 @@ class CapsuleVisualizer(Node):
         )
         label.scale.z = 0.055
         label.text = (
-            f'PRED {prediction.state} | '
+            f'CANDIDATO {prediction.state} | '
             f'd={prediction.minimum_clearance:.3f} m | '
             f'{prediction.trajectory_fraction * 100.0:.0f}% trayectoria'
         )
