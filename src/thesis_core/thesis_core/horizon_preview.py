@@ -93,11 +93,13 @@ class HorizonPreview(Node):
 
         self.state = None
         self.intent = None
+        self.jog = None
         self.execution = None
         self.control = None
         self.controller_feedback = None
         self.state_time = -math.inf
         self.intent_time = -math.inf
+        self.jog_time = -math.inf
         self.execution_time = -math.inf
         self.control_time = -math.inf
         self.controller_time = -math.inf
@@ -116,6 +118,12 @@ class HorizonPreview(Node):
             JointCommand,
             '/thesis/preview_intent',
             self.receive_intent,
+            10,
+        )
+        self.jog_sub = self.create_subscription(
+            JointCommand,
+            '/thesis/supervised_jog_command',
+            self.receive_jog,
             10,
         )
         self.execution_sub = self.create_subscription(
@@ -156,6 +164,10 @@ class HorizonPreview(Node):
         self.intent = msg if tuple(msg.joint_names) == JOINTS else None
         self.intent_time = time.monotonic()
 
+    def receive_jog(self, msg):
+        self.jog = msg if tuple(msg.joint_names) == JOINTS else None
+        self.jog_time = time.monotonic()
+
     def receive_execution(self, msg):
         if msg.status == 'ACCEPTED':
             self.execution = msg
@@ -182,6 +194,9 @@ class HorizonPreview(Node):
 
     def intent_is_fresh(self, now):
         return self.intent is not None and now - self.intent_time <= 0.5
+
+    def jog_is_fresh(self, now):
+        return self.jog is not None and now - self.jog_time <= 0.25
 
     def execution_is_active(self, now_ros):
         if self.execution is None:
@@ -246,24 +261,35 @@ class HorizonPreview(Node):
             return 'intent' if intent_active else None
         if execution_active:
             return 'execution'
+        if self.jog_is_fresh(now_monotonic):
+            return 'jog'
         if intent_active:
             return 'intent'
         return None
 
     def make_poses(self, source, now_ros):
-        if source == 'intent':
-            duration = message_time_seconds(self.intent.duration)
+        if source in ('intent', 'jog'):
+            command = self.jog if source == 'jog' else self.intent
+            duration = message_time_seconds(command.duration)
             poses = predict_samples(
                 self.state,
-                tuple(self.intent.positions),
+                tuple(command.positions),
                 duration,
                 self.horizon,
                 self.count,
             )
             return poses, {
-                'title': 'INTENCIÓN NOMINAL',
-                'detail': 'sin referencia aceptada; solo visualización',
-                'command_id': 'continuous_preview',
+                'title': (
+                    'CONTROL MANUAL SUPERVISADO'
+                    if source == 'jog'
+                    else 'INTENCIÓN NOMINAL'
+                ),
+                'detail': (
+                    'velocidad limitada y supervisada en tiempo real'
+                    if source == 'jog'
+                    else 'sin referencia aceptada; solo visualización'
+                ),
+                'command_id': command.command_id,
                 'elapsed': None,
                 'tracking_error': None,
             }
@@ -357,6 +383,7 @@ class HorizonPreview(Node):
             marker.color.b = blue
             marker.color.a = alpha
             marker.lifetime.sec = 1
+            seen = set()
             for pose in poses:
                 start, end = capsule_segments(pose)[index]
                 length = math.sqrt(sum(
@@ -370,12 +397,73 @@ class HorizonPreview(Node):
                         * step / steps
                         for axis in range(3)
                     ]
+                    key = tuple(round(value, 5) for value in point)
+                    if key in seen:
+                        continue
+                    seen.add(key)
                     marker.points.append(Point(
                         x=point[0],
                         y=point[1],
                         z=point[2],
                     ))
             output.markers.append(marker)
+
+    def append_time_traces(self, output, poses, stamp):
+        """Draw geometric guides at true scale; these are not collision volumes."""
+        segments = [capsule_segments(pose) for pose in poses]
+        maximum_travel = 0.0
+        for link in range(len(CAPSULE_RADII)):
+            trace = Marker()
+            trace.header.frame_id = self.frame_id
+            trace.header.stamp = stamp
+            trace.ns = 'horizon_endpoint_traces'
+            trace.id = link
+            trace.type = Marker.LINE_STRIP
+            trace.pose.orientation.w = 1.0
+            trace.scale.x = 0.006
+            trace.color.r, trace.color.g, trace.color.b = 1.0, 0.8, 0.1
+            trace.color.a = 0.9
+            trace.lifetime.sec = 1
+            endpoints = [sample[link][1] for sample in segments]
+            trace.points = [Point(x=p[0], y=p[1], z=p[2]) for p in endpoints]
+            travel = sum(math.dist(a, b) for a, b in zip(endpoints, endpoints[1:]))
+            maximum_travel = max(maximum_travel, travel)
+            output.markers.append(trace)
+
+        # Skeletons distinguish intermediate/final poses without enlarging occupancy.
+        for slot, fraction in enumerate((0.25, 0.5, 1.0)):
+            index = round(fraction * (len(poses) - 1))
+            skeleton = Marker()
+            skeleton.header.frame_id = self.frame_id
+            skeleton.header.stamp = stamp
+            skeleton.ns = 'horizon_time_poses'
+            skeleton.id = slot
+            skeleton.type = Marker.LINE_LIST
+            skeleton.pose.orientation.w = 1.0
+            skeleton.scale.x = 0.008
+            skeleton.color.r = fraction
+            skeleton.color.g = 1.0 - 0.5 * fraction
+            skeleton.color.b = 1.0
+            skeleton.color.a = 0.9
+            skeleton.lifetime.sec = 1
+            for a, b in segments[index]:
+                skeleton.points.extend([Point(x=p[0], y=p[1], z=p[2]) for p in (a, b)])
+            output.markers.append(skeleton)
+            if maximum_travel > 0.015:
+                label = Marker()
+                label.header = skeleton.header
+                label.ns = 'horizon_time_labels'
+                label.id = slot
+                label.type = Marker.TEXT_VIEW_FACING
+                label.pose.orientation.w = 1.0
+                p = segments[index][-1][1]
+                label.pose.position = Point(x=p[0], y=p[1], z=p[2] + 0.05 + slot * 0.035)
+                label.scale.z = 0.025
+                label.color = skeleton.color
+                label.lifetime.sec = 1
+                label.text = f'+{index * self.horizon / (len(poses) - 1):.2f} s'
+                output.markers.append(label)
+        return maximum_travel
 
     def append_label(self, output, source, description, metadata, hz, elapsed):
         label = Marker()
@@ -435,6 +523,11 @@ class HorizonPreview(Node):
 
         stamp = self.get_clock().now().to_msg()
         self.append_volume(output, poses, source, stamp)
+        travel = self.append_time_traces(output, poses, stamp)
+        metadata['detail'] += (
+            f'\nRecorrido máximo de extremos: {travel * 100:.1f} cm'
+            '\nAmarillo: trazas; líneas de color: posturas futuras'
+        )
         compute_ms = (time.monotonic() - start) * 1000
         self.append_label(
             output,

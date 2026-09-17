@@ -1,6 +1,8 @@
 import math
 import sys
 import time
+from collections import deque
+from PyQt5.QtCore import QEvent
 
 from PyQt5.QtCore import QSignalBlocker
 from PyQt5.QtCore import Qt
@@ -73,7 +75,55 @@ TEST_POSE_DEG = [math.degrees(0.20), 180.0, 180.0, 0.0, 0.0, 0.0]
 # nominal J1-J3 = 36 deg/s, nominal J4-J6 = 48 deg/s,
 # with velocity_scale = 0.5.
 ALLOWED_SPEED_DEG = [18.0, 18.0, 18.0, 24.0, 24.0, 24.0]
+MAX_JOG_SPEED_DEG = [36.0, 36.0, 36.0, 48.0, 48.0, 48.0]
 CONTINUOUS_JOINT_INDEXES = {0, 3, 4, 5}
+JOG_INPUT_TIMEOUT_SEC = 0.30
+
+
+class WheelIntention:
+    """Finite-window wheel rate. Excess input is never queued as a target."""
+
+    def __init__(self, window=0.25, degrees_per_notch=1.0):
+        self.window = window
+        self.degrees_per_notch = degrees_per_notch
+        self.events = deque()
+
+    def clear(self):
+        self.events.clear()
+
+    def add(self, now, notches):
+        if not math.isfinite(notches) or notches == 0.0:
+            return
+        if self.events and self.events[-1][1] * notches < 0:
+            self.clear()
+        self.events.append((now, notches))
+
+    def velocity(self, now, maximum):
+        while self.events and now - self.events[0][0] >= self.window:
+            self.events.popleft()
+        rate = sum(value for _, value in self.events)
+        rate *= self.degrees_per_notch / self.window
+        return max(-maximum, min(maximum, rate))
+
+
+def limited_direct_step(
+    current_degrees,
+    requested_degrees,
+    maximum_speed_deg_s,
+    elapsed_sec,
+    continuous=False,
+):
+    """Return the reachable reference and velocity for one mouse event."""
+    elapsed_sec = min(max(float(elapsed_sec), 0.01), 0.25)
+    delta = float(requested_degrees) - float(current_degrees)
+    if continuous:
+        delta = (delta + 180.0) % 360.0 - 180.0
+    maximum_step = max(0.0, float(maximum_speed_deg_s)) * elapsed_sec
+    applied = min(max(delta, -maximum_step), maximum_step)
+    return (
+        float(current_degrees) + applied,
+        applied / elapsed_sec,
+    )
 
 
 def quaternion_to_rpy(x, y, z, w):
@@ -103,6 +153,7 @@ class JointGuiNode(Node):
         )
 
         self.current_positions = {}
+        self.current_velocities = {}
         self.last_state_time = None
         self.last_command_id = None
         self.last_allowed_id = None
@@ -117,6 +168,9 @@ class JointGuiNode(Node):
         self.end_effector_pose = None
         self.intent_publisher = self.create_publisher(
             JointCommand, '/thesis/preview_intent', 10,
+        )
+        self.jog_intent_publisher = self.create_publisher(
+            JointCommand, '/thesis/jog_intent', 10,
         )
         self.last_decision = None
         self.decision_subscription = self.create_subscription(
@@ -188,6 +242,10 @@ class JointGuiNode(Node):
         )
 
     def state_callback(self, msg):
+        self.current_velocities = {
+            name: float(value) for name, value in zip(msg.name, msg.velocity)
+            if name in JOINT_NAMES and math.isfinite(value)
+        }
         for name, position in zip(msg.name, msg.position):
             if name in JOINT_NAMES and math.isfinite(position):
                 self.current_positions[name] = float(position)
@@ -271,6 +329,9 @@ class JointGuiNode(Node):
             'Supervisor': (
                 self.candidate_publisher.get_subscription_count() > 0
             ),
+            'Control manual continuo': (
+                self.jog_intent_publisher.get_subscription_count() > 0
+            ),
             'Salida supervisada': (
                 self.count_publishers('/thesis/supervised_command') > 0
             ),
@@ -331,6 +392,15 @@ class JointControlWindow(QMainWindow):
         self.current_degree_labels = []
         self.current_radian_labels = []
         self.target_radian_labels = []
+        self.jog_speed_inputs = []
+        self.wheel_intentions = [WheelIntention() for _ in JOINT_NAMES]
+        self.decrease_buttons = []
+        self.increase_buttons = []
+        self.jog_velocity_labels = []
+        self.jog_reference_deg = list(INITIAL_POSE_DEG)
+        self.jog_velocity_deg_s = [0.0] * len(JOINT_NAMES)
+        self.jog_last_input_time = [None] * len(JOINT_NAMES)
+        self.jog_last_motion_time = [None] * len(JOINT_NAMES)
         self.pending_command_id = None
         self.pending_since = None
         self.connection_indicators = {}
@@ -352,6 +422,10 @@ class JointControlWindow(QMainWindow):
         self.ui_timer = QTimer(self)
         self.ui_timer.timeout.connect(self.refresh_ui)
         self.ui_timer.start(100)
+
+        self.jog_timer = QTimer(self)
+        self.jog_timer.timeout.connect(self.publish_jog_intent)
+        self.jog_timer.start(50)
 
     def build_ui(self):
         content_widget = QWidget()
@@ -394,6 +468,11 @@ class JointControlWindow(QMainWindow):
             target_radians = QLabel('0.0000')
             target_input = QDoubleSpinBox()
             target_slider = QSlider(Qt.Horizontal)
+            target_slider.installEventFilter(self)
+            target_slider.setToolTip(
+                'Control manual: coloque el cursor aquí y gire la rueda. '
+                'La barra muestra el ángulo medido.'
+            )
             adjustment_widget = QWidget()
             adjustment_layout = QHBoxLayout(adjustment_widget)
             decrease_button = QPushButton('−1°')
@@ -427,6 +506,12 @@ class JointControlWindow(QMainWindow):
                     value,
                 )
             )
+            target_slider.sliderPressed.connect(
+                lambda item=index: self.begin_direct_drag(item)
+            )
+            target_slider.sliderReleased.connect(
+                lambda item=index: self.end_direct_drag(item)
+            )
 
             decrease_button.clicked.connect(
                 lambda checked=False, item=index: self.jog_joint(
@@ -451,6 +536,8 @@ class JointControlWindow(QMainWindow):
             self.target_inputs.append(target_input)
             self.target_sliders.append(target_slider)
             self.target_radian_labels.append(target_radians)
+            self.decrease_buttons.append(decrease_button)
+            self.increase_buttons.append(increase_button)
 
             state_layout.addWidget(name_label, row, 0)
             state_layout.addWidget(current_degrees, row, 1)
@@ -461,6 +548,40 @@ class JointControlWindow(QMainWindow):
 
         main_layout.addWidget(state_group)
 
+        jog_group = QGroupBox('Control manual articular continuo')
+        jog_layout = QGridLayout(jog_group)
+        self.jog_mode_button = QPushButton(
+            'ACTIVAR CONTROL MANUAL CONTINUO'
+        )
+        self.jog_mode_button.setCheckable(True)
+        self.jog_mode_button.toggled.connect(self.toggle_jog_mode)
+        jog_layout.addWidget(self.jog_mode_button, 0, 0, 1, 4)
+        jog_note = QLabel(
+            'Gire la rueda sobre la barra del joint. La barra muestra el '
+            'ángulo medido. Más pulsos = mayor velocidad, limitada por Vmáx '
+            'y supervisión. Sin pulsos durante 0.25 s: intención cero. '
+            'Sensibilidad: 1° por paso estándar de rueda; ventana: 0.25 s.'
+        )
+        jog_note.setWordWrap(True)
+        jog_layout.addWidget(jog_note, 1, 0, 1, 4)
+        for index, joint_label in enumerate(JOINT_LABELS):
+            row = index + 2
+            jog_layout.addWidget(QLabel(joint_label), row, 0)
+            jog_layout.addWidget(QLabel('Vmáx:'), row, 1)
+            speed_input = QDoubleSpinBox()
+            speed_input.setRange(1.0, MAX_JOG_SPEED_DEG[index])
+            speed_input.setDecimals(1)
+            speed_input.setSingleStep(1.0)
+            speed_input.setValue(ALLOWED_SPEED_DEG[index])
+            speed_input.setSuffix(' °/s')
+            self.jog_speed_inputs.append(speed_input)
+            jog_layout.addWidget(speed_input, row, 2)
+            velocity_label = QLabel('v mouse: 0.0 °/s')
+            velocity_label.setStyleSheet('font-weight: bold; color: #166534;')
+            self.jog_velocity_labels.append(velocity_label)
+            jog_layout.addWidget(velocity_label, row, 3)
+        main_layout.addWidget(jog_group)
+
         connection_group = QGroupBox('Conexiones de la simulación')
         connection_layout = QGridLayout(connection_group)
 
@@ -468,6 +589,7 @@ class JointControlWindow(QMainWindow):
             'Gazebo /clock',
             '/joint_states',
             'Supervisor',
+            'Control manual continuo',
             'Salida supervisada',
             'Predicción geométrica',
             'Referencia de ejecución',
@@ -720,12 +842,15 @@ class JointControlWindow(QMainWindow):
 
     def refresh_ui(self):
         state_ready = self.ros_node.state_is_ready()
+        jog_active = self.jog_mode_button.isChecked()
         busy = (
             self.pending_command_id is not None
             or self.ros_node.execution_is_active()
         )
         connected = self.ros_node.candidate_publisher.get_subscription_count() > 0
-        self.send_button.setEnabled(state_ready and connected and not busy)
+        self.send_button.setEnabled(
+            state_ready and connected and not busy and not jog_active
+        )
         self.send_button.setText(
             'ESPERANDO RESULTADO DEL COMANDO' if busy
             else 'ENVIAR COMANDO CANDIDATO'
@@ -756,6 +881,20 @@ class JointControlWindow(QMainWindow):
             )
             self.current_radian_labels[index].setText(
                 f'{position:.4f}'
+            )
+            if jog_active:
+                actual_degrees = math.degrees(position)
+                self.jog_reference_deg[index] = actual_degrees
+                self.set_joint_reference_display(index, actual_degrees)
+
+            velocity = self.active_jog_velocity(index, time.monotonic())
+            self.jog_velocity_labels[index].setText(
+                f'Intención: {velocity:+.1f} °/s | medida: '
+                + (
+                    f'{math.degrees(self.ros_node.current_velocities[joint_name]):+.1f} °/s'
+                    if state_ready and joint_name in self.ros_node.current_velocities
+                    else 'sin dato'
+                )
             )
 
         self.refresh_connections()
@@ -908,8 +1047,16 @@ class JointControlWindow(QMainWindow):
             control is not None
             and node.control_received_at is not None
             and now - node.control_received_at <= 1.0
-            and active is not None
-            and active.status in ('PENDING', 'ACCEPTED')
+            and (
+                (
+                    active is not None
+                    and active.status in ('PENDING', 'ACCEPTED')
+                )
+                or (
+                    self.jog_mode_button.isChecked()
+                    and control.command_id == 'jog_continuous'
+                )
+            )
         )
         values = ['Sin evaluación activa', '--', '--']
         color = '#475569'
@@ -1175,6 +1322,9 @@ class JointControlWindow(QMainWindow):
             )
 
     def target_spin_changed(self, index, degrees):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is not None and jog_button.isChecked():
+            return
         self.prediction_is_stale = True
         blocker = QSignalBlocker(self.target_sliders[index])
         self.target_sliders[index].setValue(
@@ -1184,9 +1334,41 @@ class JointControlWindow(QMainWindow):
         self.update_target_radians(index, degrees)
 
     def target_slider_changed(self, index, slider_value):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is not None and jog_button.isChecked():
+            position = self.ros_node.current_positions.get(JOINT_NAMES[index])
+            if position is not None:
+                self.set_joint_reference_display(index, math.degrees(position))
+            return
         self.target_inputs[index].setValue(slider_value / 10.0)
 
+    def begin_direct_drag(self, index):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is None or not jog_button.isChecked():
+            return
+        position = self.ros_node.current_positions.get(JOINT_NAMES[index])
+        if position is not None:
+            self.jog_reference_deg[index] = math.degrees(position)
+        self.jog_velocity_deg_s[index] = 0.0
+        self.jog_last_input_time[index] = time.monotonic()
+        self.jog_last_motion_time[index] = None
+
+    def end_direct_drag(self, index):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is None or not jog_button.isChecked():
+            return
+        self.jog_velocity_deg_s[index] = 0.0
+        self.jog_last_input_time[index] = None
+        self.jog_last_motion_time[index] = None
+        position = self.ros_node.current_positions.get(JOINT_NAMES[index])
+        if position is not None:
+            degrees = math.degrees(position)
+            self.jog_reference_deg[index] = degrees
+            self.set_joint_reference_display(index, degrees)
+
     def jog_joint(self, index, increment_degrees):
+        if self.jog_mode_button.isChecked():
+            return
         target_input = self.target_inputs[index]
         target_input.setValue(
             target_input.value() + increment_degrees
@@ -1195,6 +1377,67 @@ class JointControlWindow(QMainWindow):
     def update_target_radians(self, index, degrees):
         radians = math.radians(degrees)
         self.target_radian_labels[index].setText(f'{radians:.4f}')
+
+    def set_joint_reference_display(self, index, degrees):
+        input_blocker = QSignalBlocker(self.target_inputs[index])
+        slider_blocker = QSignalBlocker(self.target_sliders[index])
+        self.target_inputs[index].setValue(degrees)
+        self.target_sliders[index].setValue(
+            int(round(degrees * 10.0))
+        )
+        del input_blocker
+        del slider_blocker
+        self.update_target_radians(index, degrees)
+
+    def reset_direct_jog_state(self):
+        now = time.monotonic()
+        for index, name in enumerate(JOINT_NAMES):
+            position = self.ros_node.current_positions.get(name)
+            if position is None:
+                continue
+            degrees = math.degrees(position)
+            self.jog_reference_deg[index] = degrees
+            self.jog_velocity_deg_s[index] = 0.0
+            self.jog_last_input_time[index] = now
+            self.jog_last_motion_time[index] = None
+            self.set_joint_reference_display(index, degrees)
+
+    def active_jog_velocity(self, index, now=None):
+        now = time.monotonic() if now is None else now
+        if not self.jog_mode_button.isChecked() or not self.ros_node.state_is_ready():
+            self.wheel_intentions[index].clear()
+            return 0.0
+        return self.wheel_intentions[index].velocity(
+            now, self.jog_speed_inputs[index].value(),
+        )
+
+    def eventFilter(self, watched, event):
+        button = getattr(self, 'jog_mode_button', None)
+        if button is not None and button.isChecked() and watched in self.target_sliders:
+            index = self.target_sliders.index(watched)
+            if event.type() == QEvent.Wheel:
+                if self.ros_node.state_is_ready():
+                    # Qt angleDelta: 120 units per conventional wheel notch.
+                    self.wheel_intentions[index].add(
+                        time.monotonic(), event.angleDelta().y() / 120.0,
+                    )
+                event.accept()
+                return True
+            if event.type() in (
+                QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                QEvent.MouseButtonDblClick, QEvent.MouseMove,
+                QEvent.KeyPress, QEvent.KeyRelease,
+            ):
+                return True
+            if event.type() in (QEvent.Leave, QEvent.FocusOut):
+                self.wheel_intentions[index].clear()
+        return super().eventFilter(watched, event)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.ActivationChange and not self.isActiveWindow():
+            for intention in getattr(self, 'wheel_intentions', []):
+                intention.clear()
+        super().changeEvent(event)
 
     def add_history_row(
         self,
@@ -1274,7 +1517,109 @@ class JointControlWindow(QMainWindow):
         )
         self.status_label.setStyleSheet('color: #334155;')
 
+    def toggle_jog_mode(self, checked):
+        for intention in self.wheel_intentions:
+            intention.clear()
+        if checked and (
+            not self.ros_node.state_is_ready()
+            or self.ros_node.execution_is_active()
+            or self.pending_command_id is not None
+            or self.ros_node.jog_intent_publisher.get_subscription_count() == 0
+        ):
+            blocker = QSignalBlocker(self.jog_mode_button)
+            self.jog_mode_button.setChecked(False)
+            del blocker
+            QMessageBox.warning(
+                self,
+                'Control manual no disponible',
+                'Se requiere /joint_states reciente y ninguna trayectoria '
+                'por objetivo en ejecución.',
+            )
+            return
+
+        if checked:
+            self.copy_current_pose()
+            self.reset_direct_jog_state()
+            self.preview_button.setChecked(False)
+            self.preview_button.setEnabled(False)
+            self.duration_input.setEnabled(False)
+            for target_input in self.target_inputs:
+                target_input.setEnabled(False)
+            for button in self.decrease_buttons + self.increase_buttons:
+                button.setEnabled(False)
+            self.jog_mode_button.setText(
+                'DESACTIVAR CONTROL MANUAL CONTINUO'
+            )
+            self.status_label.setText(
+                'CONTROL POR RUEDA ACTIVO: gire la rueda sobre una barra. '
+                'La barra muestra el ángulo medido; no deja destinos pendientes.'
+            )
+            self.status_label.setStyleSheet('color: #166534;')
+        else:
+            for index in range(len(JOINT_NAMES)):
+                self.jog_velocity_deg_s[index] = 0.0
+                self.jog_last_motion_time[index] = None
+            self.publish_jog_intent(force_hold=True)
+            self.preview_button.setEnabled(True)
+            self.duration_input.setEnabled(True)
+            for target_input in self.target_inputs:
+                target_input.setEnabled(True)
+            for button in self.decrease_buttons + self.increase_buttons:
+                button.setEnabled(True)
+            self.jog_mode_button.setText(
+                'ACTIVAR CONTROL MANUAL CONTINUO'
+            )
+            self.status_label.setText(
+                'Control manual desactivado; se solicitó mantener la '
+                'postura actual.'
+            )
+            self.status_label.setStyleSheet('color: #334155;')
+
+    def publish_jog_intent(self, force_hold=False):
+        if not force_hold and not self.jog_mode_button.isChecked():
+            return
+        if not self.ros_node.state_is_ready():
+            return
+        if self.ros_node.jog_intent_publisher.get_subscription_count() == 0:
+            return
+
+        horizon = 1.0
+        current = [
+            self.ros_node.current_positions[name]
+            for name in JOINT_NAMES
+        ]
+        horizon_target = []
+        for index, current_value in enumerate(current):
+            if force_hold:
+                horizon_target.append(current_value)
+                continue
+            velocity_deg_s = self.active_jog_velocity(index)
+            maximum_speed = self.jog_speed_inputs[index].value()
+            velocity_deg_s = min(
+                max(velocity_deg_s, -maximum_speed),
+                maximum_speed,
+            )
+            lower, upper = map(math.radians, JOINT_LIMITS_DEG[index])
+            delta = math.radians(velocity_deg_s) * horizon
+            # Do not command a jump back into range if the measured joint is outside.
+            if delta > 0:
+                delta = min(delta, max(0.0, upper - current_value))
+            elif delta < 0:
+                delta = max(delta, min(0.0, lower - current_value))
+            horizon_target.append(current_value + delta)
+
+        msg = JointCommand()
+        msg.stamp = self.ros_node.get_clock().now().to_msg()
+        msg.command_id = 'jog_continuous'
+        msg.joint_names = list(JOINT_NAMES)
+        msg.positions = horizon_target
+        msg.duration.sec = 1
+        msg.duration.nanosec = 0
+        self.ros_node.jog_intent_publisher.publish(msg)
+
     def publish_preview_intent(self):
+        if self.jog_mode_button.isChecked():
+            return
         if not self.preview_button.isChecked():
             return
         if not self.ros_node.state_is_ready():
@@ -1292,6 +1637,8 @@ class JointControlWindow(QMainWindow):
         self.ros_node.intent_publisher.publish(msg)
 
     def send_candidate(self):
+        if self.jog_mode_button.isChecked():
+            return
         if (
             self.pending_command_id is not None
             or self.ros_node.execution_is_active()
@@ -1352,6 +1699,9 @@ class JointControlWindow(QMainWindow):
         self.status_label.setStyleSheet('color: #92400e;')
 
     def closeEvent(self, event):
+        if self.jog_mode_button.isChecked():
+            self.publish_jog_intent(force_hold=True)
+        self.jog_timer.stop()
         self.ros_timer.stop()
         self.ui_timer.stop()
         self.ros_node.destroy_node()

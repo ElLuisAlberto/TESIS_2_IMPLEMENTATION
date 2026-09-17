@@ -30,3 +30,11 @@ __pycache__/
 
 # Backups made while applying GUI fixes
 *.bak*
+
+# Local installation patches and duplicated session startup notes
+/ARRANQUE_TESIS.txt
+/FASE1_CONTROL_PREDICTIVO.patch
+/FASE2_JOG_CONTINUO.patch
+/FASE3_CONTROL_DIRECTO.patch
+/FASE4_RUEDA_HORIZONTE.patch
+/ACTUALIZACION_README_FASE4.patch

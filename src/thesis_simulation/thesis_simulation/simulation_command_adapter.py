@@ -7,13 +7,14 @@ import rclpy
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
 from thesis_interfaces.msg import (
     ExecutionControl,
     ExecutionTrajectory,
     JointCommand,
 )
-from trajectory_msgs.msg import JointTrajectoryPoint
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from thesis_core.execution_reference import normalize_target
 
@@ -36,6 +37,8 @@ class SimulationCommandAdapter(Node):
         )
         self.declare_parameter('max_state_age_sec', 0.5)
         self.declare_parameter('control_replan_cooldown_sec', 0.75)
+        self.declare_parameter('jog_control_period_sec', 0.10)
+        self.declare_parameter('jog_command_timeout_sec', 0.25)
 
         action_name = self.get_parameter('action_name').value
         self.action_client = ActionClient(
@@ -67,6 +70,22 @@ class SimulationCommandAdapter(Node):
             self.control_callback,
             10,
         )
+        jog_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        self.jog_publisher = self.create_publisher(
+            JointTrajectory,
+            '/arm_controller/joint_trajectory',
+            jog_qos,
+        )
+        self.jog_subscription = self.create_subscription(
+            JointCommand,
+            '/thesis/supervised_jog_command',
+            self.jog_command_callback,
+            10,
+        )
 
         self.current_positions = {}
         self.last_state_monotonic = None
@@ -78,6 +97,13 @@ class SimulationCommandAdapter(Node):
         self.pending_control = None
         self.applied_speed_scale = 1.0
         self.last_control_change_monotonic = None
+        self.jog_active = False
+        self.last_jog_receive_monotonic = None
+        self.jog_hold_sent = False
+        self.jog_watchdog = self.create_timer(
+            0.05,
+            self.jog_watchdog_callback,
+        )
 
         output_enabled = bool(
             self.get_parameter('simulation_output_enabled').value
@@ -171,6 +197,82 @@ class SimulationCommandAdapter(Node):
         goal.trajectory.points = [initial_point, target_point]
         return goal
 
+    def publish_jog_target(self, target, duration):
+        """Publish one short rolling setpoint to the trajectory controller."""
+        trajectory = JointTrajectory()
+        trajectory.joint_names = list(JOINTS)
+        point = JointTrajectoryPoint()
+        point.positions = list(target)
+        self.point_time_from_seconds(point, duration)
+        trajectory.points = [point]
+        self.jog_publisher.publish(trajectory)
+
+    def jog_command_callback(self, msg):
+        """Convert a safe one-second jog horizon into a short control step."""
+        if not bool(self.get_parameter('simulation_output_enabled').value):
+            return
+        if self.goal_active:
+            return
+        if tuple(msg.joint_names) != JOINTS:
+            return
+
+        horizon = self.duration_seconds(msg)
+        control_period = float(
+            self.get_parameter('jog_control_period_sec').value
+        )
+        if (
+            not math.isfinite(horizon)
+            or horizon <= 0.0
+            or not 0.02 <= control_period <= 0.25
+        ):
+            return
+
+        current = self.current_state()
+        if current is None:
+            return
+        try:
+            horizon_target = normalize_target(
+                current,
+                tuple(msg.positions),
+            )
+        except ValueError:
+            return
+
+        fraction = min(1.0, control_period / horizon)
+        control_target = tuple(
+            current_value + fraction * (target_value - current_value)
+            for current_value, target_value in zip(
+                current,
+                horizon_target,
+            )
+        )
+        self.publish_jog_target(control_target, control_period)
+        self.jog_active = True
+        self.last_jog_receive_monotonic = time.monotonic()
+        self.jog_hold_sent = False
+
+    def jog_watchdog_callback(self):
+        """Hold the measured pose if the continuous command stream stops."""
+        if (
+            not self.jog_active
+            or self.last_jog_receive_monotonic is None
+            or self.jog_hold_sent
+        ):
+            return
+        timeout = float(
+            self.get_parameter('jog_command_timeout_sec').value
+        )
+        if time.monotonic() - self.last_jog_receive_monotonic <= timeout:
+            return
+        current = self.current_state()
+        if current is not None:
+            duration = float(
+                self.get_parameter('jog_control_period_sec').value
+            )
+            self.publish_jog_target(current, duration)
+        self.jog_hold_sent = True
+        self.jog_active = False
+
     def start_goal(self, metadata, detail):
         """Send a goal and associate every callback with its generation."""
         if not self.action_client.wait_for_server(timeout_sec=1.0):
@@ -248,6 +350,14 @@ class SimulationCommandAdapter(Node):
             self.get_logger().info(
                 f'SIMULATION-DRY-RUN id={msg.command_id}: '
                 'salida a Gazebo desactivada'
+            )
+            return
+
+        if self.jog_active:
+            self.reject(
+                msg,
+                'REJECTED',
+                'el control manual continuo está activo',
             )
             return
 
