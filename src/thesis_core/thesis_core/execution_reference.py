@@ -2,35 +2,17 @@
 
 import math
 
-
-JOINT_COUNT = 6
-CONTINUOUS_JOINT_INDEXES = (0, 3, 4, 5)
+from thesis_core.joint_model import normalize_target
+from thesis_core.joint_model import validate_joint_positions
 
 
 def _validate_vector(values, name):
-    if len(values) != JOINT_COUNT:
-        raise ValueError(f'{name} must contain six joint positions')
-    if not all(math.isfinite(value) for value in values):
-        raise ValueError(f'{name} contains a non-finite position')
-
-
-def normalize_target(start, target):
-    """Return the target using the shortest continuous-joint turn."""
-    _validate_vector(start, 'start')
-    _validate_vector(target, 'target')
-
-    normalized = list(target)
-    for index in CONTINUOUS_JOINT_INDEXES:
-        delta = math.atan2(
-            math.sin(target[index] - start[index]),
-            math.cos(target[index] - start[index]),
-        )
-        normalized[index] = start[index] + delta
-    return tuple(normalized)
+    validate_joint_positions(values, name)
 
 
 def sample_reference(start, target, duration, elapsed, horizon, count):
-    """Sample an absolute-time reference from the current execution point.
+    """
+    Sample an absolute-time reference from the current execution point.
 
     ``elapsed`` is measured from the reference start time. Samples after the
     requested duration remain at the target, so a late visualizer does not

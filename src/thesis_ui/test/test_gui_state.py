@@ -5,8 +5,8 @@ import unittest
 from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PyQt5.QtWidgets import QApplication
-from thesis_ui.joint_control_gui import (
+from PyQt5.QtWidgets import QApplication  # noqa: E402
+from thesis_ui.joint_control_gui import (  # noqa: E402
     JOINT_NAMES, JointControlWindow, JointGuiNode,
 )
 
@@ -17,6 +17,7 @@ class FakeNode:
 
     def __init__(self):
         self.current_positions = dict(zip(JOINT_NAMES, [0, 3.14, 3.14, 0, 0, 0]))
+        self.current_velocities = {}
         self.last_command_id = 'gui_test'
         self.last_allowed_id = None
         self.last_prediction = None

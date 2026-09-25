@@ -1,0 +1,1840 @@
+============================================================
+PAQUETE 2 — DIAGNÓSTICO ESTÁTICO Y DE INTERFACES
+Fecha: 2026-09-22T08:06:07-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+ROS_DISTRO=humble
+============================================================
+
+----- ARCHIVOS CENTRALES COMPLETOS -----
+
+==================== src/thesis_core/thesis_core/joint_model.py ====================
+"""Canonical JACO2 joint model and operational motion limits."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Final, Mapping, Sequence, Tuple, cast
+
+
+JointVector = Tuple[float, float, float, float, float, float]
+
+JOINT_NAMES: Final[Tuple[str, ...]] = tuple(
+    f'j2n6s300_joint_{index}' for index in range(1, 7)
+)
+JOINT_COUNT: Final[int] = len(JOINT_NAMES)
+
+# Application-space position bounds.  The URDF retains the manufacturer's
+# physical model; these values are the canonical limits used by thesis nodes.
+JOINT_POSITION_LIMITS: Final[Mapping[str, Tuple[float, float]]] = {
+    JOINT_NAMES[0]: (-2.0 * math.pi, 2.0 * math.pi),
+    JOINT_NAMES[1]: (math.radians(47.0), math.radians(313.0)),
+    JOINT_NAMES[2]: (math.radians(19.0), math.radians(341.0)),
+    JOINT_NAMES[3]: (-2.0 * math.pi, 2.0 * math.pi),
+    JOINT_NAMES[4]: (-2.0 * math.pi, 2.0 * math.pi),
+    JOINT_NAMES[5]: (-2.0 * math.pi, 2.0 * math.pi),
+}
+
+CONTINUOUS_JOINT_INDEXES: Final[Tuple[int, ...]] = (0, 3, 4, 5)
+CONTINUOUS_JOINTS: Final[frozenset[str]] = frozenset(
+    JOINT_NAMES[index] for index in CONTINUOUS_JOINT_INDEXES
+)
+
+# Deliberately conservative operational limits for this thesis.  The JACO2
+# URDF keeps the nominal physical limits (36/48 deg/s), while every command
+# path in the application is bounded here to 18/24 deg/s.
+JOINT_VELOCITY_LIMITS: Final[Mapping[str, float]] = {
+    JOINT_NAMES[0]: math.radians(18.0),
+    JOINT_NAMES[1]: math.radians(18.0),
+    JOINT_NAMES[2]: math.radians(18.0),
+    JOINT_NAMES[3]: math.radians(24.0),
+    JOINT_NAMES[4]: math.radians(24.0),
+    JOINT_NAMES[5]: math.radians(24.0),
+}
+
+
+@dataclass(frozen=True)
+class SaturationResult:
+    """Result of applying operational velocity and position bounds."""
+
+    positions: JointVector
+    requested_velocities: JointVector
+    applied_velocities: JointVector
+    limiting_joint: str
+    requested_velocity: float
+    limited_velocity: float
+    was_limited: bool
+
+
+def validate_joint_names(names: Sequence[str]) -> Tuple[str, ...]:
+    """Return canonical names or raise for any order/size mismatch."""
+    result = tuple(names)
+    if result != JOINT_NAMES:
+        raise ValueError('expected six arm joints in canonical order')
+    return result
+
+
+def validate_joint_positions(
+    values: Sequence[float],
+    name: str = 'positions',
+) -> JointVector:
+    """Return one finite six-joint vector."""
+    if len(values) != JOINT_COUNT:
+        raise ValueError(f'{name} must contain six joint positions')
+    result = tuple(float(value) for value in values)
+    if not all(math.isfinite(value) for value in result):
+        raise ValueError(f'{name} contains a non-finite position')
+    return cast(JointVector, result)
+
+
+def validate_duration(duration: float) -> float:
+    """Return a finite positive duration."""
+    result = float(duration)
+    if not math.isfinite(result) or result <= 0.0:
+        raise ValueError('duration must be positive and finite')
+    return result
+
+
+def validate_position_limits(values: Sequence[float]) -> JointVector:
+    """Return positions or raise for the first application-limit violation."""
+    result = validate_joint_positions(values)
+    for joint_name, position in zip(JOINT_NAMES, result):
+        lower, upper = JOINT_POSITION_LIMITS[joint_name]
+        if not lower <= position <= upper:
+            raise ValueError(
+                f'{joint_name}={position:.6f} rad outside '
+                f'[{lower:.6f}, {upper:.6f}] rad'
+            )
+    return result
+
+
+def shortest_joint_delta(
+    joint_name: str,
+    target_position: float,
+    current_position: float,
+) -> float:
+    """Return target-current with the shortest continuous-joint turn."""
+    if joint_name not in JOINT_POSITION_LIMITS:
+        raise ValueError(f'unknown joint: {joint_name}')
+    if (
+        not math.isfinite(target_position)
+        or not math.isfinite(current_position)
+    ):
+        raise ValueError('joint positions must be finite')
+    delta = float(target_position) - float(current_position)
+    if joint_name in CONTINUOUS_JOINTS:
+        return math.atan2(math.sin(delta), math.cos(delta))
+    return delta
+
+
+def normalize_target(
+    start: Sequence[float],
+    target: Sequence[float],
+) -> JointVector:
+    """Represent a target using the shortest continuous-joint turns."""
+    start_vector = validate_joint_positions(start, 'start')
+    target_vector = validate_joint_positions(target, 'target')
+    return cast(JointVector, tuple(
+        current + shortest_joint_delta(joint_name, requested, current)
+        for joint_name, current, requested in zip(
+            JOINT_NAMES, start_vector, target_vector
+        )
+    ))
+
+
+def saturate_target_by_velocity(
+    current: Sequence[float],
+    requested: Sequence[float],
+    duration: float,
+) -> SaturationResult:
+    """Bound a target by canonical velocity and position limits."""
+    current_vector = validate_joint_positions(current, 'current')
+    requested_vector = validate_joint_positions(requested, 'requested')
+    duration = validate_duration(duration)
+
+    bounded = []
+    requested_velocities = []
+    applied_velocities = []
+    ratios = []
+    was_limited = False
+
+    for joint_name, current_value, requested_value in zip(
+        JOINT_NAMES, current_vector, requested_vector
+    ):
+        delta = shortest_joint_delta(
+            joint_name, requested_value, current_value
+        )
+        requested_velocity = delta / duration
+        velocity_limit = JOINT_VELOCITY_LIMITS[joint_name]
+        applied_velocity = min(
+            max(requested_velocity, -velocity_limit), velocity_limit
+        )
+        bounded_value = current_value + applied_velocity * duration
+        lower, upper = JOINT_POSITION_LIMITS[joint_name]
+        bounded_value = min(max(bounded_value, lower), upper)
+        applied_velocity = (bounded_value - current_value) / duration
+
+        limited = not math.isclose(
+            applied_velocity, requested_velocity, rel_tol=0.0, abs_tol=1.0e-12
+        )
+        was_limited = was_limited or limited
+        bounded.append(bounded_value)
+        requested_velocities.append(requested_velocity)
+        applied_velocities.append(applied_velocity)
+        ratios.append(abs(requested_velocity) / velocity_limit)
+
+    limiting_index = max(range(JOINT_COUNT), key=ratios.__getitem__)
+    return SaturationResult(
+        positions=cast(JointVector, tuple(bounded)),
+        requested_velocities=cast(
+            JointVector, tuple(requested_velocities)
+        ),
+        applied_velocities=cast(JointVector, tuple(applied_velocities)),
+        limiting_joint=JOINT_NAMES[limiting_index],
+        requested_velocity=requested_velocities[limiting_index],
+        limited_velocity=applied_velocities[limiting_index],
+        was_limited=was_limited,
+    )
+
+==================== src/thesis_core/thesis_core/execution_reference.py ====================
+"""Helpers for sampling an accepted joint trajectory reference."""
+
+import math
+
+from thesis_core.joint_model import normalize_target
+from thesis_core.joint_model import validate_joint_positions
+
+
+def _validate_vector(values, name):
+    validate_joint_positions(values, name)
+
+
+def sample_reference(start, target, duration, elapsed, horizon, count):
+    """
+    Sample an absolute-time reference from the current execution point.
+
+    ``elapsed`` is measured from the reference start time. Samples after the
+    requested duration remain at the target, so a late visualizer does not
+    extrapolate beyond the command sent to the controller.
+    """
+    _validate_vector(start, 'start')
+    _validate_vector(target, 'target')
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError('duration must be positive and finite')
+    if not math.isfinite(elapsed):
+        raise ValueError('elapsed must be finite')
+    if not math.isfinite(horizon) or horizon < 0:
+        raise ValueError('horizon must be finite and non-negative')
+    if count < 2:
+        raise ValueError('count must be at least two')
+
+    target = normalize_target(start, target)
+    elapsed = max(0.0, elapsed)
+    samples = []
+    for index in range(count):
+        offset = horizon * index / float(count - 1)
+        time_from_start = min(duration, elapsed + offset)
+        fraction = time_from_start / duration
+        samples.append(tuple(
+            start_value + fraction * (target_value - start_value)
+            for start_value, target_value in zip(start, target)
+        ))
+    return samples
+
+==================== src/thesis_core/thesis_core/horizon_preview.py ====================
+"""Render the nominal or accepted short-horizon arm occupancy volume."""
+
+import math
+import time
+
+import rclpy
+from control_msgs.msg import JointTrajectoryControllerState
+from geometry_msgs.msg import Point
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+from visualization_msgs.msg import Marker, MarkerArray
+
+from thesis_core.execution_reference import sample_reference
+from thesis_core.jaco_kinematics import CAPSULE_RADII, capsule_segments
+from thesis_core.joint_model import (
+    JOINT_NAMES,
+    JOINT_VELOCITY_LIMITS,
+    normalize_target,
+)
+from thesis_interfaces.msg import (
+    ExecutionControl,
+    ExecutionTrajectory,
+    JointCommand,
+)
+
+
+FRAME_ID = 'j2n6s300_link_base'
+VALID_SOURCES = ('auto', 'intent', 'execution')
+
+
+def predict_samples(current, target, duration, horizon, count):
+    """Interpolate a bounded-speed nominal intent over a fixed horizon."""
+    if len(current) != 6 or len(target) != 6:
+        raise ValueError('Expected six joints')
+    if not all(math.isfinite(x) for x in (*current, *target)):
+        raise ValueError('Non-finite positions')
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError('Invalid duration')
+    if not math.isfinite(horizon) or horizon <= 0 or count < 2:
+        raise ValueError('Invalid horizon')
+
+    normalized_target = normalize_target(current, target)
+    delta = [
+        target_value - current_value
+        for current_value, target_value in zip(current, normalized_target)
+    ]
+    effective_duration = max(
+        duration,
+        *(
+            abs(delta_value) / JOINT_VELOCITY_LIMITS[joint_name]
+            for joint_name, delta_value in zip(JOINT_NAMES, delta)
+        ),
+    )
+    return [tuple(
+        current_value + delta_value * min(
+            index * horizon / (count - 1) / effective_duration,
+            1.0,
+        )
+        for current_value, delta_value in zip(current, delta)
+    ) for index in range(count)]
+
+
+def message_time_seconds(value):
+    """Convert a ROS time message to seconds."""
+    return float(value.sec) + float(value.nanosec) * 1e-9
+
+
+class HorizonPreview(Node):
+    """Render discrete future capsules in the model base frame."""
+
+    def __init__(self):
+        super().__init__('horizon_preview')
+        for name, default in (
+            ('horizon_sec', 1.0),
+            ('rate_hz', 10.0),
+            ('samples', 21),
+            ('margin_m', 0.02),
+            ('source', 'auto'),
+            ('model_frame', FRAME_ID),
+        ):
+            self.declare_parameter(name, default)
+
+        self.horizon = float(self.get_parameter('horizon_sec').value)
+        self.rate = float(self.get_parameter('rate_hz').value)
+        self.count = int(self.get_parameter('samples').value)
+        self.margin = float(self.get_parameter('margin_m').value)
+        self.source = str(self.get_parameter('source').value).lower()
+        self.frame_id = str(self.get_parameter('model_frame').value)
+        if (not all(math.isfinite(value) for value in (
+                self.horizon, self.rate, self.margin)) or
+                not 0 < self.horizon <= 5 or
+                not 0 < self.rate <= 30 or
+                not 2 <= self.count <= 101 or
+                not 0 <= self.margin <= 0.2 or
+                self.source not in VALID_SOURCES or not self.frame_id):
+            raise ValueError('Invalid preview parameters')
+
+        self.state = None
+        self.intent = None
+        self.jog = None
+        self.execution = None
+        self.control = None
+        self.controller_feedback = None
+        self.state_time = -math.inf
+        self.intent_time = -math.inf
+        self.jog_time = -math.inf
+        self.execution_time = -math.inf
+        self.control_time = -math.inf
+        self.controller_time = -math.inf
+        self.publisher = self.create_publisher(
+            MarkerArray,
+            '/thesis/horizon_volume',
+            10,
+        )
+        self.state_sub = self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.receive_state,
+            10,
+        )
+        self.intent_sub = self.create_subscription(
+            JointCommand,
+            '/thesis/preview_intent',
+            self.receive_intent,
+            10,
+        )
+        self.jog_sub = self.create_subscription(
+            JointCommand,
+            '/thesis/supervised_jog_command',
+            self.receive_jog,
+            10,
+        )
+        self.execution_sub = self.create_subscription(
+            ExecutionTrajectory,
+            '/thesis/execution_trajectory',
+            self.receive_execution,
+            10,
+        )
+        self.control_sub = self.create_subscription(
+            ExecutionControl,
+            '/thesis/execution_control',
+            self.receive_control,
+            10,
+        )
+        self.controller_sub = self.create_subscription(
+            JointTrajectoryControllerState,
+            '/arm_controller/controller_state',
+            self.receive_controller_state,
+            10,
+        )
+        self.timer = self.create_timer(1 / self.rate, self.tick)
+        self.previous_tick = None
+        self.get_logger().info(
+            f'Horizon preview started: source={self.source}, '
+            f'horizon={self.horizon:.2f}s, rate={self.rate:.1f}Hz'
+        )
+
+    def receive_state(self, msg):
+        if len(msg.name) != len(msg.position):
+            return
+        values = dict(zip(msg.name, msg.position))
+        if all(joint in values and math.isfinite(values[joint])
+               for joint in JOINT_NAMES):
+            self.state = tuple(values[joint] for joint in JOINT_NAMES)
+            self.state_time = time.monotonic()
+
+    def receive_intent(self, msg):
+        self.intent = msg if tuple(msg.joint_names) == JOINT_NAMES else None
+        self.intent_time = time.monotonic()
+
+    def receive_jog(self, msg):
+        self.jog = msg if tuple(msg.joint_names) == JOINT_NAMES else None
+        self.jog_time = time.monotonic()
+
+    def receive_execution(self, msg):
+        if msg.status == 'ACCEPTED':
+            self.execution = msg
+            self.execution_time = time.monotonic()
+
+    def receive_control(self, msg):
+        self.control = msg
+        self.control_time = time.monotonic()
+
+    def receive_controller_state(self, msg):
+        positions = dict(zip(
+            msg.joint_names,
+            msg.feedback.positions,
+        ))
+        if all(joint in positions and math.isfinite(positions[joint])
+               for joint in JOINT_NAMES):
+            self.controller_feedback = tuple(
+                positions[joint] for joint in JOINT_NAMES
+            )
+            self.controller_time = time.monotonic()
+
+    def state_is_fresh(self, now):
+        return self.state is not None and now - self.state_time <= 0.5
+
+    def intent_is_fresh(self, now):
+        return self.intent is not None and now - self.intent_time <= 0.5
+
+    def jog_is_fresh(self, now):
+        return self.jog is not None and now - self.jog_time <= 0.25
+
+    def execution_is_active(self, now_ros):
+        if self.execution is None:
+            return False
+        if len(self.execution.start_positions) != 6:
+            return False
+        if len(self.execution.target_positions) != 6:
+            return False
+        if not math.isfinite(self.execution.duration_sec):
+            return False
+        start = message_time_seconds(self.execution.start_time)
+        if now_ros <= start + self.execution.duration_sec + 0.5:
+            return True
+        return (
+            self.control is not None
+            and self.control.command_id == self.execution.command_id
+            and self.control.state == 'STOP'
+            and time.monotonic() - self.control_time <= 1.0
+        )
+
+    def runtime_state(self):
+        if (
+            self.control is None
+            or time.monotonic() - self.control_time > 1.0
+            or self.execution is None
+            or self.control.command_id != self.execution.command_id
+        ):
+            return 'ALLOW', 1.0, None
+        return (
+            self.control.state,
+            self.control.speed_scale,
+            self.control.minimum_clearance,
+        )
+
+    def runtime_minimum(self):
+        """Return where the supervisor found its minimum in the horizon."""
+        if (
+            self.control is None
+            or time.monotonic() - self.control_time > 1.0
+            or self.execution is None
+            or self.control.command_id != self.execution.command_id
+            or self.control.minimum_sample_count < 2
+        ):
+            return None
+        sample_count = int(self.control.minimum_sample_count)
+        sample_number = min(
+            int(self.control.minimum_sample_index) + 1,
+            sample_count,
+        )
+        return (
+            float(self.control.minimum_time_from_now),
+            sample_number,
+            sample_count,
+        )
+
+    def select_source(self, now_monotonic, now_ros):
+        execution_active = self.execution_is_active(now_ros)
+        intent_active = self.intent_is_fresh(now_monotonic)
+        if self.source == 'execution':
+            return 'execution' if execution_active else None
+        if self.source == 'intent':
+            return 'intent' if intent_active else None
+        if execution_active:
+            return 'execution'
+        if self.jog_is_fresh(now_monotonic):
+            return 'jog'
+        if intent_active:
+            return 'intent'
+        return None
+
+    def make_poses(self, source, now_ros):
+        if source in ('intent', 'jog'):
+            command = self.jog if source == 'jog' else self.intent
+            duration = message_time_seconds(command.duration)
+            poses = predict_samples(
+                self.state,
+                tuple(command.positions),
+                duration,
+                self.horizon,
+                self.count,
+            )
+            return poses, {
+                'title': (
+                    'CONTROL MANUAL SUPERVISADO'
+                    if source == 'jog'
+                    else 'INTENCIÓN NOMINAL'
+                ),
+                'detail': (
+                    'velocidad limitada y supervisada en tiempo real'
+                    if source == 'jog'
+                    else 'sin referencia aceptada; solo visualización'
+                ),
+                'command_id': command.command_id,
+                'elapsed': None,
+                'tracking_error': None,
+            }
+
+        start = tuple(self.execution.start_positions)
+        target = tuple(self.execution.target_positions)
+        start_time = message_time_seconds(self.execution.start_time)
+        elapsed = max(0.0, now_ros - start_time)
+        runtime_state, speed_scale, clearance = self.runtime_state()
+        runtime_minimum = self.runtime_minimum()
+        if runtime_state == 'STOP':
+            poses = [tuple(self.state) for _ in range(self.count)]
+        else:
+            poses = sample_reference(
+                start,
+                target,
+                float(self.execution.duration_sec),
+                elapsed,
+                self.horizon,
+                self.count,
+            )
+        clearance_text = (
+            'n/a' if clearance is None else f'{clearance:.3f}m'
+        )
+        minimum_text = ''
+        if runtime_minimum is not None:
+            minimum_time, sample_number, sample_count = runtime_minimum
+            minimum_text = (
+                f'\nt_min=+{minimum_time:.2f}s '
+                f'muestra={sample_number}/{sample_count}'
+            )
+        # Anchor the displayed volume at the latest measured configuration.
+        poses[0] = self.state
+        tracking_error = None
+        if (self.controller_feedback is not None and
+                time.monotonic() - self.controller_time <= 0.5):
+            tracking_error = max(
+                abs(a - b)
+                for a, b in zip(target, self.controller_feedback)
+            )
+        return poses, {
+            'title': 'REFERENCIA ACEPTADA',
+            'detail': (
+                f'control={runtime_state} escala={speed_scale:.2f}; '
+                f'd_futuro={clearance_text}{minimum_text}'
+            ),
+            'command_id': self.execution.command_id,
+            'elapsed': elapsed,
+            'tracking_error': tracking_error,
+            'runtime_state': runtime_state,
+        }
+
+    def empty_output(self):
+        clear = Marker()
+        clear.action = Marker.DELETEALL
+        return MarkerArray(markers=[clear])
+
+    def append_volume(self, output, poses, source, stamp):
+        spacing = 0.04
+        if source == 'execution':
+            namespace = 'execution_horizon'
+            state, _, _ = self.runtime_state()
+            colors = {
+                'ALLOW': (0.10, 0.75, 0.35, 0.14),
+                'WARNING': (1.00, 0.75, 0.05, 0.18),
+                'REDUCTION': (1.00, 0.40, 0.02, 0.20),
+                'STOP': (0.90, 0.05, 0.05, 0.30),
+            }
+            red, green, blue, alpha = colors.get(
+                state,
+                colors['ALLOW'],
+            )
+        else:
+            namespace = 'nominal_horizon'
+            red, green, blue, alpha = 0.1, 0.65, 1.0, 0.10
+
+        for index, radius in enumerate(CAPSULE_RADII):
+            marker = Marker()
+            marker.header.frame_id = self.frame_id
+            marker.header.stamp = stamp
+            marker.ns = namespace
+            marker.id = index
+            marker.type = Marker.SPHERE_LIST
+            marker.pose.orientation.w = 1.0
+            diameter = 2 * math.sqrt(
+                (radius + self.margin) ** 2 + (spacing / 2) ** 2
+            )
+            marker.scale.x = marker.scale.y = marker.scale.z = diameter
+            marker.color.r = red
+            marker.color.g = green
+            marker.color.b = blue
+            marker.color.a = alpha
+            marker.lifetime.sec = 1
+            seen = set()
+            for pose in poses:
+                start, end = capsule_segments(pose)[index]
+                length = math.sqrt(sum(
+                    (end[axis] - start[axis]) ** 2
+                    for axis in range(3)
+                ))
+                steps = max(1, math.ceil(length / spacing))
+                for step in range(steps + 1):
+                    point = [
+                        start[axis] + (end[axis] - start[axis])
+                        * step / steps
+                        for axis in range(3)
+                    ]
+                    key = tuple(round(value, 5) for value in point)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    marker.points.append(Point(
+                        x=point[0],
+                        y=point[1],
+                        z=point[2],
+                    ))
+            output.markers.append(marker)
+
+    def append_time_traces(self, output, poses, stamp):
+        """Draw geometric guides at true scale; these are not collision volumes."""
+        segments = [capsule_segments(pose) for pose in poses]
+        maximum_travel = 0.0
+        for link in range(len(CAPSULE_RADII)):
+            trace = Marker()
+            trace.header.frame_id = self.frame_id
+            trace.header.stamp = stamp
+            trace.ns = 'horizon_endpoint_traces'
+            trace.id = link
+            trace.type = Marker.LINE_STRIP
+            trace.pose.orientation.w = 1.0
+            trace.scale.x = 0.006
+            trace.color.r, trace.color.g, trace.color.b = 1.0, 0.8, 0.1
+            trace.color.a = 0.9
+            trace.lifetime.sec = 1
+            endpoints = [sample[link][1] for sample in segments]
+            trace.points = [Point(x=p[0], y=p[1], z=p[2]) for p in endpoints]
+            travel = sum(math.dist(a, b) for a, b in zip(endpoints, endpoints[1:]))
+            maximum_travel = max(maximum_travel, travel)
+            output.markers.append(trace)
+
+        # Skeletons distinguish intermediate/final poses without enlarging occupancy.
+        for slot, fraction in enumerate((0.25, 0.5, 1.0)):
+            index = round(fraction * (len(poses) - 1))
+            skeleton = Marker()
+            skeleton.header.frame_id = self.frame_id
+            skeleton.header.stamp = stamp
+            skeleton.ns = 'horizon_time_poses'
+            skeleton.id = slot
+            skeleton.type = Marker.LINE_LIST
+            skeleton.pose.orientation.w = 1.0
+            skeleton.scale.x = 0.008
+            skeleton.color.r = fraction
+            skeleton.color.g = 1.0 - 0.5 * fraction
+            skeleton.color.b = 1.0
+            skeleton.color.a = 0.9
+            skeleton.lifetime.sec = 1
+            for a, b in segments[index]:
+                skeleton.points.extend([Point(x=p[0], y=p[1], z=p[2]) for p in (a, b)])
+            output.markers.append(skeleton)
+            if maximum_travel > 0.015:
+                label = Marker()
+                label.header = skeleton.header
+                label.ns = 'horizon_time_labels'
+                label.id = slot
+                label.type = Marker.TEXT_VIEW_FACING
+                label.pose.orientation.w = 1.0
+                p = segments[index][-1][1]
+                label.pose.position = Point(x=p[0], y=p[1], z=p[2] + 0.05 + slot * 0.035)
+                label.scale.z = 0.025
+                label.color = skeleton.color
+                label.lifetime.sec = 1
+                label.text = f'+{index * self.horizon / (len(poses) - 1):.2f} s'
+                output.markers.append(label)
+        return maximum_travel
+
+    def append_label(self, output, source, description, metadata, hz, elapsed):
+        label = Marker()
+        stamp = self.get_clock().now().to_msg()
+        label.header.frame_id = self.frame_id
+        label.header.stamp = stamp
+        label.ns = 'horizon_label'
+        label.id = 6
+        label.type = Marker.TEXT_VIEW_FACING
+        label.pose.orientation.w = 1.0
+        label.pose.position.z = 1.5
+        label.scale.z = 0.045
+        label.color.r = label.color.g = label.color.b = 1.0
+        label.color.a = 1.0
+        label.lifetime.sec = 1
+        if source == 'execution':
+            error = metadata['tracking_error']
+            error_text = 'n/a' if error is None else f'{error:.3f}rad'
+            label.text = (
+                f'EJECUCIÓN H={self.horizon:.1f}s N={self.count} '
+                f'cmd={metadata["command_id"]}\n'
+                f't={elapsed:.2f}s cycle={hz:.1f}Hz '
+                f'error={error_text}\n{description}'
+            )
+        else:
+            label.text = (
+                f'PREVIEW H={self.horizon:.1f}s N={self.count} '
+                f'margin={self.margin:.3f}m\n'
+                f'cycle={hz:.1f}Hz compute={metadata:.1f}ms\n'
+                f'{description}'
+            )
+        output.markers.append(label)
+
+    def tick(self):
+        start = time.monotonic()
+        hz = 0.0 if self.previous_tick is None else 1 / max(
+            start - self.previous_tick,
+            1e-9,
+        )
+        self.previous_tick = start
+        output = self.empty_output()
+        now_ros = self.get_clock().now().nanoseconds / 1e9
+        if not self.state_is_fresh(start):
+            self.publisher.publish(output)
+            return
+
+        source = self.select_source(start, now_ros)
+        if source is None:
+            self.publisher.publish(output)
+            return
+
+        try:
+            poses, metadata = self.make_poses(source, now_ros)
+        except (TypeError, ValueError, ZeroDivisionError):
+            self.publisher.publish(output)
+            return
+
+        stamp = self.get_clock().now().to_msg()
+        self.append_volume(output, poses, source, stamp)
+        travel = self.append_time_traces(output, poses, stamp)
+        metadata['detail'] += (
+            f'\nRecorrido máximo de extremos: {travel * 100:.1f} cm'
+            '\nAmarillo: trazas; líneas de color: posturas futuras'
+        )
+        compute_ms = (time.monotonic() - start) * 1000
+        self.append_label(
+            output,
+            source,
+            metadata['detail'],
+            metadata if source == 'execution' else compute_ms,
+            hz,
+            metadata['elapsed'] if source == 'execution' else 0.0,
+        )
+        self.publisher.publish(output)
+
+
+def main(args=None):
+    """Run the short-horizon occupancy visualizer."""
+    rclpy.init(args=args)
+    node = HorizonPreview()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+
+==================== src/thesis_core/test/test_joint_model.py ====================
+"""Regression tests for the canonical JACO2 joint model."""
+
+import math
+
+import pytest
+
+from thesis_core.joint_model import (
+    JOINT_NAMES,
+    JOINT_VELOCITY_LIMITS,
+    normalize_target,
+    saturate_target_by_velocity,
+    validate_duration,
+    validate_joint_names,
+    validate_joint_positions,
+)
+
+
+ZERO = (0.0, math.pi, math.pi, 0.0, 0.0, 0.0)
+
+
+def target_with_velocity(index, degrees_per_second, duration=1.0):
+    target = list(ZERO)
+    target[index] += math.radians(degrees_per_second) * duration
+    return tuple(target)
+
+
+def test_canonical_joint_order():
+    assert JOINT_NAMES == tuple(
+        f'j2n6s300_joint_{index}' for index in range(1, 7)
+    )
+    assert validate_joint_names(JOINT_NAMES) == JOINT_NAMES
+
+
+def test_j1_positive_36_is_limited_to_positive_18_degrees_per_second():
+    result = saturate_target_by_velocity(
+        ZERO, target_with_velocity(0, 36.0), 1.0
+    )
+    assert result.was_limited
+    assert result.limiting_joint == JOINT_NAMES[0]
+    assert math.isclose(
+        result.positions[0] - ZERO[0], math.radians(18.0), abs_tol=1e-12
+    )
+
+
+def test_j1_negative_36_is_limited_to_negative_18_degrees_per_second():
+    result = saturate_target_by_velocity(
+        ZERO, target_with_velocity(0, -36.0), 1.0
+    )
+    assert result.was_limited
+    assert math.isclose(
+        result.positions[0] - ZERO[0], -math.radians(18.0), abs_tol=1e-12
+    )
+
+
+def test_j4_positive_48_is_limited_to_positive_24_degrees_per_second():
+    result = saturate_target_by_velocity(
+        ZERO, target_with_velocity(3, 48.0), 1.0
+    )
+    assert result.was_limited
+    assert result.limiting_joint == JOINT_NAMES[3]
+    assert math.isclose(
+        result.positions[3] - ZERO[3], math.radians(24.0), abs_tol=1e-12
+    )
+
+
+def test_continuous_joint_uses_positive_twenty_degree_shortest_turn():
+    start = (math.radians(170.0), math.pi, math.pi, 0.0, 0.0, 0.0)
+    target = (math.radians(-170.0), math.pi, math.pi, 0.0, 0.0, 0.0)
+    normalized = normalize_target(start, target)
+    assert math.isclose(
+        normalized[0] - start[0], math.radians(20.0), abs_tol=1e-12
+    )
+
+
+def test_non_finite_position_is_rejected():
+    invalid = list(ZERO)
+    invalid[2] = math.nan
+    with pytest.raises(ValueError, match='non-finite'):
+        validate_joint_positions(invalid)
+
+
+def test_wrong_joint_order_is_rejected():
+    invalid = list(JOINT_NAMES)
+    invalid[0], invalid[1] = invalid[1], invalid[0]
+    with pytest.raises(ValueError, match='canonical order'):
+        validate_joint_names(invalid)
+
+
+def test_wrong_position_count_is_rejected():
+    with pytest.raises(ValueError, match='six'):
+        validate_joint_positions(ZERO[:-1])
+
+
+@pytest.mark.parametrize('duration', [0.0, -1.0, math.nan])
+def test_non_positive_or_non_finite_duration_is_rejected(duration):
+    with pytest.raises(ValueError, match='positive and finite'):
+        validate_duration(duration)
+
+
+def test_target_inside_limit_is_unchanged():
+    target = target_with_velocity(0, 10.0)
+    result = saturate_target_by_velocity(ZERO, target, 1.0)
+    assert not result.was_limited
+    assert result.positions == pytest.approx(target)
+
+
+def test_operational_limits_are_exactly_18_and_24_degrees_per_second():
+    expected = [18.0, 18.0, 18.0, 24.0, 24.0, 24.0]
+    actual = [
+        math.degrees(JOINT_VELOCITY_LIMITS[name]) for name in JOINT_NAMES
+    ]
+    assert actual == pytest.approx(expected)
+
+==================== src/thesis_core/test/test_execution_reference.py ====================
+import math
+import unittest
+
+from thesis_core.execution_reference import normalize_target
+from thesis_core.execution_reference import sample_reference
+
+
+class TestExecutionReference(unittest.TestCase):
+
+    def test_sample_reference_uses_absolute_elapsed_time(self):
+        start = (0.0, 1.0, 2.0, 0.0, 0.0, 0.0)
+        target = (math.pi, 2.0, 3.0, 0.0, 0.0, 0.0)
+
+        samples = sample_reference(start, target, 2.0, 0.5, 1.0, 3)
+
+        self.assertAlmostEqual(samples[0][0], math.pi / 4.0)
+        self.assertAlmostEqual(samples[1][0], math.pi / 2.0)
+        self.assertAlmostEqual(samples[2][0], 3.0 * math.pi / 4.0)
+
+        late = sample_reference(start, target, 2.0, 1.5, 1.0, 3)
+        self.assertAlmostEqual(late[-1][0], math.pi)
+        self.assertEqual(late[-1][1:], (2.0, 3.0, 0.0, 0.0, 0.0))
+
+    def test_continuous_joint_uses_shortest_turn(self):
+        start = (math.radians(170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
+        target = (math.radians(-170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
+
+        normalized = normalize_target(start, target)
+
+        self.assertAlmostEqual(normalized[0], math.radians(190.0))
+
+    def test_sample_reference_rejects_invalid_input(self):
+        vector = (0.0, 1.0, 2.0, 0.0, 0.0, 0.0)
+
+        with self.assertRaises(ValueError):
+            sample_reference(vector, vector, 0.0, 0.0, 1.0, 3)
+
+        with self.assertRaises(ValueError):
+            sample_reference(vector, vector, 1.0, 0.0, 1.0, 1)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+==================== src/thesis_core/setup.py ====================
+from setuptools import find_packages, setup
+
+package_name = 'thesis_core'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='luisito',
+    maintainer_email='luisito@todo.todo',
+    description='TODO: Package description',
+    license='TODO: License declaration',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
+    entry_points={
+        'console_scripts': [
+            'horizon_preview = thesis_core.horizon_preview:main',
+            'safety_supervisor = thesis_core.safety_supervisor_node:main',
+            'proximity_monitor = '
+            'thesis_core.proximity_monitor_node:main',
+        ],
+    },
+)
+
+==================== src/thesis_core/package.xml ====================
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>thesis_core</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="luisito@todo.todo">luisito</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+
+  <exec_depend>thesis_interfaces</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+
+----- INTERFACES DISPONIBLES -----
+
+==================== src/thesis_interfaces/msg/JointCommand.msg ====================
+# Timestamp associated with the command.
+builtin_interfaces/Time stamp
+
+# Unique command identifier for traceability and logging.
+string command_id
+
+# Ordered list of manipulator joint names.
+string[] joint_names
+
+# Desired joint positions in radians.
+float64[] positions
+
+# Requested motion duration.
+builtin_interfaces/Duration duration
+
+==================== src/thesis_interfaces/msg/TrajectoryPrediction.msg ====================
+# Prediction produced synchronously for one candidate command.
+builtin_interfaces/Time stamp
+string command_id
+string reference_frame
+
+# ALLOW, WARNING, REDUCTION or STOP based on projected clearance.
+string state
+float64 minimum_clearance
+string limiting_segment
+
+# Location of the worst sampled configuration along the trajectory.
+uint32 sample_index
+uint32 sample_count
+float64 trajectory_fraction
+
+# Limiting capsule at the worst sampled configuration.
+geometry_msgs/Point capsule_start
+geometry_msgs/Point capsule_end
+float64 capsule_radius
+
+==================== src/thesis_interfaces/msg/ExecutionTrajectory.msg ====================
+# Reference accepted by the simulation adapter for one arm movement.
+# This is an execution reference, not a safety decision.
+builtin_interfaces/Time stamp
+builtin_interfaces/Time start_time
+string command_id
+
+# PENDING, ACCEPTED, SUCCEEDED, FAILED, CANCELED, REJECTED or DRY_RUN.
+string status
+string detail
+
+string[] joint_names
+float64[] start_positions
+float64[] target_positions
+float64 duration_sec
+
+==================== src/thesis_interfaces/msg/ExecutionControl.msg ====================
+# Runtime safety decision for an already accepted trajectory.
+builtin_interfaces/Time stamp
+string command_id
+
+# ALLOW, WARNING, REDUCTION or STOP.
+string state
+
+# Requested fraction of the nominal speed. Zero means stop.
+float64 speed_scale
+
+# Geometric evidence used by the supervisor and visualizer.
+float64 minimum_clearance
+string limiting_segment
+float64 time_to_collision
+
+# Location of the minimum clearance inside the sampled short horizon.
+# minimum_time_from_now is relative to the latest measured configuration.
+float64 minimum_time_from_now
+uint32 minimum_sample_index
+uint32 minimum_sample_count
+float64 minimum_horizon_fraction
+
+# Machine-readable reason and human-readable explanation.
+string reason_code
+string reason
+
+==================== src/thesis_interfaces/CMakeLists.txt ====================
+cmake_minimum_required(VERSION 3.8)
+project(thesis_interfaces)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/JointCommand.msg"
+  "msg/ProximityStatus.msg"
+  "msg/TrajectoryPrediction.msg"
+  "msg/CommandDecision.msg"
+  "msg/ExecutionTrajectory.msg"
+  "msg/ExecutionControl.msg"
+  DEPENDENCIES
+    builtin_interfaces
+    geometry_msgs
+)
+
+ament_export_dependencies(
+  rosidl_default_runtime
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+
+  set(ament_cmake_copyright_FOUND TRUE)
+  set(ament_cmake_cpplint_FOUND TRUE)
+
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_package()
+
+==================== src/thesis_interfaces/package.xml ====================
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd"
+  schematypens="http://www.w3.org/2001/XMLSchema"?>
+
+<package format="3">
+
+  <name>thesis_interfaces</name>
+
+  <version>0.0.0</version>
+
+  <description>
+    Custom ROS 2 interfaces for the preventive safety thesis platform.
+  </description>
+
+  <maintainer email="luisito@todo.todo">
+    luisito
+  </maintainer>
+
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>
+    ament_cmake
+  </buildtool_depend>
+
+  <build_depend>
+    builtin_interfaces
+  </build_depend>
+
+  <depend>
+    geometry_msgs
+  </depend>
+
+  <build_depend>
+    rosidl_default_generators
+  </build_depend>
+
+  <exec_depend>
+    builtin_interfaces
+  </exec_depend>
+
+  <exec_depend>
+    rosidl_default_runtime
+  </exec_depend>
+
+
+  <test_depend>
+    ament_lint_auto
+  </test_depend>
+
+  <test_depend>
+    ament_lint_common
+  </test_depend>
+
+  <member_of_group>
+    rosidl_interface_packages
+  </member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>
+
+----- USOS ACTUALES DE LA PREDICCIÓN -----
+No se ha encontrado la orden «rg», pero se puede instalar con:
+sudo snap install ripgrep  # version 12.1.0, or
+sudo apt  install ripgrep  # version 13.0.0-2ubuntu0.1
+Consulte «snap info ripgrep» para ver más versiones.
+
+----- FRAGMENTOS DEL SUPERVISOR -----
+No se ha encontrado la orden «rg», pero se puede instalar con:
+sudo snap install ripgrep  # version 12.1.0, or
+sudo apt  install ripgrep  # version 13.0.0-2ubuntu0.1
+Consulte «snap info ripgrep» para ver más versiones.
+
+----- PRUEBAS EXISTENTES RELACIONADAS -----
+src/thesis_core/test/test_copyright.py
+src/thesis_core/test/test_execution_reference.py
+src/thesis_core/test/test_flake8.py
+src/thesis_core/test/test_jaco_kinematics.py
+src/thesis_core/test/test_joint_model.py
+src/thesis_core/test/test_pep257.py
+src/thesis_hardware/test/test_copyright.py
+src/thesis_hardware/test/test_flake8.py
+src/thesis_hardware/test/test_pep257.py
+src/thesis_simulation/test/test_copyright.py
+src/thesis_simulation/test/test_flake8.py
+src/thesis_simulation/test/test_pep257.py
+src/thesis_simulation/thesis_simulation/test_command_node.py
+src/thesis_ui/test/test_copyright.py
+src/thesis_ui/test/test_flake8.py
+src/thesis_ui/test/test_gui_state.py
+src/thesis_ui/test/test_pep257.py
+
+
+----- DEFINICIONES ROS INSTALADAS -----
+
+INTERFACE=thesis_interfaces/msg/JointCommand
+# Timestamp associated with the command.
+builtin_interfaces/Time stamp
+	int32 sec
+	uint32 nanosec
+
+# Unique command identifier for traceability and logging.
+string command_id
+
+# Ordered list of manipulator joint names.
+string[] joint_names
+
+# Desired joint positions in radians.
+float64[] positions
+
+# Requested motion duration.
+builtin_interfaces/Duration duration
+	int32 sec
+	uint32 nanosec
+
+INTERFACE=thesis_interfaces/msg/TrajectoryPrediction
+# Prediction produced synchronously for one candidate command.
+builtin_interfaces/Time stamp
+	int32 sec
+	uint32 nanosec
+string command_id
+string reference_frame
+
+# ALLOW, WARNING, REDUCTION or STOP based on projected clearance.
+string state
+float64 minimum_clearance
+string limiting_segment
+
+# Location of the worst sampled configuration along the trajectory.
+uint32 sample_index
+uint32 sample_count
+float64 trajectory_fraction
+
+# Limiting capsule at the worst sampled configuration.
+geometry_msgs/Point capsule_start
+	float64 x
+	float64 y
+	float64 z
+geometry_msgs/Point capsule_end
+	float64 x
+	float64 y
+	float64 z
+float64 capsule_radius
+
+INTERFACE=thesis_interfaces/msg/ExecutionTrajectory
+# Reference accepted by the simulation adapter for one arm movement.
+# This is an execution reference, not a safety decision.
+builtin_interfaces/Time stamp
+	int32 sec
+	uint32 nanosec
+builtin_interfaces/Time start_time
+	int32 sec
+	uint32 nanosec
+string command_id
+
+# PENDING, ACCEPTED, SUCCEEDED, FAILED, CANCELED, REJECTED or DRY_RUN.
+string status
+string detail
+
+string[] joint_names
+float64[] start_positions
+float64[] target_positions
+float64 duration_sec
+
+INTERFACE=thesis_interfaces/msg/ExecutionControl
+# Runtime safety decision for an already accepted trajectory.
+builtin_interfaces/Time stamp
+	int32 sec
+	uint32 nanosec
+string command_id
+
+# ALLOW, WARNING, REDUCTION or STOP.
+string state
+
+# Requested fraction of the nominal speed. Zero means stop.
+float64 speed_scale
+
+# Geometric evidence used by the supervisor and visualizer.
+float64 minimum_clearance
+string limiting_segment
+float64 time_to_collision
+
+# Location of the minimum clearance inside the sampled short horizon.
+# minimum_time_from_now is relative to the latest measured configuration.
+float64 minimum_time_from_now
+uint32 minimum_sample_index
+uint32 minimum_sample_count
+float64 minimum_horizon_fraction
+
+# Machine-readable reason and human-readable explanation.
+string reason_code
+string reason
+
+----- ARCHIVOS LAUNCH Y PARÁMETROS -----
+src/thesis_description/launch/view_jaco_hardware.launch.py
+src/thesis_description/launch/view_jaco.launch.py
+src/thesis_simulation/config/jaco_capsules.yaml
+src/thesis_simulation/config/jaco_controllers.yaml
+src/thesis_simulation/config/jaco_gazebo_controllers.yaml
+src/thesis_simulation/launch/jaco_gazebo.launch.py
+src/thesis_simulation/launch/jaco_mock_control.launch.py
+src/thesis_simulation/launch/safety_pipeline.launch.py
+
+----- HUELLAS DE ARCHIVOS RELEVANTES -----
+1d6b84a325c5d4171ce896c0ef97b1a85c61a883bd78a2156c03127dc4a6cca3  src/thesis_core/package.xml
+a87db9cef971377c6bb3fd4f1f8959d10a82fdf3330b4b342d3632baba3f5ade  src/thesis_core/setup.py
+ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757  src/thesis_core/test/test_copyright.py
+9a244465651282d9d9ff1e8e2bd41a4c0ad3c3419b98aff67deba6521981ee1f  src/thesis_core/test/test_execution_reference.py
+37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2  src/thesis_core/test/test_flake8.py
+d68807a7facab19b7ea0991c619c28c090b8ae72627609fea5570b44c5f51cc5  src/thesis_core/test/test_jaco_kinematics.py
+c71d33b1589708deedc375e91344f421c631a23f079071bd14f6ba97a3170041  src/thesis_core/test/test_joint_model.py
+e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda  src/thesis_core/test/test_pep257.py
+d86e03c02bbea099b7002ecc2a822d43d3a2932d38c4372df0111f9fcf996265  src/thesis_core/thesis_core/execution_reference.py
+21121e869ddd82898e990eb6a6f5246b91148dc10ba61e2239988e6092362660  src/thesis_core/thesis_core/horizon_preview.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  src/thesis_core/thesis_core/__init__.py
+a5767a946f00bbc52fb783937470826668bd3a94c21a5055f6ee707e112e1186  src/thesis_core/thesis_core/jaco_kinematics.py
+fb352be183dfa110631a320c0f18f9e6da8869f6a22efdf4b5d1d0bcb8512e8c  src/thesis_core/thesis_core/joint_model.py
+e45abd59f99c679cc32d4616e0a59abdd48655f8dec4ae146e059274305bc087  src/thesis_core/thesis_core/proximity_monitor_node.py
+51b5dc54c2ac99855ea711f20d362b7a9e06099f7dca072029087cfe1026ba20  src/thesis_core/thesis_core/safety_supervisor_node.py
+f041cf8670305af70337791fd3ebcfdb3f90f3b9b50aaf483c5d0db462beecfb  src/thesis_interfaces/CMakeLists.txt
+61cb866f2c74ab352aa6b1da2dda5bb7f06db7e85ed28aa94dac198918187156  src/thesis_interfaces/msg/CommandDecision.msg
+2cacbe202038e498643577d559f7530a061d8b46b1643efc7bc0554c75cb686c  src/thesis_interfaces/msg/ExecutionControl.msg
+4950fbaaa234a1338968a9e82c6ecbe37921883968dba9d886ba4e0b8feacaab  src/thesis_interfaces/msg/ExecutionTrajectory.msg
+e96d3765caf08ac183284b1cd30018606136ab159b1154743de33f7762c40e3f  src/thesis_interfaces/msg/JointCommand.msg
+19e0900f59b5af894c9447cde60384ada9085944ca8b513a1c7a1375376d0e52  src/thesis_interfaces/msg/ProximityStatus.msg
+9663b278c5b0493b850903553ed5e168996ed6f3d3df8f5f4c82a1c08f1cef75  src/thesis_interfaces/msg/TrajectoryPrediction.msg
+91e18cc9a7c881d201656dd07c7b2d6a069cf61d90828288e05c8827faf135b0  src/thesis_interfaces/package.xml
+6ff72e12484ad18ad8ab8481818bb7e4ac69a96971e9425070201fbc7ffb7046  src/thesis_simulation/launch/jaco_gazebo.launch.py
+4aa3064c248ce665226de3eb2c8dc54b09c362d2d5dc4d56c65217564da4034d  src/thesis_simulation/launch/jaco_mock_control.launch.py
+f6d85474e593ffb5fea4db0eb6efd8b16e7983f2c5e35e3b75894a637c69a0c3  src/thesis_simulation/launch/safety_pipeline.launch.py
+9f5392f63487ebab535dd3d50d9b83d2851ba19b6bd56074d6a6d98fa5059389  src/thesis_simulation/package.xml
+c37c161d933fbcd1813f394c0c57ac0e648bc0a16a4268e3d7be5be25d4e629d  src/thesis_simulation/setup.py
+ea71bbbc6247b5c14d176ed09f39ee274d563cc9b2ec355828ea451ceff31757  src/thesis_simulation/test/test_copyright.py
+37a813a0507f0ce51a2d0b57312d2cc078a0307a3ca85580ea801b0d2f9755d2  src/thesis_simulation/test/test_flake8.py
+e8b88d49ee296987b1b40069f81019b5fa09b1aa1bfee9a1faae45bb5cf53eda  src/thesis_simulation/test/test_pep257.py
+6eacfd4af4b303107a69a062d8f34fe275708339b5c34abc04d377361763a33c  src/thesis_simulation/thesis_simulation/capsule_visualizer.py
+d2d4ed4e780c91a027648e90464daa9c05df916a58e9680f12c7ae73f7bcd27e  src/thesis_simulation/thesis_simulation/dry_run_adapter.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  src/thesis_simulation/thesis_simulation/__init__.py
+b41ff7b669abbf146b6dad42cabc992ba9de878fc80d1e52ab36c4d415e194fe  src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+93d78ecd093727c8e05315914264330cc7e11a1cb0bba3c12afb2edc23e6a36b  src/thesis_simulation/thesis_simulation/test_command_node.py
+
+----- ESTADO ROS OPCIONAL -----
+/arm_controller
+/capsule_visualizer
+/controller_manager
+/gazebo_clock_bridge
+/gazebo_pose_bridge
+/gz_ros2_control
+/horizon_preview
+/joint_control_gui_node
+/joint_state_broadcaster
+/proximity_monitor
+/robot_state_publisher
+/rviz
+/safety_supervisor_node
+/simulation_command_adapter
+/transform_listener_impl_64a72e991fc0
+
+HORIZON_PREVIEW_ACTIVO=1
+/horizon_preview
+  Subscribers:
+    /arm_controller/controller_state: control_msgs/msg/JointTrajectoryControllerState
+    /clock: rosgraph_msgs/msg/Clock
+    /joint_states: sensor_msgs/msg/JointState
+    /thesis/execution_control: thesis_interfaces/msg/ExecutionControl
+    /thesis/execution_trajectory: thesis_interfaces/msg/ExecutionTrajectory
+    /thesis/preview_intent: thesis_interfaces/msg/JointCommand
+    /thesis/supervised_jog_command: thesis_interfaces/msg/JointCommand
+  Publishers:
+    /parameter_events: rcl_interfaces/msg/ParameterEvent
+    /rosout: rcl_interfaces/msg/Log
+    /thesis/horizon_volume: visualization_msgs/msg/MarkerArray
+  Service Servers:
+    /horizon_preview/describe_parameters: rcl_interfaces/srv/DescribeParameters
+    /horizon_preview/get_parameter_types: rcl_interfaces/srv/GetParameterTypes
+    /horizon_preview/get_parameters: rcl_interfaces/srv/GetParameters
+    /horizon_preview/list_parameters: rcl_interfaces/srv/ListParameters
+    /horizon_preview/set_parameters: rcl_interfaces/srv/SetParameters
+    /horizon_preview/set_parameters_atomically: rcl_interfaces/srv/SetParametersAtomically
+  Service Clients:
+
+  Action Servers:
+
+  Action Clients:
+
+/horizon_preview:
+  ros__parameters:
+    horizon_sec: 1.0
+    margin_m: 0.02
+    model_frame: j2n6s300_link_base
+    rate_hz: 10.0
+    samples: 21
+    source: auto
+    use_sim_time: true
+
+
+TOPIC=/joint_states
+sensor_msgs/msg/JointState
+Type: sensor_msgs/msg/JointState
+
+Publisher count: 1
+
+Node name: joint_state_broadcaster
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.f6.79.46.4f.00.00.00.00.00.00.53.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: TRANSIENT_LOCAL
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 5
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.23.7b.48.b0.00.00.00.00.00.00.12.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.25.7b.42.f6.00.00.00.00.00.00.1b.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.3e.7b.6a.b1.00.00.00.00.00.00.13.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.4c.7b.36.26.00.00.00.00.00.00.18.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: robot_state_publisher
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.ac.79.d8.40.00.00.00.00.00.00.16.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+TOPIC=/thesis/preview_intent
+thesis_interfaces/msg/JointCommand
+Type: thesis_interfaces/msg/JointCommand
+
+Publisher count: 1
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.4c.7b.36.26.00.00.00.00.00.00.12.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.3e.7b.6a.b1.00.00.00.00.00.00.14.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+TOPIC=/thesis/supervised_command
+thesis_interfaces/msg/JointCommand
+Type: thesis_interfaces/msg/JointCommand
+
+Publisher count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.23.7b.48.b0.00.00.00.00.00.00.17.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.25.7b.42.f6.00.00.00.00.00.00.1c.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.4c.7b.36.26.00.00.00.00.00.00.19.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+TOPIC=/thesis/supervised_jog_command
+thesis_interfaces/msg/JointCommand
+Type: thesis_interfaces/msg/JointCommand
+
+Publisher count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.23.7b.48.b0.00.00.00.00.00.00.18.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.25.7b.42.f6.00.00.00.00.00.00.1f.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.3e.7b.6a.b1.00.00.00.00.00.00.15.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+TOPIC=/thesis/execution_trajectory
+thesis_interfaces/msg/ExecutionTrajectory
+Type: thesis_interfaces/msg/ExecutionTrajectory
+
+Publisher count: 1
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionTrajectory
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.25.7b.42.f6.00.00.00.00.00.00.1a.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 3
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionTrajectory
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.23.7b.48.b0.00.00.00.00.00.00.16.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionTrajectory
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.3e.7b.6a.b1.00.00.00.00.00.00.16.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionTrajectory
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.4c.7b.36.26.00.00.00.00.00.00.1b.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+TOPIC=/thesis/trajectory_prediction
+thesis_interfaces/msg/TrajectoryPrediction
+Type: thesis_interfaces/msg/TrajectoryPrediction
+
+Publisher count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/TrajectoryPrediction
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.23.7b.48.b0.00.00.00.00.00.00.19.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/TrajectoryPrediction
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.4c.7b.36.26.00.00.00.00.00.00.1a.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: capsule_visualizer
+Node namespace: /
+Topic type: thesis_interfaces/msg/TrajectoryPrediction
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.b6.79.62.dc.00.00.00.00.00.00.14.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+TOPIC=/thesis/horizon_volume
+visualization_msgs/msg/MarkerArray
+Type: visualization_msgs/msg/MarkerArray
+
+Publisher count: 1
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: visualization_msgs/msg/MarkerArray
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.3e.7b.6a.b1.00.00.00.00.00.00.12.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: rviz
+Node namespace: /
+Topic type: visualization_msgs/msg/MarkerArray
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.b4.79.0c.f8.00.00.00.00.00.00.27.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+DIAGNOSTICO_PAQUETE2_FINALIZADO=1
+CODIGO_SALIDA_DIAGNOSTICO=0
+REPORTE=/home/luis/Escritorio/TESIS_2_IMPLEMENTATION/PAQUETE2_DIAGNOSTICO_A.txt

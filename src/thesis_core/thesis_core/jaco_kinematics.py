@@ -1,5 +1,11 @@
 import math
 
+from thesis_core.clearance_geometry import (
+    closest_point_on_segment as geometry_closest_point,
+    minimum_configuration_clearance,
+    point_distance,
+)
+
 
 SEGMENT_NAMES = (
     'base_to_shoulder',
@@ -108,26 +114,13 @@ def capsule_segments(joint_positions):
 
 
 def closest_point_on_segment(point, start, end):
-    ab = tuple(end[index] - start[index] for index in range(3))
-    ap = tuple(point[index] - start[index] for index in range(3))
-    denominator = sum(value * value for value in ab)
-    if denominator <= 1.0e-12:
-        return start
-
-    factor = sum(ap[index] * ab[index] for index in range(3))
-    factor /= denominator
-    factor = max(0.0, min(1.0, factor))
-    return tuple(
-        start[index] + factor * ab[index]
-        for index in range(3)
-    )
+    """Compatibility wrapper for the canonical geometric primitive."""
+    return geometry_closest_point(point, start, end)
 
 
 def distance(first, second):
-    return math.sqrt(sum(
-        (first[index] - second[index]) ** 2
-        for index in range(3)
-    ))
+    """Compatibility wrapper for finite Euclidean distance."""
+    return point_distance(first, second)
 
 
 def minimum_sphere_clearance(
@@ -135,30 +128,12 @@ def minimum_sphere_clearance(
     obstacle_center,
     obstacle_radius,
 ):
-    best = None
-    segments = capsule_segments(joint_positions)
-
-    for index, ((start, end), capsule_radius) in enumerate(zip(
-            segments,
-            CAPSULE_RADII)):
-        closest = closest_point_on_segment(
-            obstacle_center,
-            start,
-            end,
-        )
-        clearance = (
-            distance(obstacle_center, closest)
-            - obstacle_radius
-            - capsule_radius
-        )
-        result = (
-            clearance,
-            SEGMENT_NAMES[index],
-            index,
-            start,
-            end,
-        )
-        if best is None or clearance < best[0]:
-            best = result
-
-    return best
+    """Return the closest of all six canonical robot capsules."""
+    result = minimum_configuration_clearance(
+        capsule_segments(joint_positions),
+        SEGMENT_NAMES,
+        CAPSULE_RADII,
+        obstacle_center,
+        obstacle_radius,
+    )
+    return result.legacy_tuple()

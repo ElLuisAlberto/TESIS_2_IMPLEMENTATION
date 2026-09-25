@@ -10,6 +10,7 @@ from geometry_msgs.msg import Point, Quaternion
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
+from thesis_core.jaco_kinematics import CAPSULE_RADII
 from thesis_interfaces.msg import ProximityStatus, TrajectoryPrediction
 
 
@@ -140,6 +141,16 @@ class CapsuleVisualizer(Node):
             )
         if any(radius <= 0.0 for radius in self.radii):
             raise ValueError('Every capsule radius must be greater than zero')
+        if (
+            len(self.radii) != len(CAPSULE_RADII)
+            or any(
+                not math.isclose(actual, expected, abs_tol=1.0e-12)
+                for actual, expected in zip(self.radii, CAPSULE_RADII)
+            )
+        ):
+            raise ValueError(
+                'segment_radii must match the canonical proximity model'
+            )
         if len(self.color) != 4:
             raise ValueError('color_rgba must contain four values')
 
@@ -168,7 +179,7 @@ class CapsuleVisualizer(Node):
         marker_type,
         segment_name,
         color=None,
-        namespace='robot_capsules',
+        namespace='current_capsules',
     ):
         marker = Marker()
         marker.header.frame_id = self.reference_frame
@@ -402,13 +413,58 @@ class CapsuleVisualizer(Node):
             z=(start.z + end.z) * 0.5 + 0.12,
         )
         label.scale.z = 0.055
+        protective_ttc = (
+            'n/a'
+            if prediction.time_to_protective_volume < 0.0
+            else f'{prediction.time_to_protective_volume:.2f}s'
+        )
+        collision_ttc = (
+            'n/a'
+            if prediction.time_to_collision < 0.0
+            else f'{prediction.time_to_collision:.2f}s'
+        )
         label.text = (
             f'CANDIDATO {prediction.state} | '
             f'd={prediction.minimum_clearance:.3f} m | '
-            f'{prediction.trajectory_fraction * 100.0:.0f}% trayectoria'
+            f't_min={prediction.minimum_time_from_now:.2f}s | '
+            f'm={prediction.protective_margin:.3f}m | '
+            f'TTCp={protective_ttc} | TTCc={collision_ttc}'
         )
 
-        return [cylinder, *spheres, label]
+        witness_line = self._base_marker(
+            2004,
+            Marker.LINE_LIST,
+            'predicted_minimum_witness',
+            color=[color[0], color[1], color[2], 1.0],
+            namespace='prediction',
+        )
+        witness_line.scale.x = 0.012
+        witness_line.points = [
+            prediction.closest_robot_point,
+            prediction.obstacle_center_at_minimum,
+        ]
+
+        witnesses = []
+        for marker_id, point, witness_color in (
+            (2005, prediction.closest_robot_point, [0.1, 1.0, 1.0, 1.0]),
+            (
+                2006,
+                prediction.obstacle_center_at_minimum,
+                [0.8, 0.2, 1.0, 1.0],
+            ),
+        ):
+            marker = self._base_marker(
+                marker_id,
+                Marker.SPHERE,
+                'predicted_minimum_witness',
+                color=witness_color,
+                namespace='prediction',
+            )
+            marker.pose.position = point
+            marker.scale.x = marker.scale.y = marker.scale.z = 0.035
+            witnesses.append(marker)
+
+        return [cylinder, *spheres, label, witness_line, *witnesses]
 
     def publish_capsules(self):
         markers = []

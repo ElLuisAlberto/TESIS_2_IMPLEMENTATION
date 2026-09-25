@@ -5,6 +5,7 @@ import time
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
+from control_msgs.msg import JointTrajectoryControllerState
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -13,13 +14,20 @@ from thesis_interfaces.msg import (
     ExecutionControl,
     ExecutionTrajectory,
     JointCommand,
+    PipelineTiming,
 )
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from thesis_core.execution_reference import normalize_target
-
-
-JOINTS = tuple(f'j2n6s300_joint_{index}' for index in range(1, 7))
+from thesis_core.joint_model import (
+    JOINT_NAMES,
+    normalize_target,
+    saturate_target_by_velocity,
+)
+from thesis_simulation.control_arbitration import (
+    effective_speed_scale,
+    is_more_restrictive,
+)
+from thesis_simulation.jog_reference import advance_jog_reference
 MIN_REPLAN_DURATION_SEC = 0.15
 MAX_REPLAN_DURATION_SEC = 30.0
 
@@ -39,6 +47,11 @@ class SimulationCommandAdapter(Node):
         self.declare_parameter('control_replan_cooldown_sec', 0.75)
         self.declare_parameter('jog_control_period_sec', 0.10)
         self.declare_parameter('jog_command_timeout_sec', 0.25)
+        self.declare_parameter('jog_reference_max_lead_sec', 0.25)
+        self.declare_parameter(
+            'controller_reference_max_age_sec', 0.10
+        )
+        self.declare_parameter('jog_stop_duration_sec', 0.02)
 
         action_name = self.get_parameter('action_name').value
         self.action_client = ActionClient(
@@ -57,6 +70,12 @@ class SimulationCommandAdapter(Node):
             '/joint_states',
             self.state_callback,
             10,
+        )
+        self.controller_state_subscription = self.create_subscription(
+            JointTrajectoryControllerState,
+            '/arm_controller/controller_state',
+            self.controller_state_callback,
+            20,
         )
         self.command_subscription = self.create_subscription(
             JointCommand,
@@ -80,6 +99,10 @@ class SimulationCommandAdapter(Node):
             '/arm_controller/joint_trajectory',
             jog_qos,
         )
+        self.timing_publisher = self.create_publisher(
+            PipelineTiming, '/thesis/pipeline_timing', 100
+        )
+        self.timing_sequence = 0
         self.jog_subscription = self.create_subscription(
             JointCommand,
             '/thesis/supervised_jog_command',
@@ -89,6 +112,8 @@ class SimulationCommandAdapter(Node):
 
         self.current_positions = {}
         self.last_state_monotonic = None
+        self.controller_reference_positions = {}
+        self.last_controller_reference_monotonic = None
         self.goal_active = False
         self.goal_handle = None
         self.active_metadata = None
@@ -100,6 +125,10 @@ class SimulationCommandAdapter(Node):
         self.jog_active = False
         self.last_jog_receive_monotonic = None
         self.jog_hold_sent = False
+        self.jog_reference_target = None
+        self.jog_reference_velocity = None
+        self.last_jog_intent_stamp = None
+        self.last_jog_command_id = None
         self.jog_watchdog = self.create_timer(
             0.05,
             self.jog_watchdog_callback,
@@ -113,15 +142,67 @@ class SimulationCommandAdapter(Node):
             f'Adaptador Gazebo preparado; salida simulada {output_state}'
         )
 
+    def publish_timing(self, command_id, intent_stamp, stage, detail=''):
+        """Publish one adapter trace event on the shared ROS clock."""
+        event = PipelineTiming()
+        event.stamp = self.get_clock().now().to_msg()
+        event.intent_stamp = intent_stamp
+        event.command_id = command_id
+        event.source = 'adapter'
+        event.stage = stage
+        self.timing_sequence += 1
+        event.sequence = self.timing_sequence
+        event.monotonic_ns = time.monotonic_ns()
+        event.internal_duration_sec = -1.0
+        event.detail = str(detail)
+        self.timing_publisher.publish(event)
+
     def state_callback(self, msg):
         positions = {}
         for name, position in zip(msg.name, msg.position):
-            if name in JOINTS and math.isfinite(position):
+            if name in JOINT_NAMES and math.isfinite(position):
                 positions[name] = float(position)
 
-        if all(name in positions for name in JOINTS):
+        if all(name in positions for name in JOINT_NAMES):
             self.current_positions = positions
             self.last_state_monotonic = time.monotonic()
+
+    def controller_state_callback(self, msg):
+        """Store the controller's current desired position as JOG anchor."""
+        if tuple(msg.joint_names) != JOINT_NAMES:
+            return
+        positions = tuple(float(value) for value in msg.desired.positions)
+        if (
+            len(positions) != len(JOINT_NAMES)
+            or not all(math.isfinite(value) for value in positions)
+        ):
+            return
+        self.controller_reference_positions = dict(zip(JOINT_NAMES, positions))
+        self.last_controller_reference_monotonic = time.monotonic()
+
+    def controller_reference_state(self):
+        """Return a fresh controller reference, or None for safe fallback."""
+        if self.last_controller_reference_monotonic is None:
+            return None
+        maximum_age = float(
+            self.get_parameter('controller_reference_max_age_sec').value
+        )
+        if (
+            not math.isfinite(maximum_age)
+            or maximum_age <= 0.0
+            or time.monotonic() - self.last_controller_reference_monotonic
+            > maximum_age
+        ):
+            return None
+        if not all(
+            name in self.controller_reference_positions
+            for name in JOINT_NAMES
+        ):
+            return None
+        return tuple(
+            self.controller_reference_positions[name]
+            for name in JOINT_NAMES
+        )
 
     def duration_seconds(self, msg):
         return float(msg.duration.sec) + float(msg.duration.nanosec) * 1e-9
@@ -134,7 +215,7 @@ class SimulationCommandAdapter(Node):
         if time.monotonic() - self.last_state_monotonic > max_age:
             return None
 
-        return tuple(self.current_positions[name] for name in JOINTS)
+        return tuple(self.current_positions[name] for name in JOINT_NAMES)
 
     def publish_status(
         self,
@@ -154,7 +235,7 @@ class SimulationCommandAdapter(Node):
         msg.detail = detail
         if start_time is not None:
             msg.start_time = start_time
-        msg.joint_names = list(JOINTS)
+        msg.joint_names = list(JOINT_NAMES)
         msg.start_positions = list(start_positions)
         msg.target_positions = list(target_positions)
         msg.duration_sec = float(duration)
@@ -184,7 +265,7 @@ class SimulationCommandAdapter(Node):
 
     def build_goal(self, start, target, duration):
         goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = list(JOINTS)
+        goal.trajectory.joint_names = list(JOINT_NAMES)
 
         initial_point = JointTrajectoryPoint()
         initial_point.positions = list(start)
@@ -197,33 +278,43 @@ class SimulationCommandAdapter(Node):
         goal.trajectory.points = [initial_point, target_point]
         return goal
 
-    def publish_jog_target(self, target, duration):
-        """Publish one short rolling setpoint to the trajectory controller."""
+    def publish_jog_target(self, target, velocities, duration):
+        """Publish one short rolling position-and-slope JOG reference."""
         trajectory = JointTrajectory()
-        trajectory.joint_names = list(JOINTS)
+        trajectory.joint_names = list(JOINT_NAMES)
         point = JointTrajectoryPoint()
         point.positions = list(target)
+        point.velocities = list(velocities)
         self.point_time_from_seconds(point, duration)
         trajectory.points = [point]
         self.jog_publisher.publish(trajectory)
 
     def jog_command_callback(self, msg):
         """Convert a safe one-second jog horizon into a short control step."""
+        self.last_jog_intent_stamp = msg.stamp
+        self.last_jog_command_id = msg.command_id
+        self.publish_timing(
+            msg.command_id, msg.stamp, 'ADAPTER_RECEIVE'
+        )
         if not bool(self.get_parameter('simulation_output_enabled').value):
             return
         if self.goal_active:
             return
-        if tuple(msg.joint_names) != JOINTS:
+        if tuple(msg.joint_names) != JOINT_NAMES:
             return
 
         horizon = self.duration_seconds(msg)
         control_period = float(
             self.get_parameter('jog_control_period_sec').value
         )
+        maximum_lead = float(
+            self.get_parameter('jog_reference_max_lead_sec').value
+        )
         if (
             not math.isfinite(horizon)
             or horizon <= 0.0
             or not 0.02 <= control_period <= 0.25
+            or not control_period <= maximum_lead <= 0.50
         ):
             return
 
@@ -231,22 +322,57 @@ class SimulationCommandAdapter(Node):
         if current is None:
             return
         try:
-            horizon_target = normalize_target(
+            saturation = saturate_target_by_velocity(
                 current,
-                tuple(msg.positions),
+                msg.positions,
+                horizon,
             )
-        except ValueError:
+        except ValueError as exc:
+            self.get_logger().warning(
+                f'JOG ADAPTER REJECTED: {exc}'
+            )
             return
+        if saturation.was_limited:
+            self.get_logger().error(
+                'JOG ADAPTER REJECTED: supervisor velocity invariant '
+                f'violated by {saturation.limiting_joint}; '
+                f'requested={saturation.requested_velocity:.4f}rad/s, '
+                f'limit={saturation.limited_velocity:.4f}rad/s'
+            )
+            return
+        horizon_target = saturation.positions
 
-        fraction = min(1.0, control_period / horizon)
-        control_target = tuple(
-            current_value + fraction * (target_value - current_value)
-            for current_value, target_value in zip(
+        previous_target = (
+            self.controller_reference_state() if self.jog_active else None
+        )
+        previous_velocity = (
+            self.jog_reference_velocity
+            if previous_target is not None
+            else None
+        )
+        try:
+            control_target, control_velocity = advance_jog_reference(
                 current,
                 horizon_target,
+                horizon,
+                control_period,
+                previous_target,
+                previous_velocity,
+                maximum_lead,
             )
+        except ValueError as exc:
+            self.get_logger().warning(f'JOG ADAPTER REJECTED: {exc}')
+            return
+        self.publish_jog_target(
+            control_target,
+            control_velocity,
+            control_period,
         )
-        self.publish_jog_target(control_target, control_period)
+        self.publish_timing(
+            msg.command_id, msg.stamp, 'CONTROLLER_PUBLISH'
+        )
+        self.jog_reference_target = control_target
+        self.jog_reference_velocity = control_velocity
         self.jog_active = True
         self.last_jog_receive_monotonic = time.monotonic()
         self.jog_hold_sent = False
@@ -264,14 +390,59 @@ class SimulationCommandAdapter(Node):
         )
         if time.monotonic() - self.last_jog_receive_monotonic <= timeout:
             return
+        if (
+            self.last_jog_intent_stamp is not None
+            and self.last_jog_command_id is not None
+        ):
+            self.publish_timing(
+                self.last_jog_command_id,
+                self.last_jog_intent_stamp,
+                'STOP_DETECTED',
+                'JOG_WATCHDOG_EXPIRED',
+            )
         current = self.current_state()
         if current is not None:
             duration = float(
-                self.get_parameter('jog_control_period_sec').value
+                self.get_parameter('jog_stop_duration_sec').value
             )
-            self.publish_jog_target(current, duration)
+            if not math.isfinite(duration) or not 0.01 <= duration <= 0.10:
+                self.get_logger().error(
+                    'JOG HOLD REJECTED: invalid jog_stop_duration_sec'
+                )
+                return
+            self.publish_jog_target(
+                current,
+                (0.0,) * len(JOINT_NAMES),
+                duration,
+            )
         self.jog_hold_sent = True
         self.jog_active = False
+        self.jog_reference_target = None
+        self.jog_reference_velocity = None
+
+    def stop_active_jog(self, reason):
+        """Hold the measured pose immediately after a supervised STOP."""
+        current = self.current_state()
+        if current is not None:
+            duration = float(
+                self.get_parameter('jog_stop_duration_sec').value
+            )
+            if not math.isfinite(duration) or not 0.01 <= duration <= 0.10:
+                self.get_logger().error(
+                    'JOG HOLD REJECTED: invalid jog_stop_duration_sec'
+                )
+                return
+            self.publish_jog_target(
+                current,
+                (0.0,) * len(JOINT_NAMES),
+                duration,
+            )
+        self.jog_hold_sent = True
+        self.jog_active = False
+        self.jog_reference_target = None
+        self.jog_reference_velocity = None
+        self.last_jog_receive_monotonic = None
+        self.get_logger().warning(f'JOG STOP: {reason}')
 
     def start_goal(self, metadata, detail):
         """Send a goal and associate every callback with its generation."""
@@ -311,6 +482,10 @@ class SimulationCommandAdapter(Node):
             metadata['duration'],
         )
         future = self.action_client.send_goal_async(goal)
+        self.publish_timing(
+            metadata['command_id'], metadata['intent_stamp'],
+            'CONTROLLER_PUBLISH',
+        )
         future.add_done_callback(
             lambda result_future, token=generation:
             self.goal_response_callback(result_future, token)
@@ -324,6 +499,7 @@ class SimulationCommandAdapter(Node):
     def initial_metadata(self, msg, start, target, duration):
         return {
             'command_id': msg.command_id,
+            'intent_stamp': msg.stamp,
             'origin_start': tuple(start),
             'origin_target': tuple(target),
             'start': tuple(start),
@@ -334,6 +510,9 @@ class SimulationCommandAdapter(Node):
         }
 
     def command_callback(self, msg):
+        self.publish_timing(
+            msg.command_id, msg.stamp, 'ADAPTER_RECEIVE'
+        )
         duration = self.duration_seconds(msg)
         output_enabled = bool(
             self.get_parameter('simulation_output_enabled').value
@@ -369,7 +548,7 @@ class SimulationCommandAdapter(Node):
             )
             return
 
-        if list(msg.joint_names) != list(JOINTS):
+        if list(msg.joint_names) != list(JOINT_NAMES):
             self.reject(
                 msg,
                 'REJECTED',
@@ -395,10 +574,25 @@ class SimulationCommandAdapter(Node):
             return
 
         try:
-            target = normalize_target(start, tuple(msg.positions))
+            saturation = saturate_target_by_velocity(
+                start,
+                msg.positions,
+                duration,
+            )
         except ValueError as exc:
             self.reject(msg, 'REJECTED', str(exc))
             return
+        if saturation.was_limited:
+            self.reject(
+                msg,
+                'REJECTED',
+                'invariante de velocidad del supervisor incumplida: '
+                f'{saturation.limiting_joint}, '
+                f'solicitada={saturation.requested_velocity:.4f}rad/s, '
+                f'límite={saturation.limited_velocity:.4f}rad/s',
+            )
+            return
+        target = saturation.positions
 
         metadata = self.initial_metadata(msg, start, target, duration)
         self.start_goal(
@@ -501,8 +695,34 @@ class SimulationCommandAdapter(Node):
         )
         self.clear_active_goal()
 
+    def store_pending_control(self, msg):
+        """Keep only the most restrictive request awaiting cancellation."""
+        if (
+            self.pending_control is None
+            or is_more_restrictive(
+                msg.state,
+                msg.speed_scale,
+                self.pending_control.state,
+                self.pending_control.speed_scale,
+            )
+        ):
+            self.pending_control = msg
+
     def control_callback(self, msg):
         """Apply the latest runtime safety decision to the active goal."""
+        if (
+            self.jog_active
+            and not self.goal_active
+            and (msg.state == 'STOP' or msg.speed_scale <= 0.0)
+        ):
+            if self.last_jog_intent_stamp is not None:
+                self.publish_timing(
+                    msg.command_id, self.last_jog_intent_stamp,
+                    'STOP_DETECTED', msg.reason_code,
+                )
+            self.stop_active_jog(msg.reason)
+            return
+
         metadata = self.active_metadata
         if (
             not self.goal_active
@@ -512,21 +732,33 @@ class SimulationCommandAdapter(Node):
             return
 
         if not metadata['accepted'] or self.goal_handle is None:
-            self.pending_control = msg
+            self.store_pending_control(msg)
             return
 
         if self.control_in_progress:
-            self.pending_control = msg
+            self.store_pending_control(msg)
             return
 
-        if msg.state == 'STOP' or msg.speed_scale <= 0.0:
-            desired_scale = 0.0
-        elif msg.state == 'REDUCTION':
-            desired_scale = min(max(float(msg.speed_scale), 0.05), 1.0)
-        else:
-            desired_scale = 1.0
+        try:
+            desired_scale = effective_speed_scale(
+                msg.state,
+                msg.speed_scale,
+            )
+        except ValueError as exc:
+            self.get_logger().error(f'CONTROL REJECTED: {exc}')
+            return
 
-        if abs(desired_scale - self.applied_speed_scale) <= 0.05:
+        if msg.state == 'STOP' or desired_scale <= 0.0:
+            self.publish_timing(
+                metadata['command_id'], metadata['intent_stamp'],
+                'STOP_DETECTED', msg.reason_code,
+            )
+
+        if math.isclose(
+            desired_scale,
+            self.applied_speed_scale,
+            abs_tol=1.0e-6,
+        ):
             return
 
         # Do not immediately restore nominal speed after a reduction.  The
@@ -668,6 +900,7 @@ class SimulationCommandAdapter(Node):
 
         replacement = {
             'command_id': metadata['command_id'],
+            'intent_stamp': metadata['intent_stamp'],
             'origin_start': metadata['origin_start'],
             'origin_target': metadata['origin_target'],
             'start': tuple(current),

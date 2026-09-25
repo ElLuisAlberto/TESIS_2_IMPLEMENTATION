@@ -40,15 +40,14 @@ from thesis_interfaces.msg import (
 )
 import tf2_ros
 
+from thesis_core.joint_model import (
+    CONTINUOUS_JOINT_INDEXES,
+    JOINT_NAMES,
+    JOINT_POSITION_LIMITS,
+    JOINT_VELOCITY_LIMITS,
+    saturate_target_by_velocity,
+)
 
-JOINT_NAMES = [
-    'j2n6s300_joint_1',
-    'j2n6s300_joint_2',
-    'j2n6s300_joint_3',
-    'j2n6s300_joint_4',
-    'j2n6s300_joint_5',
-    'j2n6s300_joint_6',
-]
 
 JOINT_LABELS = [
     'J1 - Base',
@@ -59,24 +58,17 @@ JOINT_LABELS = [
     'J6 - Muñeca 3',
 ]
 
-JOINT_LIMITS_DEG = [
-    (-360.0, 360.0),
-    (47.0, 313.0),
-    (19.0, 341.0),
-    (-360.0, 360.0),
-    (-360.0, 360.0),
-    (-360.0, 360.0),
-]
+JOINT_LIMITS_DEG = tuple(
+    tuple(math.degrees(value) for value in JOINT_POSITION_LIMITS[name])
+    for name in JOINT_NAMES
+)
 
 INITIAL_POSE_DEG = [0.0, 180.0, 180.0, 0.0, 0.0, 0.0]
 TEST_POSE_DEG = [math.degrees(0.20), 180.0, 180.0, 0.0, 0.0, 0.0]
 
-# These values match the current supervisor configuration:
-# nominal J1-J3 = 36 deg/s, nominal J4-J6 = 48 deg/s,
-# with velocity_scale = 0.5.
-ALLOWED_SPEED_DEG = [18.0, 18.0, 18.0, 24.0, 24.0, 24.0]
-MAX_JOG_SPEED_DEG = [36.0, 36.0, 36.0, 48.0, 48.0, 48.0]
-CONTINUOUS_JOINT_INDEXES = {0, 3, 4, 5}
+ALLOWED_SPEED_DEG = tuple(
+    math.degrees(JOINT_VELOCITY_LIMITS[name]) for name in JOINT_NAMES
+)
 JOG_INPUT_TIMEOUT_SEC = 0.30
 
 
@@ -359,7 +351,15 @@ class JointGuiNode(Node):
         msg.stamp = now.to_msg()
         msg.command_id = f'gui_{now.nanoseconds}'
         msg.joint_names = list(JOINT_NAMES)
-        msg.positions = list(positions)
+        current = tuple(
+            self.current_positions[name] for name in JOINT_NAMES
+        )
+        saturation = saturate_target_by_velocity(
+            current,
+            positions,
+            duration_sec,
+        )
+        msg.positions = list(saturation.positions)
 
         seconds = int(duration_sec)
         nanoseconds = int((duration_sec - seconds) * 1e9)
@@ -569,7 +569,7 @@ class JointControlWindow(QMainWindow):
             jog_layout.addWidget(QLabel(joint_label), row, 0)
             jog_layout.addWidget(QLabel('Vmáx:'), row, 1)
             speed_input = QDoubleSpinBox()
-            speed_input.setRange(1.0, MAX_JOG_SPEED_DEG[index])
+            speed_input.setRange(1.0, ALLOWED_SPEED_DEG[index])
             speed_input.setDecimals(1)
             speed_input.setSingleStep(1.0)
             speed_input.setValue(ALLOWED_SPEED_DEG[index])
@@ -655,7 +655,7 @@ class JointControlWindow(QMainWindow):
         preview_layout = QVBoxLayout(preview_group)
 
         preview_note = QLabel(
-            'Estimación informativa con velocity_scale = 0.5. '
+            'Estimación con límites operativos comunes de 18/24 °/s. '
             'El safety_supervisor conserva la decisión final.'
         )
         preview_note.setWordWrap(True)
@@ -1528,7 +1528,7 @@ class JointControlWindow(QMainWindow):
         ):
             blocker = QSignalBlocker(self.jog_mode_button)
             self.jog_mode_button.setChecked(False)
-            del blocker
+            blocker.unblock()
             QMessageBox.warning(
                 self,
                 'Control manual no disponible',

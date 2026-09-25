@@ -1,0 +1,74 @@
+============================================================
+PAQUETE 1 — APLICACIÓN FASE C
+Fecha: 2026-09-22T07:15:53-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+============================================================
+SHA256_ESPERADO=d646590271d64eeac6ecf86a37295d1d5c8f6bf69a6c3287ed5995702ad03961
+SHA256_OBTENIDO=d646590271d64eeac6ecf86a37295d1d5c8f6bf69a6c3287ed5995702ad03961
+RESULTADO_INTEGRIDAD=PASS
+
+----- ESTADO LOCAL PREVIO -----
+?? APLICAR_PAQUETE1.py
+?? PAQUETE0_EVIDENCIA_A.txt
+?? PAQUETE0_EVIDENCIA_B.txt
+?? PAQUETE0_EVIDENCIA_C.txt
+?? PAQUETE1_APLICACION_FASE_C.txt
+?? PAQUETE1_DIAGNOSTICO_A.txt
+RESULTADO_GIT_STATUS_PREVIO=0
+
+----- ENSAYO SIN MODIFICACIONES -----
+CHECK_OK=1
+WOULD_MODIFY=src/thesis_core/thesis_core/safety_supervisor_node.py
+WOULD_MODIFY=src/thesis_core/thesis_core/execution_reference.py
+WOULD_MODIFY=src/thesis_core/thesis_core/horizon_preview.py
+WOULD_MODIFY=src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+WOULD_MODIFY=src/thesis_ui/thesis_ui/joint_control_gui.py
+WOULD_MODIFY=src/thesis_ui/package.xml
+WOULD_CREATE=src/thesis_core/thesis_core/joint_model.py
+WOULD_CREATE=src/thesis_core/test/test_joint_model.py
+RESULTADO_CHECK=0
+
+----- APLICACIÓN -----
+APLICACION_OK=1
+RESPALDO=/home/luis/Escritorio/RESPALDO_TESIS_PAQUETE1_20260922T071553
+MODIFICADO=src/thesis_core/thesis_core/safety_supervisor_node.py
+MODIFICADO=src/thesis_core/thesis_core/execution_reference.py
+MODIFICADO=src/thesis_core/thesis_core/horizon_preview.py
+MODIFICADO=src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+MODIFICADO=src/thesis_ui/thesis_ui/joint_control_gui.py
+MODIFICADO=src/thesis_ui/package.xml
+CREADO=src/thesis_core/thesis_core/joint_model.py
+CREADO=src/thesis_core/test/test_joint_model.py
+RESULTADO_APLICACION=0
+
+----- ESTADO LOCAL POSTERIOR -----
+ M src/thesis_core/thesis_core/execution_reference.py
+ M src/thesis_core/thesis_core/horizon_preview.py
+ M src/thesis_core/thesis_core/safety_supervisor_node.py
+ M src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+ M src/thesis_ui/package.xml
+ M src/thesis_ui/thesis_ui/joint_control_gui.py
+?? APLICAR_PAQUETE1.py
+?? PAQUETE0_EVIDENCIA_A.txt
+?? PAQUETE0_EVIDENCIA_B.txt
+?? PAQUETE0_EVIDENCIA_C.txt
+?? PAQUETE1_APLICACION_FASE_C.txt
+?? PAQUETE1_DIAGNOSTICO_A.txt
+?? src/thesis_core/test/test_joint_model.py
+?? src/thesis_core/thesis_core/joint_model.py
+RESULTADO_GIT_STATUS_POSTERIOR=0
+
+----- RESUMEN DE CAMBIOS -----
+ src/thesis_core/thesis_core/execution_reference.py |  25 +--
+ src/thesis_core/thesis_core/horizon_preview.py     |  36 ++--
+ .../thesis_core/safety_supervisor_node.py          | 196 ++++++++++-----------
+ .../simulation_command_adapter.py                  |  61 +++++--
+ src/thesis_ui/package.xml                          |   1 +
+ src/thesis_ui/thesis_ui/joint_control_gui.py       |  50 +++---
+ 6 files changed, 192 insertions(+), 177 deletions(-)
+RESULTADO_DIFF_STAT=0
+
+----- VERIFICACIÓN DEL PARCHE -----
+RESULTADO_DIFF_CHECK=0
+
+FASE_C_FINALIZADA=1

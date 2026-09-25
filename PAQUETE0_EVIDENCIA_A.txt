@@ -1,0 +1,997 @@
+PAQUETE 0 — EVIDENCIA DE LÍNEA BASE A
+Fecha: 2026-09-22T06:09:51-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+ROS_DISTRO=humble
+
+============================================================
+1. SISTEMA Y PAQUETES
+============================================================
+Linux miNave 6.8.0-138-generic #138~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Aug  7 13:43:15 UTC  x86_64 x86_64 x86_64 GNU/Linux
+
+thesis_core	src/thesis_core	(ros.ament_python)
+thesis_description	src/thesis_description	(ros.ament_cmake)
+thesis_hardware	src/thesis_hardware	(ros.ament_python)
+thesis_hardware_bridge	src/thesis_hardware_bridge	(ros.ament_cmake)
+thesis_interfaces	src/thesis_interfaces	(ros.ament_cmake)
+thesis_simulation	src/thesis_simulation	(ros.ament_python)
+thesis_ui	src/thesis_ui	(ros.ament_python)
+
+============================================================
+2. PROCESOS ROS 2 ACTIVOS Y COMANDOS DE INICIO
+============================================================
+  17314 Tue Sep 22 06:09:01 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 launch thesis_simulation jaco_gazebo.launch.py
+  17318 Tue Sep 22 06:09:01 2026 ign gazebo -r -v 3 /home/luis/Escritorio/TESIS_2_IMPLEMENTATION/install/thesis_simulation/share/thesis_simulation/worlds/jaco_empty.sdf
+  17320 Tue Sep 22 06:09:01 2026 /opt/ros/humble/lib/ros_gz_bridge/parameter_bridge /clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock --ros-args -r __node:=gazebo_clock_bridge
+  17322 Tue Sep 22 06:09:01 2026 /opt/ros/humble/lib/ros_gz_bridge/parameter_bridge /world/jaco_world/pose/info@tf2_msgs/msg/TFMessage[ignition.msgs.Pose_V --ros-args -r __node:=gazebo_pose_bridge --params-file /tmp/launch_params_7a7j0fzo
+  17324 Tue Sep 22 06:09:01 2026 /opt/ros/humble/lib/rviz2/rviz2 -d /home/luis/Escritorio/TESIS_2_IMPLEMENTATION/install/thesis_description/share/thesis_description/rviz/jaco.rviz --ros-args --params-file /tmp/launch_params_24d7c1du
+  17392 Tue Sep 22 06:09:02 2026 ign gazebo server
+  17393 Tue Sep 22 06:09:02 2026 ign gazebo gui
+  17656 Tue Sep 22 06:09:05 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 launch thesis_simulation safety_pipeline.launch.py simulation_output_enabled:=true require_proximity_status:=true use_sim_time:=true
+  17684 Tue Sep 22 06:09:06 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 run thesis_core horizon_preview --ros-args -p use_sim_time:=true -p source:=auto -p horizon_sec:=1.0 -p samples:=21 -p margin_m:=0.02 -p rate_hz:=10.0
+  17713 Tue Sep 22 06:09:08 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 run thesis_ui joint_gui
+
+============================================================
+3. NODOS ACTIVOS Y CONTEO
+============================================================
+/arm_controller
+/capsule_visualizer
+/controller_manager
+/gazebo_clock_bridge
+/gazebo_pose_bridge
+/gz_ros2_control
+/horizon_preview
+/joint_control_gui_node
+/joint_state_broadcaster
+/proximity_monitor
+/robot_state_publisher
+/rviz
+/safety_supervisor_node
+/simulation_command_adapter
+/transform_listener_impl_57aa38087940
+
+CONTEO POR NOMBRE:
+      1 /arm_controller
+      1 /capsule_visualizer
+      1 /controller_manager
+      1 /gazebo_clock_bridge
+      1 /gazebo_pose_bridge
+      1 /gz_ros2_control
+      1 /horizon_preview
+      1 /joint_control_gui_node
+      1 /joint_state_broadcaster
+      1 /proximity_monitor
+      1 /robot_state_publisher
+      1 /rviz
+      1 /safety_supervisor_node
+      1 /simulation_command_adapter
+      1 /transform_listener_impl_57aa38087940
+
+============================================================
+4. COMPROBACIÓN DE NODOS OBLIGATORIOS
+============================================================
+/joint_state_broadcaster cantidad=1
+/arm_controller cantidad=1
+/robot_state_publisher cantidad=1
+/proximity_monitor cantidad=1
+/capsule_visualizer cantidad=1
+/horizon_preview cantidad=1
+/safety_supervisor_node cantidad=1
+/simulation_command_adapter cantidad=1
+/joint_control_gui_node cantidad=1
+/rviz cantidad=1
+
+============================================================
+5. TEMAS ACTIVOS Y TIPOS
+============================================================
+/arm_controller/controller_state [control_msgs/msg/JointTrajectoryControllerState]
+/arm_controller/joint_trajectory [trajectory_msgs/msg/JointTrajectory]
+/arm_controller/state [control_msgs/msg/JointTrajectoryControllerState]
+/arm_controller/transition_event [lifecycle_msgs/msg/TransitionEvent]
+/clicked_point [geometry_msgs/msg/PointStamped]
+/clock [rosgraph_msgs/msg/Clock]
+/dynamic_joint_states [control_msgs/msg/DynamicJointState]
+/goal_pose [geometry_msgs/msg/PoseStamped]
+/initialpose [geometry_msgs/msg/PoseWithCovarianceStamped]
+/joint_state_broadcaster/transition_event [lifecycle_msgs/msg/TransitionEvent]
+/joint_states [sensor_msgs/msg/JointState]
+/parameter_events [rcl_interfaces/msg/ParameterEvent]
+/robot_description [std_msgs/msg/String]
+/rosout [rcl_interfaces/msg/Log]
+/tf [tf2_msgs/msg/TFMessage]
+/tf_static [tf2_msgs/msg/TFMessage]
+/thesis/candidate_command [thesis_interfaces/msg/JointCommand]
+/thesis/command_decision [thesis_interfaces/msg/CommandDecision]
+/thesis/execution_control [thesis_interfaces/msg/ExecutionControl]
+/thesis/execution_trajectory [thesis_interfaces/msg/ExecutionTrajectory]
+/thesis/horizon_volume [visualization_msgs/msg/MarkerArray]
+/thesis/jog_intent [thesis_interfaces/msg/JointCommand]
+/thesis/preview_intent [thesis_interfaces/msg/JointCommand]
+/thesis/proximity_status [thesis_interfaces/msg/ProximityStatus]
+/thesis/robot_capsules [visualization_msgs/msg/MarkerArray]
+/thesis/supervised_command [thesis_interfaces/msg/JointCommand]
+/thesis/supervised_jog_command [thesis_interfaces/msg/JointCommand]
+/thesis/trajectory_prediction [thesis_interfaces/msg/TrajectoryPrediction]
+/world/jaco_world/pose/info [tf2_msgs/msg/TFMessage]
+
+============================================================
+6. GRAFO DE TEMAS CRÍTICOS
+============================================================
+
+-------------------- /joint_states --------------------
+Type: sensor_msgs/msg/JointState
+
+Publisher count: 1
+
+Node name: joint_state_broadcaster
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.f0.43.8f.a2.00.00.00.00.00.00.53.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: TRANSIENT_LOCAL
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 5
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.17.45.a7.1c.00.00.00.00.00.00.13.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.3c.45.1f.5f.00.00.00.00.00.00.18.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: robot_state_publisher
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.a4.43.94.da.00.00.00.00.00.00.16.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.fb.44.bd.4a.00.00.00.00.00.00.12.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: sensor_msgs/msg/JointState
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.fd.44.d6.87.00.00.00.00.00.00.1b.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /thesis/jog_intent --------------------
+Type: thesis_interfaces/msg/JointCommand
+
+Publisher count: 1
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.3c.45.1f.5f.00.00.00.00.00.00.13.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.fb.44.bd.4a.00.00.00.00.00.00.14.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /thesis/supervised_jog_command --------------------
+Type: thesis_interfaces/msg/JointCommand
+
+Publisher count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.fb.44.bd.4a.00.00.00.00.00.00.18.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.17.45.a7.1c.00.00.00.00.00.00.15.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.fd.44.d6.87.00.00.00.00.00.00.1f.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /thesis/proximity_status --------------------
+Type: thesis_interfaces/msg/ProximityStatus
+
+Publisher count: 1
+
+Node name: proximity_monitor
+Node namespace: /
+Topic type: thesis_interfaces/msg/ProximityStatus
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.b0.43.86.46.00.00.00.00.00.00.12.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 3
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/ProximityStatus
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.3c.45.1f.5f.00.00.00.00.00.00.1d.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: capsule_visualizer
+Node namespace: /
+Topic type: thesis_interfaces/msg/ProximityStatus
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.ae.43.e2.fb.00.00.00.00.00.00.13.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/ProximityStatus
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.fb.44.bd.4a.00.00.00.00.00.00.15.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /thesis/robot_capsules --------------------
+Type: visualization_msgs/msg/MarkerArray
+
+Publisher count: 1
+
+Node name: capsule_visualizer
+Node namespace: /
+Topic type: visualization_msgs/msg/MarkerArray
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.ae.43.e2.fb.00.00.00.00.00.00.12.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: TRANSIENT_LOCAL
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: rviz
+Node namespace: /
+Topic type: visualization_msgs/msg/MarkerArray
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.ac.43.d3.fa.00.00.00.00.00.00.1b.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: TRANSIENT_LOCAL
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /thesis/horizon_volume --------------------
+Type: visualization_msgs/msg/MarkerArray
+
+Publisher count: 1
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: visualization_msgs/msg/MarkerArray
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.17.45.a7.1c.00.00.00.00.00.00.12.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: rviz
+Node namespace: /
+Topic type: visualization_msgs/msg/MarkerArray
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.ac.43.d3.fa.00.00.00.00.00.00.27.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /thesis/execution_control --------------------
+Type: thesis_interfaces/msg/ExecutionControl
+
+Publisher count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionControl
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.fb.44.bd.4a.00.00.00.00.00.00.1b.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 3
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionControl
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.17.45.a7.1c.00.00.00.00.00.00.17.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionControl
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.3c.45.1f.5f.00.00.00.00.00.00.1c.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: thesis_interfaces/msg/ExecutionControl
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.fd.44.d6.87.00.00.00.00.00.00.1d.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /arm_controller/joint_trajectory --------------------
+Type: trajectory_msgs/msg/JointTrajectory
+
+Publisher count: 1
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: trajectory_msgs/msg/JointTrajectory
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.fd.44.d6.87.00.00.00.00.00.00.1e.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: arm_controller
+Node namespace: /
+Topic type: trajectory_msgs/msg/JointTrajectory
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.f0.43.8f.a2.00.00.00.00.00.00.66.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+============================================================
+7. PARÁMETROS EFECTIVOS
+============================================================
+
+-------------------- /safety_supervisor_node --------------------
+/safety_supervisor_node:
+  ros__parameters:
+    hard_stop_clearance_m: 0.0
+    max_proximity_age_sec: 0.5
+    max_state_age_sec: 0.5
+    prediction_enabled: true
+    prediction_horizon_sec: 1.0
+    prediction_samples: 25
+    predictive_margin_m: 0.02
+    reduction_distance: 0.15
+    reduction_duration_scale: 2.0
+    require_current_state: false
+    require_proximity_status: true
+    runtime_horizon_sec: 1.0
+    runtime_minimum_speed_scale: 0.05
+    runtime_monitor_enabled: true
+    runtime_rate_hz: 10.0
+    runtime_samples: 21
+    runtime_scale_search_iterations: 10
+    state_topic: /joint_states
+    stop_distance: 0.05
+    use_sim_time: true
+    velocity_scale: 0.5
+    warning_distance: 0.3
+
+
+-------------------- /horizon_preview --------------------
+/horizon_preview:
+  ros__parameters:
+    horizon_sec: 1.0
+    margin_m: 0.02
+    model_frame: j2n6s300_link_base
+    rate_hz: 10.0
+    samples: 21
+    source: auto
+    use_sim_time: true
+
+
+-------------------- /proximity_monitor --------------------
+/proximity_monitor:
+  ros__parameters:
+    evaluation_rate_hz: 20.0
+    obstacle_frame: safety_obstacle
+    obstacle_pose_timeout_sec: 0.5
+    obstacle_pose_topic: /world/jaco_world/pose/info
+    obstacle_radius: 0.12
+    obstacle_x: 0.6
+    obstacle_y: 0.0
+    obstacle_z: 0.65
+    reduction_distance: 0.15
+    reference_frame: world
+    segment_end_frames:
+    - j2n6s300_link_1
+    - j2n6s300_link_2
+    - j2n6s300_link_3
+    - j2n6s300_link_4
+    - j2n6s300_link_5
+    - j2n6s300_end_effector
+    segment_names:
+    - base_to_shoulder
+    - shoulder_to_upper_arm
+    - upper_arm_to_forearm
+    - forearm_to_wrist_1
+    - wrist_1_to_wrist_2
+    - wrist_2_to_tool
+    segment_radii:
+    - 0.105
+    - 0.095
+    - 0.085
+    - 0.075
+    - 0.07
+    - 0.09
+    segment_start_frames:
+    - j2n6s300_link_base
+    - j2n6s300_link_1
+    - j2n6s300_link_2
+    - j2n6s300_link_3
+    - j2n6s300_link_4
+    - j2n6s300_link_5
+    status_topic: /thesis/proximity_status
+    stop_distance: 0.05
+    use_sim_time: true
+    warning_distance: 0.3
+
+
+-------------------- /capsule_visualizer --------------------
+/capsule_visualizer:
+  ros__parameters:
+    color_rgba:
+    - 0.05
+    - 0.8
+    - 0.35
+    - 0.38
+    marker_topic: /thesis/robot_capsules
+    publish_rate_hz: 20.0
+    reference_frame: world
+    segment_end_frames:
+    - j2n6s300_link_1
+    - j2n6s300_link_2
+    - j2n6s300_link_3
+    - j2n6s300_link_4
+    - j2n6s300_link_5
+    - j2n6s300_end_effector
+    segment_names:
+    - base_to_shoulder
+    - shoulder_to_upper_arm
+    - upper_arm_to_forearm
+    - forearm_to_wrist_1
+    - wrist_1_to_wrist_2
+    - wrist_2_to_tool
+    segment_radii:
+    - 0.105
+    - 0.095
+    - 0.085
+    - 0.075
+    - 0.07
+    - 0.09
+    segment_start_frames:
+    - j2n6s300_link_base
+    - j2n6s300_link_1
+    - j2n6s300_link_2
+    - j2n6s300_link_3
+    - j2n6s300_link_4
+    - j2n6s300_link_5
+    use_sim_time: true
+
+
+-------------------- /simulation_command_adapter --------------------
+/simulation_command_adapter:
+  ros__parameters:
+    action_name: /arm_controller/follow_joint_trajectory
+    control_replan_cooldown_sec: 0.75
+    jog_command_timeout_sec: 0.25
+    jog_control_period_sec: 0.1
+    max_state_age_sec: 0.5
+    simulation_output_enabled: true
+    use_sim_time: true
+
+
+-------------------- /joint_control_gui_node --------------------
+/joint_control_gui_node:
+  ros__parameters:
+    use_sim_time: true
+
+
+============================================================
+8. CONTROLADORES
+============================================================
+[92mjoint_state_broadcaster[0m joint_state_broadcaster/JointStateBroadcaster          [92mactive[0m
+[92marm_controller         [0m joint_trajectory_controller/JointTrajectoryController  [92mactive[0m
+
+[INFO] [1790075430.912327864] [_ros2cli_17945]: waiting for service /controller_manager/list_hardware_interfaces to become available...
+command interfaces
+	[94mj2n6s300_joint_1/position [available] [claimed][0m
+	[94mj2n6s300_joint_2/position [available] [claimed][0m
+	[94mj2n6s300_joint_3/position [available] [claimed][0m
+	[94mj2n6s300_joint_4/position [available] [claimed][0m
+	[94mj2n6s300_joint_5/position [available] [claimed][0m
+	[94mj2n6s300_joint_6/position [available] [claimed][0m
+state interfaces
+	j2n6s300_joint_1/position
+	j2n6s300_joint_1/velocity
+	j2n6s300_joint_2/position
+	j2n6s300_joint_2/velocity
+	j2n6s300_joint_3/position
+	j2n6s300_joint_3/velocity
+	j2n6s300_joint_4/position
+	j2n6s300_joint_4/velocity
+	j2n6s300_joint_5/position
+	j2n6s300_joint_5/velocity
+	j2n6s300_joint_6/position
+	j2n6s300_joint_6/velocity
+
+============================================================
+9. POSTURA INICIAL — MUESTRA 1
+============================================================
+A message was lost!!!
+	total count change:1
+	total count: 1---
+header:
+  stamp:
+    sec: 70
+    nanosec: 946000000
+  frame_id: base_link
+name:
+- j2n6s300_joint_2
+- j2n6s300_joint_3
+- j2n6s300_joint_4
+- j2n6s300_joint_5
+- j2n6s300_joint_1
+- j2n6s300_joint_6
+- j2n6s300_joint_finger_1
+- j2n6s300_joint_finger_tip_1
+- j2n6s300_joint_finger_2
+- j2n6s300_joint_finger_tip_2
+- j2n6s300_joint_finger_3
+- j2n6s300_joint_finger_tip_3
+position:
+- 3.100533629410442
+- 3.1415926849387468
+- -5.554232896987698e-07
+- -6.077196302129144e-07
+- -0.05495366728107704
+- -5.14922797315908e-07
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+velocity:
+- -8.140780367524303e-12
+- 5.454374452096289e-11
+- 1.1058004165120927e-10
+- -2.313861862529576e-11
+- -1.734723475976807e-18
+- 1.3968661297103502e-12
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+effort:
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+---
+
+============================================================
+10. POSTURA INICIAL — MUESTRA 2
+============================================================
+header:
+  stamp:
+    sec: 74
+    nanosec: 456000000
+  frame_id: base_link
+name:
+- j2n6s300_joint_2
+- j2n6s300_joint_3
+- j2n6s300_joint_4
+- j2n6s300_joint_5
+- j2n6s300_joint_1
+- j2n6s300_joint_6
+- j2n6s300_joint_finger_1
+- j2n6s300_joint_finger_tip_1
+- j2n6s300_joint_finger_2
+- j2n6s300_joint_finger_tip_2
+- j2n6s300_joint_finger_3
+- j2n6s300_joint_finger_tip_3
+position:
+- 3.1005336293871584
+- 3.1415926850959766
+- -5.551045880734201e-07
+- -6.07786317767876e-07
+- -0.05495366728107704
+- -5.149187713370665e-07
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+velocity:
+- -7.208188039509178e-12
+- 4.8179961756322776e-11
+- 9.769376627111193e-11
+- -2.044218223515304e-11
+- 5.204170427930421e-18
+- 1.2341720527497824e-12
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+effort:
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+---
+
+============================================================
+11. ANTIGÜEDAD/RETRASO DE JOINT_STATES
+============================================================
+average delay: 1790075365.186
+	min: 1790075365.116s max: 1790075365.397s std dev: 0.06334s window: 40
+average delay: 1790075365.283
+	min: 1790075365.116s max: 1790075365.397s std dev: 0.08392s window: 126
+average delay: 1790075365.357
+	min: 1790075365.116s max: 1790075365.547s std dev: 0.11458s window: 210
+average delay: 1790075365.432
+	min: 1790075365.116s max: 1790075365.677s std dev: 0.15276s window: 297
+average delay: 1790075365.501
+	min: 1790075365.116s max: 1790075365.769s std dev: 0.18292s window: 388
+
+============================================================
+12. OBSTÁCULO Y DISTANCIA INICIAL
+============================================================
+stamp:
+  sec: 82
+  nanosec: 650000000
+reference_frame: world
+state: ALLOW
+minimum_clearance: 0.37923986605837096
+limiting_segment: upper_arm_to_forearm
+closest_robot_point:
+  x: 0.016256148999564537
+  y: 0.0024966543215614407
+  z: 0.6739395954076779
+obstacle_center:
+  x: 0.6
+  y: 0.0
+  z: 0.65
+obstacle_velocity:
+  x: 0.0
+  y: 0.0
+  z: 0.0
+obstacle_radius: 0.12
+---
+
+============================================================
+13. FRECUENCIAS CONTINUAS
+============================================================
+
+-------------------- /joint_states --------------------
+average rate: 81.826
+	min: 0.009s max: 0.016s std dev: 0.00144s window: 83
+average rate: 81.751
+	min: 0.009s max: 0.016s std dev: 0.00138s window: 165
+average rate: 83.132
+	min: 0.009s max: 0.016s std dev: 0.00146s window: 251
+average rate: 83.513
+	min: 0.009s max: 0.016s std dev: 0.00142s window: 336
+average rate: 84.319
+	min: 0.009s max: 0.016s std dev: 0.00143s window: 424
+average rate: 84.216
+	min: 0.009s max: 0.016s std dev: 0.00140s window: 508
+
+-------------------- /thesis/proximity_status --------------------
+average rate: 17.205
+	min: 0.049s max: 0.068s std dev: 0.00423s window: 19
+average rate: 16.988
+	min: 0.049s max: 0.069s std dev: 0.00435s window: 36
+average rate: 17.152
+	min: 0.049s max: 0.069s std dev: 0.00435s window: 54
+average rate: 17.181
+	min: 0.049s max: 0.069s std dev: 0.00420s window: 72
+
+-------------------- /thesis/robot_capsules --------------------
+WARNING: topic [/thesis/robot_capsules] does not appear to be published yet
+average rate: 16.846
+	min: 0.054s max: 0.073s std dev: 0.00469s window: 18
+average rate: 16.873
+	min: 0.053s max: 0.074s std dev: 0.00483s window: 35
+average rate: 16.849
+	min: 0.051s max: 0.074s std dev: 0.00493s window: 52
+average rate: 16.780
+	min: 0.051s max: 0.074s std dev: 0.00500s window: 69
+average rate: 16.778
+	min: 0.051s max: 0.074s std dev: 0.00486s window: 86
+
+-------------------- /thesis/horizon_volume --------------------
+average rate: 8.551
+	min: 0.094s max: 0.140s std dev: 0.01419s window: 10
+average rate: 8.568
+	min: 0.093s max: 0.145s std dev: 0.01498s window: 19
+average rate: 8.474
+	min: 0.093s max: 0.145s std dev: 0.01418s window: 28
+average rate: 8.392
+	min: 0.093s max: 0.145s std dev: 0.01333s window: 37
+average rate: 8.361
+	min: 0.093s max: 0.145s std dev: 0.01318s window: 46
+
+============================================================
+14. PUBLICADOR DEL CONTROLADOR
+============================================================
+Type: trajectory_msgs/msg/JointTrajectory
+
+Publisher count: 1
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: trajectory_msgs/msg/JointTrajectory
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.fd.44.d6.87.00.00.00.00.00.00.1e.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: arm_controller
+Node namespace: /
+Topic type: trajectory_msgs/msg/JointTrajectory
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.f0.43.8f.a2.00.00.00.00.00.00.66.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+============================================================
+15. ARCHIVOS DE RESPALDO DENTRO DE SRC
+============================================================
+src/thesis_ui/thesis_ui/joint_control_gui.py.~1~
+src/thesis_ui/thesis_ui/joint_control_gui.py.bak_v5
+
+============================================================
+16. RESULTADO DE PRUEBAS DISPONIBLE
+============================================================
+build/thesis_core/pytest.xml: 8 tests, 0 errors, 2 failures, 1 skipped
+- thesis_core.test.test_flake8 test_flake8
+  <<< failure message
+    AssertionError: Found 3 code style errors / warnings:
+      ./thesis_core/safety_supervisor_node.py:21:1: E303 too many blank lines (3)
+      ./test/test_execution_reference.py:25:5: E303 too many blank lines (2)
+      ./test/test_execution_reference.py:34:5: E303 too many blank lines (2)
+    assert 1 == 0
+  >>>
+- thesis_core.test.test_pep257 test_pep257
+  <<< failure message
+    AssertionError: Found code style errors / warnings
+    assert 1 == 0
+  >>>
+
+Summary: 18 tests, 0 errors, 2 failures, 3 skipped
+
+============================================================
+FIN DE EVIDENCIA A
+============================================================

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>thesis_validation</name>
+  <version>0.1.0</version>
+  <description>Validation matrix and evidence tooling for Thesis Advance 2.</description>
+  <maintainer email="luis@todo.todo">Luis</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>thesis_core</exec_depend>
+  <exec_depend>thesis_interfaces</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

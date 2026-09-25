@@ -12,39 +12,10 @@ from tf2_msgs.msg import TFMessage
 
 from thesis_interfaces.msg import ProximityStatus
 
-
-def closest_point_on_segment(point, start, end):
-    """Return the point on a line segment closest to the supplied point."""
-    ab_x = end.x - start.x
-    ab_y = end.y - start.y
-    ab_z = end.z - start.z
-    ap_x = point.x - start.x
-    ap_y = point.y - start.y
-    ap_z = point.z - start.z
-
-    denominator = ab_x * ab_x + ab_y * ab_y + ab_z * ab_z
-    if denominator <= 1.0e-12:
-        return Point(x=start.x, y=start.y, z=start.z)
-
-    factor = (
-        ap_x * ab_x + ap_y * ab_y + ap_z * ab_z
-    ) / denominator
-    factor = max(0.0, min(1.0, factor))
-
-    return Point(
-        x=start.x + factor * ab_x,
-        y=start.y + factor * ab_y,
-        z=start.z + factor * ab_z,
-    )
-
-
-def point_distance(first, second):
-    """Return Euclidean distance between two geometry points."""
-    return math.sqrt(
-        (first.x - second.x) ** 2
-        + (first.y - second.y) ** 2
-        + (first.z - second.z) ** 2
-    )
+from thesis_core.clearance_geometry import (
+    minimum_configuration_clearance,
+)
+from thesis_core.jaco_kinematics import CAPSULE_RADII, SEGMENT_NAMES
 
 
 class ProximityMonitorNode(Node):
@@ -160,6 +131,10 @@ class ProximityMonitorNode(Node):
             y=float(selected.y),
             z=float(selected.z),
         )
+        if not all(math.isfinite(value) for value in (
+            center.x, center.y, center.z
+        )):
+            return
         now = time.monotonic()
         if self.previous_obstacle_center is not None:
             elapsed = now - self.previous_obstacle_time
@@ -187,8 +162,18 @@ class ProximityMonitorNode(Node):
             raise ValueError(
                 'Capsule parameter arrays must have equal non-zero length'
             )
-        if any(radius <= 0.0 for radius in self.radii):
-            raise ValueError('Capsule radii must be greater than zero')
+        if any(
+            not math.isfinite(radius) or radius <= 0.0
+            for radius in self.radii
+        ):
+            raise ValueError('Capsule radii must be finite and positive')
+        if tuple(self.segment_names) != SEGMENT_NAMES:
+            raise ValueError('Segment names differ from canonical geometry')
+        if len(self.radii) != len(CAPSULE_RADII) or any(
+            not math.isclose(actual, expected, abs_tol=1.0e-12)
+            for actual, expected in zip(self.radii, CAPSULE_RADII)
+        ):
+            raise ValueError('Capsule radii differ from canonical geometry')
 
         warning = float(self.get_parameter('warning_distance').value)
         reduction = float(
@@ -252,28 +237,20 @@ class ProximityMonitorNode(Node):
     def evaluate(self):
         obstacle, obstacle_radius, obstacle_velocity = self._obstacle()
         unavailable = set()
-        best_result = None
+        segments = []
 
-        for name, start_frame, end_frame, radius in zip(
-                self.segment_names,
-                self.start_frames,
-                self.end_frames,
-                self.radii):
+        for start_frame, end_frame in zip(
+                self.start_frames, self.end_frames):
             try:
                 start = self._frame_point(start_frame)
                 end = self._frame_point(end_frame)
             except TransformException:
                 unavailable.update((start_frame, end_frame))
                 continue
-
-            closest = closest_point_on_segment(obstacle, start, end)
-            clearance = (
-                point_distance(obstacle, closest)
-                - radius
-                - obstacle_radius
-            )
-            if best_result is None or clearance < best_result[0]:
-                best_result = (clearance, name, closest)
+            segments.append((
+                (start.x, start.y, start.z),
+                (end.x, end.y, end.z),
+            ))
 
         if unavailable != self.missing_frames:
             if unavailable:
@@ -287,18 +264,34 @@ class ProximityMonitorNode(Node):
                 )
             self.missing_frames = unavailable
 
-        if best_result is None:
+        if unavailable or len(segments) != len(self.segment_names):
             return
 
-        clearance, limiting_segment, closest = best_result
-        state = self._state_for_clearance(clearance)
+        try:
+            result = minimum_configuration_clearance(
+                segments,
+                self.segment_names,
+                self.radii,
+                (obstacle.x, obstacle.y, obstacle.z),
+                obstacle_radius,
+            )
+        except ValueError as exc:
+            self.get_logger().error(f'Invalid proximity geometry: {exc}')
+            return
+
+        state = self._state_for_clearance(result.clearance)
+        closest = Point(
+            x=result.closest_robot_point[0],
+            y=result.closest_robot_point[1],
+            z=result.closest_robot_point[2],
+        )
 
         message = ProximityStatus()
         message.stamp = self.get_clock().now().to_msg()
         message.reference_frame = self.reference_frame
         message.state = state
-        message.minimum_clearance = clearance
-        message.limiting_segment = limiting_segment
+        message.minimum_clearance = result.clearance
+        message.limiting_segment = result.segment_name
         message.closest_robot_point = closest
         message.obstacle_center = obstacle
         message.obstacle_velocity.x = obstacle_velocity[0]
@@ -309,8 +302,8 @@ class ProximityMonitorNode(Node):
 
         if state != self.previous_state:
             self.get_logger().info(
-                f'{state}: clearance={clearance:.3f} m, '
-                f'segment={limiting_segment}'
+                f'{state}: clearance={result.clearance:.3f} m, '
+                f'segment={result.segment_name}'
             )
             self.previous_state = state
 

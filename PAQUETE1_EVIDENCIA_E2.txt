@@ -1,0 +1,52 @@
+============================================================
+PAQUETE 1 — FASE E2: VALIDACIÓN EN EJECUCIÓN
+Fecha: 2026-09-22T07:47:51-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+============================================================
+SHA256_ESPERADO=c69ec4de0a1f828863949ffce2c2571b343e456ea0920cfd5aebb3faae8b79b6
+SHA256_OBTENIDO=c69ec4de0a1f828863949ffce2c2571b343e456ea0920cfd5aebb3faae8b79b6
+RESULTADO_INTEGRIDAD=PASS
+
+----- ESTADO INICIAL DEL ADAPTADOR -----
+Boolean value is: True
+RESULTADO_PARAMETRO_INICIAL=0
+
+----- DESACTIVAR MOVIMIENTO DE CANDIDATOS -----
+Set parameter successful
+RESULTADO_DESACTIVACION=0
+Boolean value is: False
+
+----- PRUEBAS DEL SUPERVISOR -----
+PROXIMITY_STATE=REDUCTION
+INITIAL_POSITIONS=(0.24075192518967356, 2.7018910783990835, 3.517974367525061, 0.045088619721971944, -6.623692381536863e-07, -5.114765577465964e-07)
+TEST_J1_POS_36=PASS requested_deg=+36.000 supervised_delta_deg=+18.000000 duration=1.000000s diagnostic='VELOCITY SATURATED p1_J1_POS_36_13106640021801: joint=j2n6s300_joint_1, requested=0.6283rad/s, limited=0.3142rad/s || PREDICTION p1_J1_POS_36_13106640021801: WARNING, min_clearance=0.086 m, path=0.00, segment=wrist_2_to_tool || WARNING p1_J1_POS_36_13106640021801: clearance=0.086 m, segment=wrist_2_to_tool'
+TEST_J1_NEG_36=PASS requested_deg=-36.000 supervised_delta_deg=-18.000000 duration=1.000000s diagnostic='VELOCITY SATURATED p1_J1_NEG_36_13106656924973: joint=j2n6s300_joint_1, requested=-0.6283rad/s, limited=-0.3142rad/s || PREDICTION p1_J1_NEG_36_13106656924973: WARNING, min_clearance=0.076 m, path=0.50, segment=wrist_2_to_tool || WARNING p1_J1_NEG_36_13106656924973: clearance=0.076 m, segment=wrist_2_to_tool'
+TEST_J4_POS_48=PASS requested_deg=+48.000 supervised_delta_deg=+24.000000 duration=1.000000s diagnostic='VELOCITY SATURATED p1_J4_POS_48_13106674360750: joint=j2n6s300_joint_4, requested=0.8378rad/s, limited=0.4189rad/s || PREDICTION p1_J4_POS_48_13106674360750: WARNING, min_clearance=0.071 m, path=1.00, segment=wrist_2_to_tool || WARNING p1_J4_POS_48_13106674360750: clearance=0.071 m, segment=wrist_2_to_tool || WARNING FORWARDED id=p1_J4_POS_48_13106674360750 | joints=6 | proximity=WARNING | duration=1.00 s | joint_lim=j2n6s300_joint_4 | v_req=0.8378 rad/s | v_lim=0.4189 rad/s | input_latency=-1790080622061.456 ms'
+TEST_WRONG_ORDER=PASS detail='REJECTED p1_WRONG_ORDER_13106711695157: expected six arm joints in canonical order'
+TEST_NAN_REJECTION=PASS detail='REJECTED p1_NAN_REJECTION_13106730126562: non-finite joint position detected'
+CANDIDATE_TESTS=PASS
+RESULTADO_PRUEBAS_CANDIDATE=0
+
+----- RESTAURAR MOVIMIENTO EN GAZEBO -----
+Set parameter successful
+RESULTADO_REACTIVACION=0
+Boolean value is: True
+
+----- PRUEBA JOG Y SALIDA AL CONTROLADOR -----
+TEST_JOG_SUPERVISOR=PASS velocity_deg_s=+18.000000
+TEST_CONTROLLER_OUTPUT=PASS duration=0.100000s velocities_deg_s=(0.0, 4.768287578450104e-10, -4.811288677743491e-09, -1.1138294543098532e-08, 2.6665161965567317e-09, -1.688481109891328e-10)
+TEST_JOG_DIAGNOSTIC=FAIL diagnostic=''
+JOG_TESTS=FAIL
+RESULTADO_PRUEBA_JOG=1
+
+----- CONFIRMACIÓN FINAL DEL ADAPTADOR -----
+Boolean value is: True
+RESULTADO_PARAMETRO_FINAL=0
+SALIDA_SIMULACION_FINAL=HABILITADA
+
+============================================================
+FASE_E2=FAIL
+RESULTADO_GLOBAL_FASE_E2=1
+
+CODIGO_SALIDA_FASE_E2=1
+REPORTE=/home/luis/Escritorio/TESIS_2_IMPLEMENTATION/PAQUETE1_EVIDENCIA_E2.txt

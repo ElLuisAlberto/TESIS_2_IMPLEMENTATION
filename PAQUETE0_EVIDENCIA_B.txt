@@ -1,0 +1,396 @@
+PAQUETE 0 — EVIDENCIA DE REINICIO B
+Fecha: 2026-09-22T06:20:19-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+ROS_DISTRO=humble
+
+============================================================
+1. COMANDOS DE INICIO DE LA EJECUCIÓN B
+============================================================
+  18444 Tue Sep 22 06:19:39 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 launch thesis_simulation jaco_gazebo.launch.py
+  18450 Tue Sep 22 06:19:39 2026 ign gazebo -r -v 3 /home/luis/Escritorio/TESIS_2_IMPLEMENTATION/install/thesis_simulation/share/thesis_simulation/worlds/jaco_empty.sdf
+  18452 Tue Sep 22 06:19:39 2026 /opt/ros/humble/lib/ros_gz_bridge/parameter_bridge /clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock --ros-args -r __node:=gazebo_clock_bridge
+  18454 Tue Sep 22 06:19:39 2026 /opt/ros/humble/lib/ros_gz_bridge/parameter_bridge /world/jaco_world/pose/info@tf2_msgs/msg/TFMessage[ignition.msgs.Pose_V --ros-args -r __node:=gazebo_pose_bridge --params-file /tmp/launch_params_nczwj72_
+  18456 Tue Sep 22 06:19:39 2026 /opt/ros/humble/lib/rviz2/rviz2 -d /home/luis/Escritorio/TESIS_2_IMPLEMENTATION/install/thesis_description/share/thesis_description/rviz/jaco.rviz --ros-args --params-file /tmp/launch_params_2p_pq9x0
+  18522 Tue Sep 22 06:19:40 2026 ign gazebo server
+  18523 Tue Sep 22 06:19:40 2026 ign gazebo gui
+  18843 Tue Sep 22 06:19:48 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 launch thesis_simulation safety_pipeline.launch.py simulation_output_enabled:=true require_proximity_status:=true use_sim_time:=true
+  18886 Tue Sep 22 06:19:55 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 run thesis_core horizon_preview --ros-args -p use_sim_time:=true -p source:=auto -p horizon_sec:=1.0 -p samples:=21 -p margin_m:=0.02 -p rate_hz:=10.0
+  18916 Tue Sep 22 06:20:03 2026 /usr/bin/python3 /opt/ros/humble/bin/ros2 run thesis_ui joint_gui
+
+============================================================
+2. NODOS OBLIGATORIOS
+============================================================
+/joint_state_broadcaster cantidad=1
+/arm_controller cantidad=1
+/robot_state_publisher cantidad=1
+/proximity_monitor cantidad=1
+/capsule_visualizer cantidad=1
+/horizon_preview cantidad=1
+/safety_supervisor_node cantidad=1
+/simulation_command_adapter cantidad=1
+/joint_control_gui_node cantidad=1
+/rviz cantidad=1
+
+============================================================
+3. CONTROLADORES
+============================================================
+[INFO] [1790076029.809862369] [_ros2cli_19003]: waiting for service /controller_manager/list_controllers to become available...
+[92mjoint_state_broadcaster[0m joint_state_broadcaster/JointStateBroadcaster          [92mactive[0m
+[92marm_controller         [0m joint_trajectory_controller/JointTrajectoryController  [92mactive[0m
+
+[INFO] [1790076033.822951503] [_ros2cli_19020]: waiting for service /controller_manager/list_hardware_interfaces to become available...
+command interfaces
+	[94mj2n6s300_joint_1/position [available] [claimed][0m
+	[94mj2n6s300_joint_2/position [available] [claimed][0m
+	[94mj2n6s300_joint_3/position [available] [claimed][0m
+	[94mj2n6s300_joint_4/position [available] [claimed][0m
+	[94mj2n6s300_joint_5/position [available] [claimed][0m
+	[94mj2n6s300_joint_6/position [available] [claimed][0m
+state interfaces
+	j2n6s300_joint_1/position
+	j2n6s300_joint_1/velocity
+	j2n6s300_joint_2/position
+	j2n6s300_joint_2/velocity
+	j2n6s300_joint_3/position
+	j2n6s300_joint_3/velocity
+	j2n6s300_joint_4/position
+	j2n6s300_joint_4/velocity
+	j2n6s300_joint_5/position
+	j2n6s300_joint_5/velocity
+	j2n6s300_joint_6/position
+	j2n6s300_joint_6/velocity
+
+============================================================
+4. POSTURA INICIAL B — MUESTRA 1
+============================================================
+header:
+  stamp:
+    sec: 44
+    nanosec: 288000000
+  frame_id: base_link
+name:
+- j2n6s300_joint_2
+- j2n6s300_joint_3
+- j2n6s300_joint_4
+- j2n6s300_joint_5
+- j2n6s300_joint_1
+- j2n6s300_joint_6
+- j2n6s300_joint_finger_1
+- j2n6s300_joint_finger_tip_1
+- j2n6s300_joint_finger_2
+- j2n6s300_joint_finger_tip_2
+- j2n6s300_joint_finger_3
+- j2n6s300_joint_finger_tip_3
+position:
+- 3.141592655710413
+- 3.141592682920455
+- -5.595139010573419e-07
+- -6.068646822980676e-07
+- 2.760754810654131e-09
+- -5.149753083628115e-07
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+velocity:
+- 1.7981565579044023e-13
+- 1.8192095236919253e-13
+- 1.734723475976807e-18
+- 6.505213034913027e-19
+- -4.404571325722362e-19
+- 1.0842021724855044e-18
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+effort:
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+---
+
+============================================================
+5. POSTURA INICIAL B — MUESTRA 2
+============================================================
+header:
+  stamp:
+    sec: 49
+    nanosec: 598000000
+  frame_id: base_link
+name:
+- j2n6s300_joint_2
+- j2n6s300_joint_3
+- j2n6s300_joint_4
+- j2n6s300_joint_5
+- j2n6s300_joint_1
+- j2n6s300_joint_6
+- j2n6s300_joint_finger_1
+- j2n6s300_joint_finger_tip_1
+- j2n6s300_joint_finger_2
+- j2n6s300_joint_finger_tip_2
+- j2n6s300_joint_finger_3
+- j2n6s300_joint_finger_tip_3
+position:
+- 3.141592655710413
+- 3.141592682920455
+- -5.595139010573591e-07
+- -6.068646822980602e-07
+- 2.7607548106578072e-09
+- -5.149753083628691e-07
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+velocity:
+- 1.7981554991132183e-13
+- 1.8192070164744015e-13
+- 2.2768245622195593e-18
+- 4.336808689942018e-19
+- -8.267041565201971e-19
+- 7.589415207398531e-19
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+effort:
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- .nan
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+---
+
+============================================================
+6. ANTIGÜEDAD DE JOINT_STATES CON TIEMPO SIMULADO
+============================================================
+muestras_recibidas=100
+age_min_sec=0.000000000
+age_mean_sec=0.000073684
+age_max_sec=0.001000000
+AGE_PASS=True
+
+============================================================
+7. OBSTÁCULO EN LA EJECUCIÓN B
+============================================================
+stamp:
+  sec: 52
+  nanosec: 750000000
+reference_frame: world
+state: ALLOW
+minimum_clearance: 0.39500213411929286
+limiting_segment: upper_arm_to_forearm
+closest_robot_point:
+  x: -7.897548742539999e-10
+  y: 0.0015999999999999266
+  z: 0.6499999987276283
+obstacle_center:
+  x: 0.6
+  y: 0.0
+  z: 0.65
+obstacle_velocity:
+  x: 0.0
+  y: 0.0
+  z: 0.0
+obstacle_radius: 0.12
+---
+
+============================================================
+8. PARÁMETROS CONGELADOS DEL SUPERVISOR
+============================================================
+prediction_horizon_sec=Double value is: 1.0
+runtime_horizon_sec=Double value is: 1.0
+prediction_samples=Integer value is: 25
+runtime_samples=Integer value is: 21
+predictive_margin_m=Double value is: 0.02
+warning_distance=Double value is: 0.3
+reduction_distance=Double value is: 0.15
+stop_distance=Double value is: 0.05
+runtime_rate_hz=Double value is: 10.0
+max_state_age_sec=Double value is: 0.5
+max_proximity_age_sec=Double value is: 0.5
+
+============================================================
+9. PARÁMETROS CONGELADOS DEL ADAPTADOR
+============================================================
+jog_control_period_sec=Double value is: 0.1
+jog_command_timeout_sec=Double value is: 0.25
+max_state_age_sec=Double value is: 0.5
+simulation_output_enabled=Boolean value is: True
+
+============================================================
+10. CONEXIÓN GUI–SUPERVISOR–ADAPTADOR–CONTROLADOR
+============================================================
+
+-------------------- /thesis/jog_intent --------------------
+Type: thesis_interfaces/msg/JointCommand
+
+Publisher count: 1
+
+Node name: joint_control_gui_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.e5.49.c7.43.00.00.00.00.00.00.13.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.9e.49.31.31.00.00.00.00.00.00.14.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /thesis/supervised_jog_command --------------------
+Type: thesis_interfaces/msg/JointCommand
+
+Publisher count: 1
+
+Node name: safety_supervisor_node
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.9e.49.31.31.00.00.00.00.00.00.18.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 2
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.a0.49.e2.ca.00.00.00.00.00.00.1f.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: thesis_interfaces/msg/JointCommand
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.c7.49.e0.17.00.00.00.00.00.00.15.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+-------------------- /arm_controller/joint_trajectory --------------------
+Type: trajectory_msgs/msg/JointTrajectory
+
+Publisher count: 1
+
+Node name: simulation_command_adapter
+Node namespace: /
+Topic type: trajectory_msgs/msg/JointTrajectory
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.a0.49.e2.ca.00.00.00.00.00.00.1e.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 1
+
+Node name: arm_controller
+Node namespace: /
+Topic type: trajectory_msgs/msg/JointTrajectory
+Endpoint type: SUBSCRIPTION
+GID: 01.0f.67.f0.5a.48.c7.bd.00.00.00.00.00.00.66.04.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: BEST_EFFORT
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+
+============================================================
+11. SUSCRIPCIÓN DE RVIZ AL HORIZONTE
+============================================================
+Type: visualization_msgs/msg/MarkerArray
+
+Publisher count: 1
+
+Node name: horizon_preview
+Node namespace: /
+Topic type: visualization_msgs/msg/MarkerArray
+Endpoint type: PUBLISHER
+GID: 01.0f.67.f0.c7.49.e0.17.00.00.00.00.00.00.12.03.00.00.00.00.00.00.00.00
+QoS profile:
+  Reliability: RELIABLE
+  History (Depth): UNKNOWN
+  Durability: VOLATILE
+  Lifespan: Infinite
+  Deadline: Infinite
+  Liveliness: AUTOMATIC
+  Liveliness lease duration: Infinite
+
+Subscription count: 0
+
+
+============================================================
+FIN DE EVIDENCIA B
+============================================================

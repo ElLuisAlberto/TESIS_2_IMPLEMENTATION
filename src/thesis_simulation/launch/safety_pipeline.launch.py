@@ -50,6 +50,10 @@ def generate_launch_description():
                     require_proximity_status,
                     value_type=bool,
                 ),
+                'runtime_recovery_required_samples': 5,
+                'runtime_max_scale_increment': 0.10,
+                'runtime_recovery_sample_period_sec': 0.10,
+                'jog_command_timeout_sec': 0.25,
             }],
         ),
 
@@ -67,6 +71,9 @@ def generate_launch_description():
                         simulation_output_enabled,
                         value_type=bool,
                     ),
+                'control_replan_cooldown_sec': 0.75,
+                'jog_control_period_sec': 0.10,
+                'jog_command_timeout_sec': 0.25,
             }],
         ),
     ])

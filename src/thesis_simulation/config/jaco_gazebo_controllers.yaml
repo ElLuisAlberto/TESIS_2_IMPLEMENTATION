@@ -39,3 +39,6 @@ arm_controller:
       - velocity
 
     allow_partial_joints_goal: false
+
+    # Preserve trajectory continuity between rolling JOG updates.
+    open_loop_control: true

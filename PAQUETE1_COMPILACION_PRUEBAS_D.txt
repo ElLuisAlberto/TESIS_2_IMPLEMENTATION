@@ -1,0 +1,898 @@
+============================================================
+PAQUETE 1 — FASE D: COMPILACIÓN Y PRUEBAS AUTOMÁTICAS
+Fecha: 2026-09-22T07:20:16-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+============================================================
+TEMP_ROOT=/tmp/tesis-paquete1-fase-d-vK5roB
+BUILD_BASE=/tmp/tesis-paquete1-fase-d-vK5roB/build
+INSTALL_BASE=/tmp/tesis-paquete1-fase-d-vK5roB/install
+LOG_BASE=/tmp/tesis-paquete1-fase-d-vK5roB/log
+ROS_DISTRO=humble
+
+----- PAQUETES DETECTADOS -----
+thesis_core	src/thesis_core	(ros.ament_python)
+thesis_description	src/thesis_description	(ros.ament_cmake)
+thesis_hardware	src/thesis_hardware	(ros.ament_python)
+thesis_hardware_bridge	src/thesis_hardware_bridge	(ros.ament_cmake)
+thesis_interfaces	src/thesis_interfaces	(ros.ament_cmake)
+thesis_simulation	src/thesis_simulation	(ros.ament_python)
+thesis_ui	src/thesis_ui	(ros.ament_python)
+RESULTADO_COLCON_LIST=0
+
+----- COMPILACIÓN LIMPIA -----
+Starting >>> thesis_interfaces
+Starting >>> thesis_description
+-- The C compiler identification is GNU 11.4.0
+-- The C compiler identification is GNU 11.4.0
+-- The CXX compiler identification is GNU 11.4.0
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Detecting CXX compile features - done
+-- Found ament_cmake: 1.3.14 (/opt/ros/humble/share/ament_cmake/cmake)
+-- Found ament_cmake: 1.3.14 (/opt/ros/humble/share/ament_cmake/cmake)
+-- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+-- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+-- Override CMake install command with custom implementation using symlinks instead of copying resources
+-- Override CMake install command with custom implementation using symlinks instead of copying resources
+-- Found builtin_interfaces: 1.2.3 (/opt/ros/humble/share/builtin_interfaces/cmake)
+-- Found rosidl_generator_c: 3.1.9 (/opt/ros/humble/share/rosidl_generator_c/cmake)
+-- Found rosidl_adapter: 3.1.9 (/opt/ros/humble/share/rosidl_adapter/cmake)
+-- Found rosidl_generator_cpp: 3.1.9 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_description
+-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+-- Found geometry_msgs: 4.9.2 (/opt/ros/humble/share/geometry_msgs/cmake)
+-- Install configuration: ""
+-- Execute custom install script
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/urdf/j2n6s300.xacro
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/urdf/j2n6s300_standalone.xacro
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/urdf/kinova.gazebo
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/urdf/kinova_common.xacro
+-- Found rosidl_default_generators: 1.2.1 (/opt/ros/humble/share/rosidl_default_generators/cmake)
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/urdf/kinova_finger_set.xacro
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/urdf/kinova_inertial.xacro
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/arm.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/arm_half_1.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/arm_half_2.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/arm_mico.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/base.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/finger_distal.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/finger_proximal.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/forearm.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/forearm_mico.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/hand_2finger.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/hand_3finger.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/ring_big.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/ring_small.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/shoulder.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/wrist.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/wrist_spherical_1.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/meshes/wrist_spherical_2.dae
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/launch/__pycache__/view_jaco_hardware.launch.cpython-310.pyc
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/launch/view_jaco.launch.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/launch/view_jaco_hardware.launch.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/rviz/jaco.rviz
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/UPSTREAM.md
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/KINOVA_LICENSE
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/ament_index/resource_index/package_run_dependencies/thesis_description
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/ament_index/resource_index/parent_prefix_path/thesis_description
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/environment/ament_prefix_path.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/environment/ament_prefix_path.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/environment/path.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/environment/path.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/local_setup.bash
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/local_setup.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/local_setup.zsh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/local_setup.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/package.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/ament_index/resource_index/packages/thesis_description
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/cmake/thesis_descriptionConfig.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/cmake/thesis_descriptionConfig-version.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_description/share/thesis_description/package.xml
+Finished <<< thesis_description [0.96s]
+-- Found ament_cmake_ros: 0.10.1 (/opt/ros/humble/share/ament_cmake_ros/cmake)
+-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+-- Found PythonInterp: /usr/bin/python3 (found suitable version "3.10.12", minimum required is "3.6") 
+-- Found python_cmake_module: 0.10.0 (/opt/ros/humble/share/python_cmake_module/cmake)
+-- Found PythonLibs: /usr/lib/x86_64-linux-gnu/libpython3.10.so (found suitable version "3.10.12", minimum required is "3.5") 
+-- Using PYTHON_EXECUTABLE: /usr/bin/python3
+-- Using PYTHON_INCLUDE_DIRS: /usr/include/python3.10
+-- Using PYTHON_LIBRARIES: /usr/lib/x86_64-linux-gnu/libpython3.10.so
+-- Found PythonExtra: .so  
+-- Found ament_lint_auto: 0.12.15 (/opt/ros/humble/share/ament_lint_auto/cmake)
+-- Added test 'lint_cmake' to check CMake code style
+-- Added test 'xmllint' to check XML markup files
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_interfaces
+[  1%] Generating C code for ROS interfaces
+[  2%] Generating Rust code for ROS interfaces
+[  4%] Generating C++ code for ROS interfaces
+[  4%] Built target ament_cmake_python_symlink_thesis_interfaces
+running egg_info
+creating thesis_interfaces.egg-info
+writing thesis_interfaces.egg-info/PKG-INFO
+writing dependency_links to thesis_interfaces.egg-info/dependency_links.txt
+writing top-level names to thesis_interfaces.egg-info/top_level.txt
+writing manifest file 'thesis_interfaces.egg-info/SOURCES.txt'
+reading manifest file 'thesis_interfaces.egg-info/SOURCES.txt'
+writing manifest file 'thesis_interfaces.egg-info/SOURCES.txt'
+[  4%] Built target ament_cmake_python_build_thesis_interfaces_egg
+[  4%] Built target thesis_interfaces__rs
+[  4%] Built target thesis_interfaces__cpp
+[  6%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_c.dir/rosidl_generator_c/thesis_interfaces/msg/detail/trajectory_prediction__functions.c.o
+[  6%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_c.dir/rosidl_generator_c/thesis_interfaces/msg/detail/proximity_status__functions.c.o
+[  8%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_c.dir/rosidl_generator_c/thesis_interfaces/msg/detail/command_decision__functions.c.o
+[  9%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_c.dir/rosidl_generator_c/thesis_interfaces/msg/detail/execution_trajectory__functions.c.o
+[ 11%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_c.dir/rosidl_generator_c/thesis_interfaces/msg/detail/joint_command__functions.c.o
+[ 12%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_c.dir/rosidl_generator_c/thesis_interfaces/msg/detail/execution_control__functions.c.o
+[ 15%] Generating C++ introspection for ROS interfaces
+[ 15%] Generating C++ type support for eProsima Fast-RTPS
+[ 16%] Generating C++ type support dispatch for ROS interfaces
+[ 18%] Linking C shared library libthesis_interfaces__rosidl_generator_c.so
+[ 18%] Built target thesis_interfaces__rosidl_generator_c
+[ 19%] Generating C type support for eProsima Fast-RTPS
+[ 22%] Generating C introspection for ROS interfaces
+[ 22%] Generating C type support dispatch for ROS interfaces
+[ 23%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/thesis_interfaces/msg/joint_command__type_support.cpp.o
+[ 25%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/thesis_interfaces/msg/execution_trajectory__type_support.cpp.o
+[ 26%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/thesis_interfaces/msg/command_decision__type_support.cpp.o
+[ 27%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/thesis_interfaces/msg/proximity_status__type_support.cpp.o
+[ 29%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/thesis_interfaces/msg/trajectory_prediction__type_support.cpp.o
+[ 30%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/thesis_interfaces/msg/execution_control__type_support.cpp.o
+[ 31%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/thesis_interfaces/msg/detail/joint_command__type_support.cpp.o
+[ 33%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/thesis_interfaces/msg/detail/proximity_status__type_support.cpp.o
+[ 34%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/thesis_interfaces/msg/detail/trajectory_prediction__type_support.cpp.o
+[ 36%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/thesis_interfaces/msg/detail/execution_trajectory__type_support.cpp.o
+[ 37%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/thesis_interfaces/msg/detail/command_decision__type_support.cpp.o
+[ 38%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/thesis_interfaces/msg/detail/execution_control__type_support.cpp.o
+[ 40%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/thesis_interfaces/msg/joint_command__type_support.cpp.o
+[ 41%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/thesis_interfaces/msg/proximity_status__type_support.cpp.o
+[ 43%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/thesis_interfaces/msg/trajectory_prediction__type_support.cpp.o
+[ 44%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/thesis_interfaces/msg/command_decision__type_support.cpp.o
+[ 45%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/thesis_interfaces/msg/detail/joint_command__type_support.c.o
+[ 47%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/thesis_interfaces/msg/execution_trajectory__type_support.cpp.o
+[ 48%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/thesis_interfaces/msg/detail/proximity_status__type_support.c.o
+[ 50%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/thesis_interfaces/msg/execution_control__type_support.cpp.o
+[ 51%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/thesis_interfaces/msg/detail/trajectory_prediction__type_support.c.o
+[ 52%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/thesis_interfaces/msg/detail/dds_fastrtps/joint_command__type_support.cpp.o
+[ 54%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/thesis_interfaces/msg/detail/dds_fastrtps/proximity_status__type_support.cpp.o
+[ 55%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/thesis_interfaces/msg/detail/dds_fastrtps/trajectory_prediction__type_support.cpp.o
+[ 56%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/thesis_interfaces/msg/detail/dds_fastrtps/command_decision__type_support.cpp.o
+[ 58%] Linking CXX shared library libthesis_interfaces__rosidl_typesupport_c.so
+[ 59%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/thesis_interfaces/msg/detail/command_decision__type_support.c.o
+[ 61%] Linking CXX shared library libthesis_interfaces__rosidl_typesupport_cpp.so
+[ 62%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/thesis_interfaces/msg/detail/execution_trajectory__type_support.c.o
+[ 63%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/thesis_interfaces/msg/detail/execution_control__type_support.c.o
+[ 65%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/thesis_interfaces/msg/detail/joint_command__type_support_c.cpp.o
+[ 66%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/thesis_interfaces/msg/detail/proximity_status__type_support_c.cpp.o
+[ 66%] Built target thesis_interfaces__rosidl_typesupport_cpp
+[ 68%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/thesis_interfaces/msg/detail/dds_fastrtps/execution_control__type_support.cpp.o
+[ 69%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/thesis_interfaces/msg/detail/dds_fastrtps/execution_trajectory__type_support.cpp.o
+[ 70%] Linking C shared library libthesis_interfaces__rosidl_typesupport_introspection_c.so
+[ 70%] Built target thesis_interfaces__rosidl_typesupport_c
+[ 72%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/thesis_interfaces/msg/detail/trajectory_prediction__type_support_c.cpp.o
+[ 72%] Built target thesis_interfaces__rosidl_typesupport_introspection_c
+[ 73%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/thesis_interfaces/msg/detail/command_decision__type_support_c.cpp.o
+[ 75%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/thesis_interfaces/msg/detail/execution_trajectory__type_support_c.cpp.o
+[ 76%] Building CXX object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/thesis_interfaces/msg/detail/execution_control__type_support_c.cpp.o
+[ 77%] Linking CXX shared library libthesis_interfaces__rosidl_typesupport_introspection_cpp.so
+[ 77%] Built target thesis_interfaces__rosidl_typesupport_introspection_cpp
+[ 79%] Linking CXX shared library libthesis_interfaces__rosidl_typesupport_fastrtps_c.so
+[ 80%] Linking CXX shared library libthesis_interfaces__rosidl_typesupport_fastrtps_cpp.so
+[ 80%] Built target thesis_interfaces__rosidl_typesupport_fastrtps_c
+[ 80%] Built target thesis_interfaces__rosidl_typesupport_fastrtps_cpp
+[ 80%] Built target thesis_interfaces
+[ 81%] Generating Python code for ROS interfaces
+[ 81%] Built target thesis_interfaces__py
+[ 83%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_py.dir/rosidl_generator_py/thesis_interfaces/msg/_joint_command_s.c.o
+[ 84%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_py.dir/rosidl_generator_py/thesis_interfaces/msg/_proximity_status_s.c.o
+[ 86%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_py.dir/rosidl_generator_py/thesis_interfaces/msg/_command_decision_s.c.o
+[ 87%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_py.dir/rosidl_generator_py/thesis_interfaces/msg/_execution_control_s.c.o
+[ 88%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_py.dir/rosidl_generator_py/thesis_interfaces/msg/_execution_trajectory_s.c.o
+[ 90%] Building C object CMakeFiles/thesis_interfaces__rosidl_generator_py.dir/rosidl_generator_py/thesis_interfaces/msg/_trajectory_prediction_s.c.o
+[ 91%] Linking C shared library rosidl_generator_py/thesis_interfaces/libthesis_interfaces__rosidl_generator_py.so
+[ 91%] Built target thesis_interfaces__rosidl_generator_py
+[ 93%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_introspection_c__pyext.dir/rosidl_generator_py/thesis_interfaces/_thesis_interfaces_s.ep.rosidl_typesupport_introspection_c.c.o
+[ 94%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_c__pyext.dir/rosidl_generator_py/thesis_interfaces/_thesis_interfaces_s.ep.rosidl_typesupport_c.c.o
+[ 95%] Building C object CMakeFiles/thesis_interfaces__rosidl_typesupport_fastrtps_c__pyext.dir/rosidl_generator_py/thesis_interfaces/_thesis_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c.o
+[ 97%] Linking C shared library rosidl_generator_py/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+[ 98%] Linking C shared library rosidl_generator_py/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+[100%] Linking C shared library rosidl_generator_py/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+[100%] Built target thesis_interfaces__rosidl_typesupport_fastrtps_c__pyext
+[100%] Built target thesis_interfaces__rosidl_typesupport_c__pyext
+[100%] Built target thesis_interfaces__rosidl_typesupport_introspection_c__pyext
+-- Install configuration: ""
+-- Execute custom install script
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/ament_index/resource_index/rosidl_interfaces/thesis_interfaces
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/command_decision.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__functions.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__struct.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__type_support.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__functions.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__struct.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__type_support.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__functions.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__struct.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__type_support.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__functions.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__struct.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__type_support.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__functions.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__struct.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__type_support.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__functions.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__struct.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__type_support.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/execution_control.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/execution_trajectory.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/joint_command.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/proximity_status.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/rosidl_generator_c__visibility_control.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/trajectory_prediction.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/library_path.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/library_path.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__rosidl_typesupport_fastrtps_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__rosidl_typesupport_fastrtps_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__rosidl_typesupport_fastrtps_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__rosidl_typesupport_fastrtps_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__rosidl_typesupport_fastrtps_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__rosidl_typesupport_fastrtps_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/rosidl_typesupport_fastrtps_c__visibility_control.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/command_decision.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__builder.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__struct.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__traits.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__type_support.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__builder.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__struct.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__traits.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__type_support.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__builder.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__struct.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__traits.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__type_support.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__builder.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__struct.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__traits.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__type_support.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__builder.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__struct.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__traits.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__type_support.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__builder.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__struct.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__traits.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__type_support.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/execution_control.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/execution_trajectory.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/joint_command.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/proximity_status.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/rosidl_generator_cpp__visibility_control.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/trajectory_prediction.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__rosidl_typesupport_fastrtps_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__rosidl_typesupport_fastrtps_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__rosidl_typesupport_fastrtps_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__rosidl_typesupport_fastrtps_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__rosidl_typesupport_fastrtps_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__rosidl_typesupport_fastrtps_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__rosidl_typesupport_introspection_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__rosidl_typesupport_introspection_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__rosidl_typesupport_introspection_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__rosidl_typesupport_introspection_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__rosidl_typesupport_introspection_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__rosidl_typesupport_introspection_c.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/rosidl_typesupport_introspection_c__visibility_control.h
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/command_decision__rosidl_typesupport_introspection_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_control__rosidl_typesupport_introspection_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/execution_trajectory__rosidl_typesupport_introspection_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/joint_command__rosidl_typesupport_introspection_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/proximity_status__rosidl_typesupport_introspection_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/include/thesis_interfaces/thesis_interfaces/msg/detail/trajectory_prediction__rosidl_typesupport_introspection_cpp.hpp
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/pythonpath.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/pythonpath.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces-0.0.0-py3.10.egg-info/PKG-INFO
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces-0.0.0-py3.10.egg-info/SOURCES.txt
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces-0.0.0-py3.10.egg-info/dependency_links.txt
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces-0.0.0-py3.10.egg-info/top_level.txt
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/__init__.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/_thesis_interfaces_s.ep.rosidl_typesupport_c.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/_thesis_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/_thesis_interfaces_s.ep.rosidl_typesupport_introspection_c.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/libthesis_interfaces__rosidl_generator_py.so
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/__init__.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_command_decision.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_command_decision_s.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_execution_control.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_execution_control_s.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_execution_trajectory.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_execution_trajectory_s.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_joint_command.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_joint_command_s.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_proximity_status.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_proximity_status_s.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_trajectory_prediction.py
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_trajectory_prediction_s.c
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+-- Up-to-date symlink: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/thesis_interfaces_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/rust/Cargo.toml
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/rust/build.rs
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/rust/src/lib.rs
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/rust/src/msg.rs
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/rust/src/msg/rmw.rs
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/JointCommand.idl
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/ProximityStatus.idl
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/TrajectoryPrediction.idl
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/CommandDecision.idl
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/ExecutionTrajectory.idl
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/ExecutionControl.idl
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/JointCommand.msg
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/ProximityStatus.msg
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/TrajectoryPrediction.msg
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/CommandDecision.msg
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/ExecutionTrajectory.msg
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/msg/ExecutionControl.msg
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/ament_index/resource_index/package_run_dependencies/thesis_interfaces
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/ament_index/resource_index/parent_prefix_path/thesis_interfaces
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/ament_prefix_path.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/ament_prefix_path.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/path.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/environment/path.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/local_setup.bash
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/local_setup.sh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/local_setup.zsh
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/local_setup.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/package.dsv
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/ament_index/resource_index/packages/thesis_interfaces
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/rosidl_cmake-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/ament_cmake_export_dependencies-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/ament_cmake_export_include_directories-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/ament_cmake_export_libraries-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/ament_cmake_export_targets-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/rosidl_cmake_aggregate_target-extras.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfacesConfig.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfacesConfig-version.cmake
+-- Symlinking: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/package.xml
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_generator_c.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_generator_c.so" to ""
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_fastrtps_c.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_fastrtps_c.so" to ""
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_fastrtps_cpp.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_fastrtps_cpp.so" to ""
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_introspection_c.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_introspection_c.so" to ""
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_c.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_c.so" to ""
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_introspection_cpp.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_introspection_cpp.so" to ""
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_cpp.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_typesupport_cpp.so" to ""
+Listing '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/__init__.py'...
+Listing '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/__init__.py'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_command_decision.py'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_execution_control.py'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_execution_trajectory.py'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_joint_command.py'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_proximity_status.py'...
+Compiling '/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/local/lib/python3.10/dist-packages/thesis_interfaces/msg/_trajectory_prediction.py'...
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_generator_py.so
+-- Set runtime path of "/tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/lib/libthesis_interfaces__rosidl_generator_py.so" to ""
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_generator_cExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_generator_cExport-noconfig.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_typesupport_fastrtps_cExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_typesupport_fastrtps_cExport-noconfig.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_generator_cppExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_typesupport_fastrtps_cppExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_introspection_cExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_introspection_cExport-noconfig.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_cExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_cExport-noconfig.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_introspection_cppExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_introspection_cppExport-noconfig.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_cppExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/thesis_interfaces__rosidl_typesupport_cppExport-noconfig.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_generator_pyExport.cmake
+-- Installing: /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_interfaces/share/thesis_interfaces/cmake/export_thesis_interfaces__rosidl_generator_pyExport-noconfig.cmake
+Finished <<< thesis_interfaces [7.41s]
+Starting >>> thesis_core
+running develop
+running egg_info
+creating thesis_core.egg-info
+writing thesis_core.egg-info/PKG-INFO
+writing dependency_links to thesis_core.egg-info/dependency_links.txt
+writing entry points to thesis_core.egg-info/entry_points.txt
+writing requirements to thesis_core.egg-info/requires.txt
+writing top-level names to thesis_core.egg-info/top_level.txt
+writing manifest file 'thesis_core.egg-info/SOURCES.txt'
+reading manifest file 'thesis_core.egg-info/SOURCES.txt'
+writing manifest file 'thesis_core.egg-info/SOURCES.txt'
+running build_ext
+Creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/lib/python3.10/site-packages/thesis-core.egg-link (link to .)
+Installing horizon_preview script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/lib/thesis_core
+Installing proximity_monitor script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/lib/thesis_core
+Installing safety_supervisor script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/lib/thesis_core
+
+Installed /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_core
+running symlink_data
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/share/ament_index
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/share/ament_index/resource_index
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/share/ament_index/resource_index/packages
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_core/resource/thesis_core -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/share/ament_index/resource_index/packages
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_core/package.xml -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_core/share/thesis_core
+Finished <<< thesis_core [1.06s]
+Starting >>> thesis_simulation
+Starting >>> thesis_ui
+running develop
+running develop
+running egg_info
+creating thesis_ui.egg-info
+writing thesis_ui.egg-info/PKG-INFO
+writing dependency_links to thesis_ui.egg-info/dependency_links.txt
+writing entry points to thesis_ui.egg-info/entry_points.txt
+writing requirements to thesis_ui.egg-info/requires.txt
+writing top-level names to thesis_ui.egg-info/top_level.txt
+writing manifest file 'thesis_ui.egg-info/SOURCES.txt'
+reading manifest file 'thesis_ui.egg-info/SOURCES.txt'
+writing manifest file 'thesis_ui.egg-info/SOURCES.txt'
+running build_ext
+Creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_ui/lib/python3.10/site-packages/thesis-ui.egg-link (link to .)
+Installing joint_gui script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_ui/lib/thesis_ui
+
+Installed /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_ui
+running symlink_data
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_ui/share/ament_index
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_ui/share/ament_index/resource_index
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_ui/share/ament_index/resource_index/packages
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_ui/resource/thesis_ui -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_ui/share/ament_index/resource_index/packages
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_ui/package.xml -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_ui/share/thesis_ui
+running egg_info
+creating thesis_simulation.egg-info
+writing thesis_simulation.egg-info/PKG-INFO
+writing dependency_links to thesis_simulation.egg-info/dependency_links.txt
+writing entry points to thesis_simulation.egg-info/entry_points.txt
+writing requirements to thesis_simulation.egg-info/requires.txt
+writing top-level names to thesis_simulation.egg-info/top_level.txt
+writing manifest file 'thesis_simulation.egg-info/SOURCES.txt'
+reading manifest file 'thesis_simulation.egg-info/SOURCES.txt'
+writing manifest file 'thesis_simulation.egg-info/SOURCES.txt'
+running build_ext
+Creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/lib/python3.10/site-packages/thesis-simulation.egg-link (link to .)
+Installing capsule_visualizer script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/lib/thesis_simulation
+Installing dry_run_adapter script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/lib/thesis_simulation
+Installing simulation_command_adapter script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/lib/thesis_simulation
+Installing test_command script to /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/lib/thesis_simulation
+
+Installed /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation
+running symlink_data
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/ament_index
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/ament_index/resource_index
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/ament_index/resource_index/packages
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/resource/thesis_simulation -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/ament_index/resource_index/packages
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/package.xml -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/launch
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/launch/jaco_gazebo.launch.py -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/launch
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/launch/jaco_mock_control.launch.py -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/launch
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/launch/safety_pipeline.launch.py -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/launch
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/config
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/config/jaco_gazebo_controllers.yaml -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/config
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/config/jaco_capsules.yaml -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/config
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/config/jaco_controllers.yaml -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/config
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/urdf
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/urdf/jaco_mock.ros2_control.xacro -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/urdf
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/urdf
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/worlds
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/worlds/jaco_empty.sdf -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/worlds
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/models
+creating /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/models/safety_obstacle
+symbolically linking /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/models/safety_obstacle/model.sdf -> /tmp/tesis-paquete1-fase-d-vK5roB/install/thesis_simulation/share/thesis_simulation/models/safety_obstacle
+Finished <<< thesis_ui [1.34s]
+Finished <<< thesis_simulation [1.35s]
+
+Summary: 5 packages finished [10.0s]
+RESULTADO_COMPILACION=0
+RESULTADO_SOURCE_OVERLAY=0
+
+----- COMPROBACIÓN DE IMPORTACIONES -----
+JOINT_NAMES= ('j2n6s300_joint_1', 'j2n6s300_joint_2', 'j2n6s300_joint_3', 'j2n6s300_joint_4', 'j2n6s300_joint_5', 'j2n6s300_joint_6')
+VELOCITY_LIMITS_DEG_S= (18.0, 18.0, 18.0, 24.000000000000004, 24.000000000000004, 24.000000000000004)
+CONTINUOUS_JOINTS= ('j2n6s300_joint_1', 'j2n6s300_joint_4', 'j2n6s300_joint_5', 'j2n6s300_joint_6')
+RESULTADO_IMPORTACION_INTERNA=PASS
+RESULTADO_IMPORTACION=0
+
+----- PRUEBAS UNITARIAS DEL MODELO ARTICULAR -----
+.............                                                            [100%]
+13 passed in 0.02s
+RESULTADO_PRUEBAS_UNITARIAS=0
+
+----- PRUEBAS COLCON DE PAQUETES AFECTADOS -----
+Starting >>> thesis_core
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-6.2.5, py-1.10.0, pluggy-0.13.0
+cachedir: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_core/.pytest_cache
+rootdir: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION/src/thesis_core
+plugins: ament-pep257-0.12.15, ament-flake8-0.12.15, ament-copyright-0.12.15, launch-testing-ros-0.19.14, ament-xmllint-0.12.15, launch-testing-1.0.15, ament-lint-0.12.15, colcon-core-0.21.2, cov-3.0.0
+collected 21 items
+
+test/test_copyright.py s                                                 [  4%]
+test/test_execution_reference.py ...                                     [ 19%]
+test/test_flake8.py F                                                    [ 23%]
+test/test_jaco_kinematics.py ..                                          [ 33%]
+test/test_joint_model.py .............                                   [ 95%]
+=============================== warnings summary ===============================
+test/test_flake8.py::test_flake8
+test/test_flake8.py::test_flake8
+  Warning: SelectableGroups dict interface is deprecated. Use select.
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+test/test_pep257.py F                                                    [100%]
+
+=================================== FAILURES ===================================
+_________________________________ test_flake8 __________________________________
+test/test_flake8.py:23: in test_flake8
+    assert rc == 0, \
+E   AssertionError: Found 7 code style errors / warnings:
+E     ./thesis_core/safety_supervisor_node.py:1212:100: E501 line too long (109 > 99 characters)
+E     ./thesis_core/safety_supervisor_node.py:1234:100: E501 line too long (110 > 99 characters)
+E     ./thesis_core/safety_supervisor_node.py:1385:100: E501 line too long (150 > 99 characters)
+E     ./thesis_core/safety_supervisor_node.py:1452:100: E501 line too long (117 > 99 characters)
+E     ./thesis_core/safety_supervisor_node.py:1469:100: E501 line too long (129 > 99 characters)
+E     ./test/test_execution_reference.py:25:5: E303 too many blank lines (2)
+E     ./test/test_execution_reference.py:34:5: E303 too many blank lines (2)
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+
+./thesis_core/safety_supervisor_node.py:1212:100: E501 line too long (109 > 99 characters)
+                f'REJECTED {msg.command_id}: STOP proximity, clearance={clearance:.3f} m, segment={segment}',
+                                                                                                   ^
+
+./thesis_core/safety_supervisor_node.py:1234:100: E501 line too long (110 > 99 characters)
+                    f'REJECTED {msg.command_id}: REDUCTION requested but duration cannot be increased safely',
+                                                                                                   ^
+
+./thesis_core/safety_supervisor_node.py:1385:100: E501 line too long (150 > 99 characters)
+                    f'REJECTED {msg.command_id}: {joint_name} requested velocity {requested_velocity:.4f} rad/s exceeds {allowed_velocity:.4f} rad/s',
+                                                                                                   ^
+
+./thesis_core/safety_supervisor_node.py:1452:100: E501 line too long (117 > 99 characters)
+                    f'REJECTED {msg.command_id}: {joint_name}={position:.4f} rad outside [{lower:.4f}, {upper:.4f}]',
+                                                                                                   ^
+
+./thesis_core/safety_supervisor_node.py:1469:100: E501 line too long (129 > 99 characters)
+                f'REJECTED {msg.command_id}: duration must be between {MIN_DURATION_SEC:.1f} and {MAX_DURATION_SEC:.1f} seconds',
+                                                                                                   ^
+
+./test/test_execution_reference.py:25:5: E303 too many blank lines (2)
+    def test_continuous_joint_uses_shortest_turn(self):
+    ^
+
+./test/test_execution_reference.py:34:5: E303 too many blank lines (2)
+    def test_sample_reference_rejects_invalid_input(self):
+    ^
+
+2     E303 too many blank lines (2)
+5     E501 line too long (109 > 99 characters)
+
+14 files checked
+7 errors
+
+'E'-type errors: 7
+
+Checked files:
+
+* ./setup.py
+* ./thesis_core/proximity_monitor_node.py
+* ./thesis_core/joint_model.py
+* ./thesis_core/execution_reference.py
+* ./thesis_core/safety_supervisor_node.py
+* ./thesis_core/jaco_kinematics.py
+* ./thesis_core/__init__.py
+* ./thesis_core/horizon_preview.py
+* ./test/test_flake8.py
+* ./test/test_pep257.py
+* ./test/test_joint_model.py
+* ./test/test_execution_reference.py
+* ./test/test_jaco_kinematics.py
+* ./test/test_copyright.py
+----------------------------- Captured stderr call -----------------------------
+option --max-complexity: please update from optparse string `type=` to argparse callable `type=` -- this will be an error in the future
+_________________________________ test_pep257 __________________________________
+test/test_pep257.py:23: in test_pep257
+    assert rc == 0, 'Found code style errors / warnings'
+E   AssertionError: Found code style errors / warnings
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+checking ./setup.py
+checking ./test/test_copyright.py
+checking ./test/test_execution_reference.py
+checking ./test/test_flake8.py
+checking ./test/test_jaco_kinematics.py
+checking ./test/test_joint_model.py
+checking ./test/test_pep257.py
+checking ./thesis_core/__init__.py
+checking ./thesis_core/execution_reference.py
+./thesis_core/execution_reference.py:14 in public function `sample_reference`: D213: Multi-line docstring summary should start at the second line
+checking ./thesis_core/horizon_preview.py
+checking ./thesis_core/jaco_kinematics.py
+checking ./thesis_core/joint_model.py
+checking ./thesis_core/proximity_monitor_node.py
+checking ./thesis_core/safety_supervisor_node.py
+checking test/test_copyright.py
+checking test/test_execution_reference.py
+checking test/test_flake8.py
+checking test/test_jaco_kinematics.py
+checking test/test_joint_model.py
+checking test/test_pep257.py
+1 errors
+- generated xml file: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_core/pytest.xml -
+=========================== short test summary info ============================
+FAILED test/test_flake8.py::test_flake8 - AssertionError: Found 7 code style ...
+FAILED test/test_pep257.py::test_pep257 - AssertionError: Found code style er...
+============= 2 failed, 18 passed, 1 skipped, 2 warnings in 0.50s ==============
+--- stderr: thesis_core
+=============================== warnings summary ===============================
+test/test_flake8.py::test_flake8
+test/test_flake8.py::test_flake8
+  Warning: SelectableGroups dict interface is deprecated. Use select.
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+---
+Finished <<< thesis_core [0.96s]	[ with test failures ]
+Starting >>> thesis_simulation
+Starting >>> thesis_ui
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-6.2.5, py-1.10.0, pluggy-0.13.0
+cachedir: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/.pytest_cache
+rootdir: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION/src/thesis_simulation
+plugins: ament-pep257-0.12.15, ament-flake8-0.12.15, ament-copyright-0.12.15, launch-testing-ros-0.19.14, ament-xmllint-0.12.15, launch-testing-1.0.15, ament-lint-0.12.15, colcon-core-0.21.2, cov-3.0.0
+collected 3 items
+
+test/test_copyright.py s                                                 [ 33%]
+test/test_flake8.py .                                                    [ 66%]
+
+=============================== warnings summary ===============================
+thesis_simulation/test_command_node.py:10
+  Warning: cannot collect test class 'TestCommandNode' because it has a __init__ constructor (from: thesis_simulation/test_command_node.py)
+
+test/test_flake8.py::test_flake8
+test/test_flake8.py::test_flake8
+  Warning: SelectableGroups dict interface is deprecated. Use select.
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+test/test_pep257.py .                                                    [100%]
+- generated xml file: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_simulation/pytest.xml -
+=================== 2 passed, 1 skipped, 3 warnings in 0.48s ===================
+--- stderr: thesis_simulation
+
+=============================== warnings summary ===============================
+thesis_simulation/test_command_node.py:10
+  Warning: cannot collect test class 'TestCommandNode' because it has a __init__ constructor (from: thesis_simulation/test_command_node.py)
+
+test/test_flake8.py::test_flake8
+test/test_flake8.py::test_flake8
+  Warning: SelectableGroups dict interface is deprecated. Use select.
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+---
+Finished <<< thesis_simulation [0.98s]
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-6.2.5, py-1.10.0, pluggy-0.13.0
+cachedir: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_ui/.pytest_cache
+rootdir: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION/src/thesis_ui
+plugins: ament-pep257-0.12.15, ament-flake8-0.12.15, ament-copyright-0.12.15, launch-testing-ros-0.19.14, ament-xmllint-0.12.15, launch-testing-1.0.15, ament-lint-0.12.15, colcon-core-0.21.2, cov-3.0.0
+collected 8 items
+
+test/test_copyright.py s                                                 [ 12%]
+test/test_flake8.py F                                                    [ 25%]
+test/test_gui_state.py FFFFF                                             [ 87%]
+=============================== warnings summary ===============================
+test/test_flake8.py::test_flake8
+test/test_flake8.py::test_flake8
+  Warning: SelectableGroups dict interface is deprecated. Use select.
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+test/test_pep257.py .                                                    [100%]
+
+=================================== FAILURES ===================================
+_________________________________ test_flake8 __________________________________
+test/test_flake8.py:23: in test_flake8
+    assert rc == 0, \
+E   AssertionError: Found 3 code style errors / warnings:
+E     ./thesis_ui/joint_control_gui.py:1529:13: F841 local variable 'blocker' is assigned to but never used
+E     ./test/test_gui_state.py:8:1: E402 module level import not at top of file
+E     ./test/test_gui_state.py:9:1: E402 module level import not at top of file
+E   assert 1 == 0
+----------------------------- Captured stdout call -----------------------------
+
+./thesis_ui/joint_control_gui.py:1529:13: F841 local variable 'blocker' is assigned to but never used
+            blocker = QSignalBlocker(self.jog_mode_button)
+            ^
+
+./test/test_gui_state.py:8:1: E402 module level import not at top of file
+from PyQt5.QtWidgets import QApplication
+^
+
+./test/test_gui_state.py:9:1: E402 module level import not at top of file
+from thesis_ui.joint_control_gui import (
+^
+
+2     E402 module level import not at top of file
+1     F841 local variable 'blocker' is assigned to but never used
+
+7 files checked
+3 errors
+
+'E'-type errors: 2
+'F'-type errors: 1
+
+Checked files:
+
+* ./setup.py
+* ./thesis_ui/joint_control_gui.py
+* ./thesis_ui/__init__.py
+* ./test/test_gui_state.py
+* ./test/test_flake8.py
+* ./test/test_pep257.py
+* ./test/test_copyright.py
+----------------------------- Captured stderr call -----------------------------
+option --max-complexity: please update from optparse string `type=` to argparse callable `type=` -- this will be an error in the future
+___________ GuiStateTests.test_canceled_execution_keeps_final_state ____________
+test/test_gui_state.py:89: in test_canceled_execution_keeps_final_state
+    self.window.refresh_ui()
+thesis_ui/joint_control_gui.py:895: in refresh_ui
+    if state_ready and joint_name in self.ros_node.current_velocities
+E   AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+_____ GuiStateTests.test_execution_lifecycle_updates_history_and_send_lock _____
+test/test_gui_state.py:76: in test_execution_lifecycle_updates_history_and_send_lock
+    self.window.refresh_ui()
+thesis_ui/joint_control_gui.py:895: in refresh_ui
+    if state_ready and joint_name in self.ros_node.current_velocities
+E   AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+____ GuiStateTests.test_refresh_reaches_pose_and_velocity_after_connections ____
+test/test_gui_state.py:67: in test_refresh_reaches_pose_and_velocity_after_connections
+    self.window.refresh_ui()
+thesis_ui/joint_control_gui.py:895: in refresh_ui
+    if state_ready and joint_name in self.ros_node.current_velocities
+E   AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+_________ GuiStateTests.test_stale_projection_is_not_displayed_as_live _________
+test/test_gui_state.py:102: in test_stale_projection_is_not_displayed_as_live
+    self.window.refresh_ui()
+thesis_ui/joint_control_gui.py:895: in refresh_ui
+    if state_ready and joint_name in self.ros_node.current_velocities
+E   AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+______ GuiStateTests.test_unrelated_rejection_does_not_unlock_active_goal ______
+test/test_gui_state.py:83: in test_unrelated_rejection_does_not_unlock_active_goal
+    self.window.refresh_ui()
+thesis_ui/joint_control_gui.py:895: in refresh_ui
+    if state_ready and joint_name in self.ros_node.current_velocities
+E   AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+- generated xml file: /tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_ui/pytest.xml -
+=========================== short test summary info ============================
+FAILED test/test_flake8.py::test_flake8 - AssertionError: Found 3 code style ...
+FAILED test/test_gui_state.py::GuiStateTests::test_canceled_execution_keeps_final_state
+FAILED test/test_gui_state.py::GuiStateTests::test_execution_lifecycle_updates_history_and_send_lock
+FAILED test/test_gui_state.py::GuiStateTests::test_refresh_reaches_pose_and_velocity_after_connections
+FAILED test/test_gui_state.py::GuiStateTests::test_stale_projection_is_not_displayed_as_live
+FAILED test/test_gui_state.py::GuiStateTests::test_unrelated_rejection_does_not_unlock_active_goal
+============== 6 failed, 1 passed, 1 skipped, 2 warnings in 0.95s ==============
+--- stderr: thesis_ui
+=============================== warnings summary ===============================
+test/test_flake8.py::test_flake8
+test/test_flake8.py::test_flake8
+  Warning: SelectableGroups dict interface is deprecated. Use select.
+
+-- Docs: https://docs.pytest.org/en/stable/warnings.html
+---
+Finished <<< thesis_ui [1.68s]	[ with test failures ]
+
+Summary: 3 packages finished [2.85s]
+  3 packages had stderr output: thesis_core thesis_simulation thesis_ui
+  2 packages had test failures: thesis_core thesis_ui
+RESULTADO_COLCON_TEST=0
+
+----- RESUMEN DETALLADO DE RESULTADOS -----
+/tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_core/pytest.xml: 21 tests, 0 errors, 2 failures, 1 skipped
+- thesis_core.test.test_flake8 test_flake8
+  <<< failure message
+    AssertionError: Found 7 code style errors / warnings:
+      ./thesis_core/safety_supervisor_node.py:1212:100: E501 line too long (109 > 99 characters)
+      ./thesis_core/safety_supervisor_node.py:1234:100: E501 line too long (110 > 99 characters)
+      ./thesis_core/safety_supervisor_node.py:1385:100: E501 line too long (150 > 99 characters)
+      ./thesis_core/safety_supervisor_node.py:1452:100: E501 line too long (117 > 99 characters)
+      ./thesis_core/safety_supervisor_node.py:1469:100: E501 line too long (129 > 99 characters)
+      ./test/test_execution_reference.py:25:5: E303 too many blank lines (2)
+      ./test/test_execution_reference.py:34:5: E303 too many blank lines (2)
+    assert 1 == 0
+  >>>
+- thesis_core.test.test_pep257 test_pep257
+  <<< failure message
+    AssertionError: Found code style errors / warnings
+    assert 1 == 0
+  >>>
+/tmp/tesis-paquete1-fase-d-vK5roB/build/thesis_ui/pytest.xml: 8 tests, 0 errors, 6 failures, 1 skipped
+- thesis_ui.test.test_flake8 test_flake8
+  <<< failure message
+    AssertionError: Found 3 code style errors / warnings:
+      ./thesis_ui/joint_control_gui.py:1529:13: F841 local variable 'blocker' is assigned to but never used
+      ./test/test_gui_state.py:8:1: E402 module level import not at top of file
+      ./test/test_gui_state.py:9:1: E402 module level import not at top of file
+    assert 1 == 0
+  >>>
+- thesis_ui.test.test_gui_state.GuiStateTests test_canceled_execution_keeps_final_state
+  <<< failure message
+    AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+  >>>
+- thesis_ui.test.test_gui_state.GuiStateTests test_execution_lifecycle_updates_history_and_send_lock
+  <<< failure message
+    AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+  >>>
+- thesis_ui.test.test_gui_state.GuiStateTests test_refresh_reaches_pose_and_velocity_after_connections
+  <<< failure message
+    AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+  >>>
+- thesis_ui.test.test_gui_state.GuiStateTests test_stale_projection_is_not_displayed_as_live
+  <<< failure message
+    AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+  >>>
+- thesis_ui.test.test_gui_state.GuiStateTests test_unrelated_rejection_does_not_unlock_active_goal
+  <<< failure message
+    AttributeError: 'FakeNode' object has no attribute 'current_velocities'
+  >>>
+
+Summary: 32 tests, 0 errors, 8 failures, 3 skipped
+RESULTADO_TEST_RESULT=1
+
+----- ESTADO LOCAL DESPUÉS DE LAS PRUEBAS -----
+ M src/thesis_core/thesis_core/execution_reference.py
+ M src/thesis_core/thesis_core/horizon_preview.py
+ M src/thesis_core/thesis_core/safety_supervisor_node.py
+ M src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+ M src/thesis_ui/package.xml
+ M src/thesis_ui/thesis_ui/joint_control_gui.py
+?? APLICAR_PAQUETE1.py
+?? PAQUETE0_EVIDENCIA_A.txt
+?? PAQUETE0_EVIDENCIA_B.txt
+?? PAQUETE0_EVIDENCIA_C.txt
+?? PAQUETE1_APLICACION_FASE_C.txt
+?? PAQUETE1_COMPILACION_PRUEBAS_D.txt
+?? PAQUETE1_DIAGNOSTICO_A.txt
+?? src/thesis_core/test/test_joint_model.py
+?? src/thesis_core/thesis_core/joint_model.py
+RESULTADO_GIT_STATUS=0
+
+============================================================
+FASE_D=FAIL
+RESULTADO_GLOBAL_FASE_D=1
+
+CODIGO_SALIDA_FASE_D=1
+REPORTE=/home/luis/Escritorio/TESIS_2_IMPLEMENTATION/PAQUETE1_COMPILACION_PRUEBAS_D.txt

@@ -1,0 +1,59 @@
+============================================================
+PAQUETE 1 — CORRECCIÓN DE FASE D
+Fecha: 2026-09-22T07:27:38-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+============================================================
+SHA256_ESPERADO=89d38756bd62a45300472b13902a6752d08e634e46140d3756ab56e226451141
+SHA256_OBTENIDO=89d38756bd62a45300472b13902a6752d08e634e46140d3756ab56e226451141
+RESULTADO_INTEGRIDAD=PASS
+
+----- ENSAYO DE LA CORRECCIÓN -----
+CHECK_CORRECCION_OK=1
+WOULD_MODIFY=src/thesis_core/thesis_core/safety_supervisor_node.py
+WOULD_MODIFY=src/thesis_core/thesis_core/execution_reference.py
+WOULD_MODIFY=src/thesis_core/test/test_execution_reference.py
+WOULD_MODIFY=src/thesis_ui/thesis_ui/joint_control_gui.py
+WOULD_MODIFY=src/thesis_ui/test/test_gui_state.py
+RESULTADO_CHECK_CORRECCION=0
+
+----- APLICACIÓN DE LA CORRECCIÓN -----
+CORRECCION_APLICADA_OK=1
+RESPALDO=/home/luis/Escritorio/RESPALDO_TESIS_PAQUETE1_FASE_D_20260922T072738
+MODIFICADO=src/thesis_core/thesis_core/safety_supervisor_node.py
+MODIFICADO=src/thesis_core/thesis_core/execution_reference.py
+MODIFICADO=src/thesis_core/test/test_execution_reference.py
+MODIFICADO=src/thesis_ui/thesis_ui/joint_control_gui.py
+MODIFICADO=src/thesis_ui/test/test_gui_state.py
+RESULTADO_APLICACION_CORRECCION=0
+
+----- VERIFICACIÓN SINTÁCTICA -----
+RESULTADO_SINTAXIS=0
+
+----- VERIFICACIÓN DEL DIFF -----
+RESULTADO_DIFF_CHECK=0
+
+----- ARCHIVOS MODIFICADOS -----
+ M src/thesis_core/test/test_execution_reference.py
+ M src/thesis_core/thesis_core/execution_reference.py
+ M src/thesis_core/thesis_core/horizon_preview.py
+ M src/thesis_core/thesis_core/safety_supervisor_node.py
+ M src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+ M src/thesis_ui/package.xml
+ M src/thesis_ui/test/test_gui_state.py
+ M src/thesis_ui/thesis_ui/joint_control_gui.py
+?? APLICAR_PAQUETE1.py
+?? CORREGIR_PAQUETE1_FASE_D.py
+?? PAQUETE0_EVIDENCIA_A.txt
+?? PAQUETE0_EVIDENCIA_B.txt
+?? PAQUETE0_EVIDENCIA_C.txt
+?? PAQUETE1_APLICACION_FASE_C.txt
+?? PAQUETE1_COMPILACION_PRUEBAS_D.txt
+?? PAQUETE1_CORRECCION_FASE_D.txt
+?? PAQUETE1_DIAGNOSTICO_A.txt
+?? src/thesis_core/test/test_joint_model.py
+?? src/thesis_core/thesis_core/joint_model.py
+
+CORRECCION_FASE_D=PASS
+
+CODIGO_SALIDA_CORRECCION=0
+REPORTE=/home/luis/Escritorio/TESIS_2_IMPLEMENTATION/PAQUETE1_CORRECCION_FASE_D.txt

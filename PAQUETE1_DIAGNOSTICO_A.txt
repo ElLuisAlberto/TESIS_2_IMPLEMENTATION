@@ -1,0 +1,5252 @@
+PAQUETE 1 — DIAGNÓSTICO ESTÁTICO A
+Fecha: 2026-09-22T06:38:22-05:00
+Workspace: /home/luis/Escritorio/TESIS_2_IMPLEMENTATION
+ROS_DISTRO=humble
+
+============================================================
+1. ARCHIVOS RELACIONADOS
+============================================================
+
+-------------------- src/thesis_core/thesis_core/safety_supervisor_node.py --------------------
+import math
+
+import rclpy
+from rclpy.node import Node
+
+from sensor_msgs.msg import JointState
+from thesis_interfaces.msg import (
+    CommandDecision,
+    ExecutionControl,
+    ExecutionTrajectory,
+    JointCommand,
+    ProximityStatus,
+    TrajectoryPrediction,
+)
+
+from thesis_core.execution_reference import sample_reference
+from thesis_core.jaco_kinematics import (
+    CAPSULE_RADII,
+    minimum_sphere_clearance,
+)
+
+EXPECTED_ARM_JOINTS = [
+    'j2n6s300_joint_1',
+    'j2n6s300_joint_2',
+    'j2n6s300_joint_3',
+    'j2n6s300_joint_4',
+    'j2n6s300_joint_5',
+    'j2n6s300_joint_6',
+]
+
+JOINT_LIMITS = {
+    EXPECTED_ARM_JOINTS[0]: (-2.0 * math.pi, 2.0 * math.pi),
+    EXPECTED_ARM_JOINTS[1]: (
+        47.0 * math.pi / 180.0,
+        313.0 * math.pi / 180.0,
+    ),
+    EXPECTED_ARM_JOINTS[2]: (
+        19.0 * math.pi / 180.0,
+        341.0 * math.pi / 180.0,
+    ),
+    EXPECTED_ARM_JOINTS[3]: (-2.0 * math.pi, 2.0 * math.pi),
+    EXPECTED_ARM_JOINTS[4]: (-2.0 * math.pi, 2.0 * math.pi),
+    EXPECTED_ARM_JOINTS[5]: (-2.0 * math.pi, 2.0 * math.pi),
+}
+
+JOINT_VELOCITY_LIMITS = {
+    EXPECTED_ARM_JOINTS[0]: 36.0 * math.pi / 180.0,
+    EXPECTED_ARM_JOINTS[1]: 36.0 * math.pi / 180.0,
+    EXPECTED_ARM_JOINTS[2]: 36.0 * math.pi / 180.0,
+    EXPECTED_ARM_JOINTS[3]: 48.0 * math.pi / 180.0,
+    EXPECTED_ARM_JOINTS[4]: 48.0 * math.pi / 180.0,
+    EXPECTED_ARM_JOINTS[5]: 48.0 * math.pi / 180.0,
+}
+
+CONTINUOUS_JOINTS = {
+    EXPECTED_ARM_JOINTS[0],
+    EXPECTED_ARM_JOINTS[3],
+    EXPECTED_ARM_JOINTS[4],
+    EXPECTED_ARM_JOINTS[5],
+}
+
+MIN_DURATION_SEC = 0.1
+MAX_DURATION_SEC = 30.0
+
+
+class SafetySupervisorNode(Node):
+
+    def __init__(self):
+        super().__init__('safety_supervisor_node')
+
+        self.declare_parameter(
+            'state_topic',
+            '/joint_states',
+        )
+
+        self.declare_parameter(
+            'velocity_scale',
+            0.5,
+        )
+
+        self.declare_parameter(
+            'max_state_age_sec',
+            0.5,
+        )
+
+        self.declare_parameter(
+            'require_current_state',
+            False,
+        )
+
+        self.declare_parameter(
+            'require_proximity_status',
+            True,
+        )
+
+        self.declare_parameter(
+            'max_proximity_age_sec',
+            0.5,
+        )
+
+        self.declare_parameter(
+            'reduction_duration_scale',
+            2.0,
+        )
+
+        self.declare_parameter(
+            'prediction_enabled',
+            True,
+        )
+
+        self.declare_parameter(
+            'prediction_samples',
+            25,
+        )
+        self.declare_parameter('prediction_horizon_sec', 1.0)
+
+        self.declare_parameter('warning_distance', 0.30)
+        self.declare_parameter('reduction_distance', 0.15)
+        self.declare_parameter('stop_distance', 0.05)
+        self.declare_parameter('runtime_monitor_enabled', True)
+        self.declare_parameter('runtime_rate_hz', 10.0)
+        self.declare_parameter('runtime_horizon_sec', 1.0)
+        self.declare_parameter('runtime_samples', 21)
+        self.declare_parameter('predictive_margin_m', 0.02)
+        self.declare_parameter('hard_stop_clearance_m', 0.0)
+        self.declare_parameter('runtime_minimum_speed_scale', 0.05)
+        self.declare_parameter('runtime_scale_search_iterations', 10)
+
+        state_topic = self.get_parameter(
+            'state_topic'
+        ).value
+
+        self.current_positions = {}
+        self.last_state_receive_ns = None
+        self.proximity_status = None
+        self.last_proximity_receive_ns = None
+        self.last_proximity_decision = 'UNAVAILABLE'
+        self.active_execution = None
+        self.last_execution_receive_ns = None
+        self.last_runtime_command_id = None
+        self.last_runtime_state = None
+        self.last_runtime_scale = None
+        self.runtime_recovery_count = 0
+        self.last_prediction_speed_scale = 1.0
+        self.last_jog_state = None
+        self.last_jog_scale = None
+
+        self.state_subscription = self.create_subscription(
+            JointState,
+            state_topic,
+            self.joint_state_callback,
+            10,
+        )
+
+        self.candidate_subscription = self.create_subscription(
+            JointCommand,
+            '/thesis/candidate_command',
+            self.candidate_command_callback,
+            10,
+        )
+        self.jog_subscription = self.create_subscription(
+            JointCommand,
+            '/thesis/jog_intent',
+            self.jog_intent_callback,
+            10,
+        )
+
+        self.proximity_subscription = self.create_subscription(
+            ProximityStatus,
+            '/thesis/proximity_status',
+            self.proximity_status_callback,
+            10,
+        )
+
+        self.execution_subscription = self.create_subscription(
+            ExecutionTrajectory,
+            '/thesis/execution_trajectory',
+            self.execution_callback,
+            10,
+        )
+
+        self.supervised_publisher = self.create_publisher(
+            JointCommand,
+            '/thesis/supervised_command',
+            10,
+        )
+        self.supervised_jog_publisher = self.create_publisher(
+            JointCommand,
+            '/thesis/supervised_jog_command',
+            10,
+        )
+
+        self.prediction_publisher = self.create_publisher(
+            TrajectoryPrediction,
+            '/thesis/trajectory_prediction',
+            10,
+        )
+
+        self.decision_publisher = self.create_publisher(
+            CommandDecision,
+            '/thesis/command_decision',
+            10,
+        )
+
+        self.execution_control_publisher = self.create_publisher(
+            ExecutionControl,
+            '/thesis/execution_control',
+            10,
+        )
+
+        runtime_rate = float(
+            self.get_parameter('runtime_rate_hz').value
+        )
+        if runtime_rate <= 0.0:
+            raise ValueError('runtime_rate_hz must be greater than zero')
+        self.runtime_timer = None
+        if bool(self.get_parameter('runtime_monitor_enabled').value):
+            self.runtime_timer = self.create_timer(
+                1.0 / runtime_rate,
+                self.runtime_monitor_callback,
+            )
+
+        self.get_logger().info(
+            'Safety supervisor started in validation/pass-through mode'
+        )
+
+        self.get_logger().info(
+            f'State topic configured: {state_topic}'
+        )
+
+        self.get_logger().info(
+            'Proximity policy enabled on /thesis/proximity_status'
+        )
+
+        self.get_logger().info(
+            'Preventive trajectory prediction enabled'
+        )
+
+        self.get_logger().info(
+            f'Runtime execution monitor enabled at {runtime_rate:.1f} Hz'
+        )
+
+    def joint_state_callback(self, msg):
+        positions = {}
+
+        for joint_name, position in zip(
+            msg.name,
+            msg.position,
+        ):
+            if math.isfinite(position):
+                positions[joint_name] = float(position)
+
+        self.current_positions = positions
+        self.last_state_receive_ns = (
+            self.get_clock().now().nanoseconds
+        )
+
+    def proximity_status_callback(self, msg):
+        self.proximity_status = msg
+        self.last_proximity_receive_ns = (
+            self.get_clock().now().nanoseconds
+        )
+
+    def execution_callback(self, msg):
+        """Track the trajectory currently accepted by the adapter."""
+        now_ns = self.get_clock().now().nanoseconds
+        if msg.status == 'ACCEPTED':
+            if self.last_runtime_command_id != msg.command_id:
+                self.last_runtime_state = None
+                self.last_runtime_scale = None
+                self.runtime_recovery_count = 0
+            self.active_execution = msg
+            self.last_execution_receive_ns = now_ns
+            self.last_runtime_command_id = msg.command_id
+            return
+
+        terminal_statuses = {
+            'SUCCEEDED',
+            'FAILED',
+            'CANCELED',
+            'REJECTED',
+            'DRY_RUN',
+        }
+        if (
+            msg.status in terminal_statuses
+            and self.active_execution is not None
+            and msg.command_id == self.active_execution.command_id
+        ):
+            self.active_execution = None
+            self.last_execution_receive_ns = None
+            self.last_runtime_command_id = None
+            self.last_runtime_state = None
+            self.last_runtime_scale = None
+            self.runtime_recovery_count = 0
+
+    @staticmethod
+    def message_time_seconds(value):
+        return float(value.sec) + float(value.nanosec) * 1e-9
+
+    def runtime_obstacle(self):
+        """Return the latest obstacle state when it is fresh."""
+        if (
+            self.proximity_status is None
+            or self.last_proximity_receive_ns is None
+        ):
+            return None
+
+        age_sec = (
+            self.get_clock().now().nanoseconds
+            - self.last_proximity_receive_ns
+        ) / 1e9
+        max_age_sec = float(
+            self.get_parameter('max_proximity_age_sec').value
+        )
+        if age_sec > max_age_sec:
+            return None
+
+        center = self.proximity_status.obstacle_center
+        velocity = self.proximity_status.obstacle_velocity
+        return (
+            (center.x, center.y, center.z),
+            (velocity.x, velocity.y, velocity.z),
+            float(self.proximity_status.obstacle_radius),
+        )
+
+    def publish_execution_control(
+        self,
+        command_id,
+        state,
+        speed_scale,
+        clearance,
+        segment,
+        time_to_collision,
+        reason_code,
+        reason,
+        minimum_time_from_now=-1.0,
+        minimum_sample_index=0,
+        minimum_sample_count=0,
+        minimum_horizon_fraction=-1.0,
+    ):
+        control = ExecutionControl()
+        control.stamp = self.get_clock().now().to_msg()
+        control.command_id = command_id
+        control.state = state
+        control.speed_scale = float(speed_scale)
+        control.minimum_clearance = float(clearance)
+        control.limiting_segment = segment
+        control.time_to_collision = float(time_to_collision)
+        control.minimum_time_from_now = float(minimum_time_from_now)
+        control.minimum_sample_index = int(minimum_sample_index)
+        control.minimum_sample_count = int(minimum_sample_count)
+        control.minimum_horizon_fraction = float(
+            minimum_horizon_fraction
+        )
+        control.reason_code = reason_code
+        control.reason = reason
+        self.execution_control_publisher.publish(control)
+
+    def evaluate_runtime_horizon(
+        self,
+        current,
+        target,
+        nominal_remaining,
+        speed_scale,
+        horizon,
+        sample_count,
+        obstacle,
+    ):
+        """Evaluate one candidate absolute speed scale over the horizon."""
+        if speed_scale <= 0.0:
+            samples = [tuple(current) for _ in range(sample_count)]
+        else:
+            effective_duration = nominal_remaining / speed_scale
+            samples = sample_reference(
+                current,
+                target,
+                effective_duration,
+                0.0,
+                horizon,
+                sample_count,
+            )
+
+        obstacle_center, obstacle_velocity, obstacle_radius = obstacle
+        best = None
+        minimum_sample_index = 0
+        minimum_time_from_now = 0.0
+        collision_time = -1.0
+        for sample_index, sample in enumerate(samples):
+            sample_time = horizon * sample_index / float(sample_count - 1)
+            predicted_obstacle = tuple(
+                obstacle_center[axis]
+                + obstacle_velocity[axis] * sample_time
+                for axis in range(3)
+            )
+            result = minimum_sphere_clearance(
+                sample,
+                predicted_obstacle,
+                obstacle_radius,
+            )
+            if result[0] <= 0.0 and collision_time < 0.0:
+                collision_time = sample_time
+            if best is None or result[0] < best[0]:
+                best = result
+                minimum_sample_index = sample_index
+                minimum_time_from_now = sample_time
+
+        return (
+            best,
+            minimum_sample_index,
+            minimum_time_from_now,
+            collision_time,
+        )
+
+    def publish_supervised_jog(self, source, positions, horizon):
+        output = JointCommand()
+        output.stamp = self.get_clock().now().to_msg()
+        output.command_id = source.command_id
+        output.joint_names = list(EXPECTED_ARM_JOINTS)
+        output.positions = list(positions)
+        whole_seconds = int(horizon)
+        nanoseconds = int(round(
+            (horizon - whole_seconds) * 1_000_000_000
+        ))
+        if nanoseconds >= 1_000_000_000:
+            whole_seconds += 1
+            nanoseconds -= 1_000_000_000
+        output.duration.sec = whole_seconds
+        output.duration.nanosec = nanoseconds
+        self.supervised_jog_publisher.publish(output)
+
+    def jog_intent_callback(self, msg):
+        """Supervise a rolling joint-space velocity intention."""
+        if self.active_execution is not None:
+            return
+        if tuple(msg.joint_names) != tuple(EXPECTED_ARM_JOINTS):
+            return
+        if len(msg.positions) != len(EXPECTED_ARM_JOINTS):
+            return
+        if not all(math.isfinite(value) for value in msg.positions):
+            return
+        if not all(
+            name in self.current_positions
+            for name in EXPECTED_ARM_JOINTS
+        ):
+            return
+        if self.last_state_receive_ns is None:
+            return
+
+        now_ns = self.get_clock().now().nanoseconds
+        state_age = (now_ns - self.last_state_receive_ns) / 1e9
+        if state_age > float(
+                self.get_parameter('max_state_age_sec').value):
+            return
+
+        current = tuple(
+            self.current_positions[name]
+            for name in EXPECTED_ARM_JOINTS
+        )
+        horizon = (
+            float(msg.duration.sec)
+            + float(msg.duration.nanosec) * 1e-9
+        )
+        if not math.isfinite(horizon) or not 0.1 <= horizon <= 2.0:
+            self.publish_supervised_jog(msg, current, 1.0)
+            return
+
+        obstacle = self.runtime_obstacle()
+        if obstacle is None:
+            self.publish_supervised_jog(msg, current, horizon)
+            return
+
+        bounded_target = []
+        for name, current_value, requested_value in zip(
+            EXPECTED_ARM_JOINTS,
+            current,
+            msg.positions,
+        ):
+            delta = self.shortest_joint_delta(
+                name,
+                float(requested_value),
+                current_value,
+            )
+            maximum_delta = JOINT_VELOCITY_LIMITS[name] * horizon
+            delta = min(max(delta, -maximum_delta), maximum_delta)
+            bounded_target.append(current_value + delta)
+        bounded_target = tuple(bounded_target)
+
+        sample_count = int(
+            self.get_parameter('runtime_samples').value
+        )
+        if sample_count < 2:
+            self.publish_supervised_jog(msg, current, horizon)
+            return
+
+        obstacle_center, _, obstacle_radius = obstacle
+        current_result = minimum_sphere_clearance(
+            current,
+            obstacle_center,
+            obstacle_radius,
+        )
+        full_evaluation = self.evaluate_runtime_horizon(
+            current,
+            bounded_target,
+            horizon,
+            1.0,
+            horizon,
+            sample_count,
+            obstacle,
+        )
+        best, sample_index, minimum_time, collision_time = full_evaluation
+        full_clearance = best[0]
+        current_clearance = current_result[0]
+        margin = float(
+            self.get_parameter('predictive_margin_m').value
+        )
+        hard_stop = float(
+            self.get_parameter('hard_stop_clearance_m').value
+        )
+        minimum_scale = float(
+            self.get_parameter('runtime_minimum_speed_scale').value
+        )
+        iterations = max(
+            4,
+            int(self.get_parameter(
+                'runtime_scale_search_iterations'
+            ).value),
+        )
+
+        speed_scale = 1.0
+        if current_clearance <= hard_stop:
+            state = 'STOP'
+            speed_scale = 0.0
+        elif full_clearance >= margin:
+            state = (
+                'WARNING'
+                if full_clearance <= float(
+                    self.get_parameter('warning_distance').value
+                )
+                else 'ALLOW'
+            )
+        else:
+            low = 0.0
+            high = 1.0
+            safe_evaluation = self.evaluate_runtime_horizon(
+                current,
+                bounded_target,
+                horizon,
+                0.0,
+                horizon,
+                sample_count,
+                obstacle,
+            )
+            for _ in range(iterations):
+                candidate = 0.5 * (low + high)
+                evaluation = self.evaluate_runtime_horizon(
+                    current,
+                    bounded_target,
+                    horizon,
+                    candidate,
+                    horizon,
+                    sample_count,
+                    obstacle,
+                )
+                if evaluation[0][0] >= margin:
+                    low = candidate
+                    safe_evaluation = evaluation
+                else:
+                    high = candidate
+            if low < minimum_scale:
+                state = 'STOP'
+                speed_scale = 0.0
+            else:
+                state = 'REDUCTION'
+                speed_scale = low
+                best, sample_index, minimum_time, collision_time = (
+                    safe_evaluation
+                )
+
+        safe_target = tuple(
+            current_value + speed_scale * (target_value - current_value)
+            for current_value, target_value in zip(
+                current,
+                bounded_target,
+            )
+        )
+        self.publish_supervised_jog(msg, safe_target, horizon)
+
+        clearance, segment, _, _, _ = best
+        reason = (
+            f'JOG H={horizon:.2f}s; d_actual={current_clearance:.3f}m; '
+            f'd_nominal={full_clearance:.3f}m; '
+            f'd_seguro={clearance:.3f}m; margen={margin:.3f}m; '
+            f'escala={speed_scale:.3f}'
+        )
+        self.publish_execution_control(
+            msg.command_id,
+            state,
+            speed_scale,
+            clearance,
+            segment,
+            collision_time,
+            f'JOG_{state}',
+            reason,
+            minimum_time_from_now=minimum_time,
+            minimum_sample_index=sample_index,
+            minimum_sample_count=sample_count,
+            minimum_horizon_fraction=(
+                sample_index / float(sample_count - 1)
+            ),
+        )
+        if (
+            state != self.last_jog_state
+            or self.last_jog_scale is None
+            or abs(speed_scale - self.last_jog_scale) >= 0.05
+        ):
+            self.get_logger().info(
+                f'JOG {state}: scale={speed_scale:.3f}, '
+                f'd_nominal={full_clearance:.3f}m, '
+                f'd_safe={clearance:.3f}m'
+            )
+            self.last_jog_state = state
+            self.last_jog_scale = speed_scale
+
+    def runtime_monitor_callback(self):
+        """Evaluate the short horizon for the trajectory in execution."""
+        execution = self.active_execution
+        if execution is None:
+            return
+
+        command_id = execution.command_id
+        if not all(
+            joint_name in self.current_positions
+            for joint_name in EXPECTED_ARM_JOINTS
+        ):
+            self.publish_execution_control(
+                command_id,
+                'STOP',
+                0.0,
+                -1.0,
+                '',
+                0.0,
+                'RUNTIME_STATE_UNAVAILABLE',
+                'No se recibió una configuración articular completa.',
+            )
+            return
+
+        state_age_sec = (
+            self.get_clock().now().nanoseconds
+            - self.last_state_receive_ns
+        ) / 1e9
+        if state_age_sec > float(
+                self.get_parameter('max_state_age_sec').value):
+            self.publish_execution_control(
+                command_id,
+                'STOP',
+                0.0,
+                -1.0,
+                '',
+                0.0,
+                'RUNTIME_STATE_STALE',
+                f'Estado articular obsoleto ({state_age_sec:.3f} s).',
+            )
+            return
+
+        obstacle = self.runtime_obstacle()
+        if obstacle is None:
+            self.publish_execution_control(
+                command_id,
+                'STOP',
+                0.0,
+                -1.0,
+                '',
+                0.0,
+                'RUNTIME_PROXIMITY_STALE',
+                'No existe una medición de proximidad reciente.',
+            )
+            return
+
+        now_sec = self.get_clock().now().nanoseconds / 1e9
+        start_sec = self.message_time_seconds(execution.start_time)
+        duration = float(execution.duration_sec)
+        elapsed = max(0.0, now_sec - start_sec)
+        remaining = duration - elapsed
+        if not math.isfinite(remaining) or remaining <= 0.05:
+            return
+
+        current = tuple(
+            self.current_positions[name]
+            for name in EXPECTED_ARM_JOINTS
+        )
+        target = tuple(float(value) for value in execution.target_positions)
+        horizon = min(
+            float(self.get_parameter('runtime_horizon_sec').value),
+            remaining,
+        )
+        sample_count = int(
+            self.get_parameter('runtime_samples').value
+        )
+        if horizon <= 0.0 or sample_count < 2:
+            return
+
+        previous_scale = self.last_runtime_scale
+        if previous_scale is None or not 0.0 < previous_scale <= 1.0:
+            previous_scale = 1.0
+        nominal_remaining = remaining * previous_scale
+        obstacle_center, obstacle_velocity, obstacle_radius = obstacle
+
+        try:
+            current_result = minimum_sphere_clearance(
+                current,
+                obstacle_center,
+                obstacle_radius,
+            )
+            full_speed_evaluation = self.evaluate_runtime_horizon(
+                current,
+                target,
+                nominal_remaining,
+                1.0,
+                horizon,
+                sample_count,
+                obstacle,
+            )
+        except (TypeError, ValueError, ZeroDivisionError):
+            self.publish_execution_control(
+                command_id,
+                'STOP',
+                0.0,
+                -1.0,
+                '',
+                0.0,
+                'RUNTIME_PREDICTION_ERROR',
+                'No se pudo muestrear la trayectoria activa.',
+            )
+            return
+
+        predictive_margin = float(
+            self.get_parameter('predictive_margin_m').value
+        )
+        hard_stop_clearance = float(
+            self.get_parameter('hard_stop_clearance_m').value
+        )
+        minimum_scale = float(
+            self.get_parameter('runtime_minimum_speed_scale').value
+        )
+        search_iterations = max(
+            4,
+            int(self.get_parameter(
+                'runtime_scale_search_iterations'
+            ).value),
+        )
+        if not 0.0 <= hard_stop_clearance < predictive_margin:
+            predictive_margin = 0.02
+            hard_stop_clearance = 0.0
+        if not 0.0 < minimum_scale < 1.0:
+            minimum_scale = 0.05
+
+        current_clearance = current_result[0]
+        best, minimum_sample_index, minimum_time_from_now, collision_time = (
+            full_speed_evaluation
+        )
+        full_speed_clearance = best[0]
+        speed_scale = 1.0
+
+        if current_clearance <= hard_stop_clearance:
+            state = 'STOP'
+            speed_scale = 0.0
+        elif full_speed_clearance >= predictive_margin:
+            state = (
+                'WARNING'
+                if full_speed_clearance <= float(
+                    self.get_parameter('warning_distance').value
+                )
+                else 'ALLOW'
+            )
+        else:
+            low = 0.0
+            high = 1.0
+            safe_evaluation = self.evaluate_runtime_horizon(
+                current,
+                target,
+                nominal_remaining,
+                0.0,
+                horizon,
+                sample_count,
+                obstacle,
+            )
+            for _ in range(search_iterations):
+                candidate_scale = 0.5 * (low + high)
+                candidate_evaluation = self.evaluate_runtime_horizon(
+                    current,
+                    target,
+                    nominal_remaining,
+                    candidate_scale,
+                    horizon,
+                    sample_count,
+                    obstacle,
+                )
+                if candidate_evaluation[0][0] >= predictive_margin:
+                    low = candidate_scale
+                    safe_evaluation = candidate_evaluation
+                else:
+                    high = candidate_scale
+
+            if low < minimum_scale:
+                state = 'STOP'
+                speed_scale = 0.0
+            else:
+                state = 'REDUCTION'
+                speed_scale = low
+                (
+                    best,
+                    minimum_sample_index,
+                    minimum_time_from_now,
+                    collision_time,
+                ) = safe_evaluation
+
+        clearance, segment, _, _, _ = best
+        reason_code = {
+            'ALLOW': 'RUNTIME_CLEAR',
+            'WARNING': 'RUNTIME_WARNING_OUTSIDE_VOLUME',
+            'REDUCTION': 'RUNTIME_SCALE_TO_PREDICTIVE_MARGIN',
+            'STOP': 'RUNTIME_HARD_STOP_OR_NO_SAFE_SCALE',
+        }.get(state, 'RUNTIME_UNKNOWN_STATE')
+        reason = (
+            f'H={horizon:.2f}s; d_min={clearance:.3f} m; '
+            f'd_actual={current_clearance:.3f} m; '
+            f'margen={predictive_margin:.3f} m; '
+            f'd_nominal={full_speed_clearance:.3f} m; '
+            f't_min={minimum_time_from_now:.2f}s; '
+            f'muestra={minimum_sample_index + 1}/{sample_count}; '
+            f'segment={segment}; '
+            f'escala={speed_scale:.2f}'
+        )
+        self.publish_execution_control(
+            command_id,
+            state,
+            speed_scale,
+            clearance,
+            segment,
+            collision_time,
+            reason_code,
+            reason,
+            minimum_time_from_now=minimum_time_from_now,
+            minimum_sample_index=minimum_sample_index,
+            minimum_sample_count=sample_count,
+            minimum_horizon_fraction=(
+                minimum_sample_index / float(sample_count - 1)
+            ),
+        )
+
+        if (
+            state != self.last_runtime_state
+            or self.last_runtime_scale is None
+            or abs(speed_scale - self.last_runtime_scale) > 1.0e-3
+        ):
+            self.get_logger().warning(
+                f'RUNTIME {command_id}: {state}, '
+                f'd_min={clearance:.3f} m, scale={speed_scale:.2f}, '
+                f't_min={minimum_time_from_now:.3f} s, '
+                f'TTC={collision_time:.3f} s'
+            )
+            self.last_runtime_state = state
+            self.last_runtime_scale = speed_scale
+
+    def copy_command_with_duration(self, msg, duration_sec):
+        output = JointCommand()
+        output.stamp = msg.stamp
+        output.command_id = msg.command_id
+        output.joint_names = list(msg.joint_names)
+        output.positions = list(msg.positions)
+
+        whole_seconds = int(duration_sec)
+        nanoseconds = int(round(
+            (duration_sec - whole_seconds) * 1_000_000_000
+        ))
+        if nanoseconds >= 1_000_000_000:
+            whole_seconds += 1
+            nanoseconds -= 1_000_000_000
+
+        output.duration.sec = whole_seconds
+        output.duration.nanosec = nanoseconds
+        return output
+
+    def state_for_clearance(self, clearance):
+        if clearance <= float(self.get_parameter('stop_distance').value):
+            return 'STOP'
+        if clearance <= float(
+                self.get_parameter('reduction_distance').value):
+            return 'REDUCTION'
+        if clearance <= float(
+                self.get_parameter('warning_distance').value):
+            return 'WARNING'
+        return 'ALLOW'
+
+    def predictive_state(self, current_clearance, minimum_clearance):
+        """Classify motion using the displayed predictive envelope."""
+        hard_stop = float(
+            self.get_parameter('hard_stop_clearance_m').value
+        )
+        margin = float(
+            self.get_parameter('predictive_margin_m').value
+        )
+        warning = float(self.get_parameter('warning_distance').value)
+        if current_clearance <= hard_stop:
+            return 'STOP'
+        if minimum_clearance < margin:
+            return 'REDUCTION'
+        if minimum_clearance <= warning:
+            return 'WARNING'
+        return 'ALLOW'
+
+    def publish_decision(
+            self, command, accepted, state, reason_code, reason):
+        """Publish the supervisor decision for a candidate command."""
+        decision = CommandDecision()
+        decision.stamp = self.get_clock().now().to_msg()
+        decision.command_id = command.command_id
+        decision.accepted = accepted
+        decision.state = state
+        decision.reason_code = reason_code
+        decision.reason = reason
+        self.decision_publisher.publish(decision)
+
+    def joint_limit_violation(self, joint_positions):
+        """Return the first joint-limit violation in a configuration."""
+        for joint_name, position in zip(
+                EXPECTED_ARM_JOINTS,
+                joint_positions):
+            lower, upper = JOINT_LIMITS[joint_name]
+            if not math.isfinite(position) or not lower <= position <= upper:
+                return joint_name, position, lower, upper
+        return None
+
+    def predict_candidate(self, msg):
+        self.last_prediction_speed_scale = 1.0
+        if not bool(self.get_parameter('prediction_enabled').value):
+            return None
+
+        if not all(
+            joint_name in self.current_positions
+            for joint_name in EXPECTED_ARM_JOINTS
+        ):
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: '
+                'current state unavailable for prediction'
+            )
+            return False
+
+        max_state_age_sec = float(
+            self.get_parameter('max_state_age_sec').value
+        )
+        state_age_sec = (
+            self.get_clock().now().nanoseconds
+            - self.last_state_receive_ns
+        ) / 1e9
+        if state_age_sec > max_state_age_sec:
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: state stale for prediction '
+                f'({state_age_sec:.3f} s)'
+            )
+            return False
+
+        sample_count = int(
+            self.get_parameter('prediction_samples').value
+        )
+        if sample_count < 2:
+            self.get_logger().error(
+                'prediction_samples must be at least 2'
+            )
+            return False
+
+        current = tuple(
+            self.current_positions[name]
+            for name in EXPECTED_ARM_JOINTS
+        )
+        target = tuple(float(value) for value in msg.positions)
+        trajectory_duration = (
+            float(msg.duration.sec)
+            + float(msg.duration.nanosec) * 1e-9
+        )
+        prediction_horizon = min(
+            trajectory_duration,
+            float(self.get_parameter('prediction_horizon_sec').value),
+        )
+        if prediction_horizon <= 0.0:
+            self.get_logger().error(
+                'prediction_horizon_sec must be greater than zero'
+            )
+            return False
+        deltas = tuple(
+            self.shortest_joint_delta(name, target_value, current_value)
+            for name, target_value, current_value in zip(
+                EXPECTED_ARM_JOINTS,
+                target,
+                current,
+            )
+        )
+        obstacle = (
+            self.proximity_status.obstacle_center.x,
+            self.proximity_status.obstacle_center.y,
+            self.proximity_status.obstacle_center.z,
+        )
+        obstacle_velocity = (
+            self.proximity_status.obstacle_velocity.x,
+            self.proximity_status.obstacle_velocity.y,
+            self.proximity_status.obstacle_velocity.z,
+        )
+        obstacle_radius = self.proximity_status.obstacle_radius
+
+        best = None
+        best_index = 0
+        current_clearance = math.inf
+        for sample_index in range(sample_count):
+            fraction = sample_index / float(sample_count - 1)
+            sample_time = fraction * prediction_horizon
+            trajectory_fraction = sample_time / trajectory_duration
+            sample = tuple(
+                current_value + trajectory_fraction * delta
+                for current_value, delta in zip(current, deltas)
+            )
+            violation = self.joint_limit_violation(sample)
+            if violation is not None:
+                joint_name, position, lower, upper = violation
+                reason = (
+                    f'{joint_name}={position:.4f} rad fuera de '
+                    f'[{lower:.4f}, {upper:.4f}] rad '
+                    f'en la muestra {sample_index + 1}/{sample_count}.'
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: {reason}'
+                )
+                self.publish_decision(
+                    msg,
+                    False,
+                    'STOP',
+                    'PREDICTED_JOINT_LIMIT',
+                    reason,
+                )
+                return False
+            result = minimum_sphere_clearance(
+                sample,
+                tuple(
+                    obstacle[axis]
+                    + obstacle_velocity[axis] * sample_time
+                    for axis in range(3)
+                ),
+                obstacle_radius,
+            )
+            if sample_index == 0:
+                current_clearance = result[0]
+            if best is None or result[0] < best[0]:
+                best = result
+                best_index = sample_index
+
+        clearance, segment, segment_index, start, end = best
+        state = self.predictive_state(current_clearance, clearance)
+        if state == 'REDUCTION':
+            margin = float(
+                self.get_parameter('predictive_margin_m').value
+            )
+            minimum_scale = float(
+                self.get_parameter('runtime_minimum_speed_scale').value
+            )
+            iterations = max(
+                4,
+                int(self.get_parameter(
+                    'runtime_scale_search_iterations'
+                ).value),
+            )
+            obstacle_data = (
+                obstacle,
+                obstacle_velocity,
+                obstacle_radius,
+            )
+            low = 0.0
+            high = 1.0
+            for _ in range(iterations):
+                candidate_scale = 0.5 * (low + high)
+                evaluation = self.evaluate_runtime_horizon(
+                    current,
+                    target,
+                    trajectory_duration,
+                    candidate_scale,
+                    prediction_horizon,
+                    sample_count,
+                    obstacle_data,
+                )
+                if evaluation[0][0] >= margin:
+                    low = candidate_scale
+                else:
+                    high = candidate_scale
+            if low < minimum_scale:
+                state = 'STOP'
+            else:
+                self.last_prediction_speed_scale = low
+
+        prediction = TrajectoryPrediction()
+        prediction.stamp = self.get_clock().now().to_msg()
+        prediction.command_id = msg.command_id
+        prediction.reference_frame = (
+            self.proximity_status.reference_frame
+        )
+        prediction.state = state
+        prediction.minimum_clearance = clearance
+        prediction.limiting_segment = segment
+        prediction.sample_index = best_index
+        prediction.sample_count = sample_count
+        prediction.trajectory_fraction = (
+            (best_index / float(sample_count - 1))
+            * prediction_horizon / trajectory_duration
+        )
+        prediction.capsule_start.x = start[0]
+        prediction.capsule_start.y = start[1]
+        prediction.capsule_start.z = start[2]
+        prediction.capsule_end.x = end[0]
+        prediction.capsule_end.y = end[1]
+        prediction.capsule_end.z = end[2]
+        prediction.capsule_radius = CAPSULE_RADII[segment_index]
+        self.prediction_publisher.publish(prediction)
+
+        self.get_logger().info(
+            f'PREDICTION {msg.command_id}: {state}, '
+            f'min_clearance={clearance:.3f} m, '
+            f'path={prediction.trajectory_fraction:.2f}, '
+            f'segment={segment}'
+        )
+        return prediction
+
+    def apply_proximity_policy(self, msg, duration_sec):
+        require_status = bool(
+            self.get_parameter('require_proximity_status').value
+        )
+
+        if (
+            self.proximity_status is None
+            or self.last_proximity_receive_ns is None
+        ):
+            if require_status:
+                self.publish_decision(
+                    msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                    f'REJECTED {msg.command_id}: proximity status unavailable',
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: '
+                    'proximity status unavailable'
+                )
+                return None
+
+            self.get_logger().warning(
+                f'PROXIMITY CHECK SKIPPED {msg.command_id}: '
+                'status unavailable'
+            )
+            self.last_proximity_decision = 'SKIPPED'
+            return self.copy_command_with_duration(msg, duration_sec)
+
+        max_age_sec = float(
+            self.get_parameter('max_proximity_age_sec').value
+        )
+        status_age_sec = (
+            self.get_clock().now().nanoseconds
+            - self.last_proximity_receive_ns
+        ) / 1e9
+
+        if status_age_sec > max_age_sec:
+            if require_status:
+                self.publish_decision(
+                    msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                    f'REJECTED {msg.command_id}: proximity status stale ({status_age_sec:.3f} s)',
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: proximity status stale '
+                    f'({status_age_sec:.3f} s)'
+                )
+                return None
+
+            self.get_logger().warning(
+                f'PROXIMITY CHECK SKIPPED {msg.command_id}: '
+                f'status stale ({status_age_sec:.3f} s)'
+            )
+            self.last_proximity_decision = 'SKIPPED'
+            return self.copy_command_with_duration(msg, duration_sec)
+
+        state = self.proximity_status.state.upper()
+        clearance = self.proximity_status.minimum_clearance
+        segment = self.proximity_status.limiting_segment
+
+        if not math.isfinite(clearance):
+            self.publish_decision(
+                msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                f'REJECTED {msg.command_id}: non-finite proximity clearance',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: '
+                'non-finite proximity clearance'
+            )
+            return None
+
+        prediction = self.predict_candidate(msg)
+        if prediction is False:
+            return None
+        if prediction is not None:
+            state = prediction.state
+            clearance = prediction.minimum_clearance
+            segment = prediction.limiting_segment
+
+        self.last_proximity_decision = state
+
+        if state == 'STOP':
+            self.publish_decision(
+                msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                f'REJECTED {msg.command_id}: STOP proximity, clearance={clearance:.3f} m, segment={segment}',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: STOP proximity, '
+                f'clearance={clearance:.3f} m, segment={segment}'
+            )
+            return None
+
+        if state == 'REDUCTION':
+            speed_scale = min(max(
+                float(self.last_prediction_speed_scale),
+                float(self.get_parameter(
+                    'runtime_minimum_speed_scale'
+                ).value),
+            ), 1.0)
+            reduced_speed_duration = min(
+                duration_sec / speed_scale,
+                MAX_DURATION_SEC,
+            )
+            if reduced_speed_duration <= duration_sec + 1.0e-9:
+                self.publish_decision(
+                    msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                    f'REJECTED {msg.command_id}: REDUCTION requested but duration cannot be increased safely',
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: REDUCTION requested '
+                    'but duration cannot be increased safely'
+                )
+                return None
+
+            self.get_logger().warning(
+                f'REDUCTION {msg.command_id}: '
+                f'clearance={clearance:.3f} m, segment={segment}, '
+                f'duration={duration_sec:.2f}s'
+                f'->{reduced_speed_duration:.2f}s'
+            )
+            return self.copy_command_with_duration(
+                msg,
+                reduced_speed_duration,
+            )
+
+        if state == 'WARNING':
+            self.get_logger().warning(
+                f'WARNING {msg.command_id}: '
+                f'clearance={clearance:.3f} m, segment={segment}'
+            )
+            return self.copy_command_with_duration(msg, duration_sec)
+
+        if state == 'ALLOW':
+            return self.copy_command_with_duration(msg, duration_sec)
+
+        self.publish_decision(
+            msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+            f'REJECTED {msg.command_id}: unknown proximity state={state}',
+        )
+        self.get_logger().warning(
+            f'REJECTED {msg.command_id}: unknown proximity state={state}'
+        )
+        return None
+
+    def shortest_joint_delta(
+        self,
+        joint_name,
+        target_position,
+        current_position,
+    ):
+        delta = target_position - current_position
+
+        if joint_name in CONTINUOUS_JOINTS:
+            return math.atan2(
+                math.sin(delta),
+                math.cos(delta),
+            )
+
+        return delta
+
+    def validate_velocity(
+        self,
+        msg,
+        duration_sec,
+    ):
+        require_state = bool(
+            self.get_parameter(
+                'require_current_state'
+            ).value
+        )
+
+        velocity_scale = float(
+            self.get_parameter(
+                'velocity_scale'
+            ).value
+        )
+
+        max_state_age_sec = float(
+            self.get_parameter(
+                'max_state_age_sec'
+            ).value
+        )
+
+        if (
+            not self.current_positions
+            or self.last_state_receive_ns is None
+        ):
+            if require_state:
+                self.publish_decision(
+                    msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                    f'REJECTED {msg.command_id}: current joint state unavailable',
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: '
+                    'current joint state unavailable'
+                )
+                return False
+
+            self.get_logger().warning(
+                f'VELOCITY CHECK SKIPPED {msg.command_id}: '
+                'current joint state unavailable'
+            )
+            return True
+
+        state_age_sec = (
+            self.get_clock().now().nanoseconds
+            - self.last_state_receive_ns
+        ) / 1e9
+
+        if state_age_sec > max_state_age_sec:
+            if require_state:
+                self.publish_decision(
+                    msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                    f'REJECTED {msg.command_id}: joint state is stale ({state_age_sec:.3f} s)',
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: '
+                    f'joint state is stale '
+                    f'({state_age_sec:.3f} s)'
+                )
+                return False
+
+            self.get_logger().warning(
+                f'VELOCITY CHECK SKIPPED {msg.command_id}: '
+                f'joint state is stale '
+                f'({state_age_sec:.3f} s)'
+            )
+            return True
+
+        for joint_name, target_position in zip(
+            msg.joint_names,
+            msg.positions,
+        ):
+            if joint_name not in self.current_positions:
+                if require_state:
+                    self.publish_decision(
+                        msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                        f'REJECTED {msg.command_id}: no current state for {joint_name}',
+                    )
+                    self.get_logger().warning(
+                        f'REJECTED {msg.command_id}: '
+                        f'no current state for {joint_name}'
+                    )
+                    return False
+
+                self.get_logger().warning(
+                    f'VELOCITY CHECK SKIPPED {msg.command_id}: '
+                    f'no current state for {joint_name}'
+                )
+                return True
+
+            current_position = self.current_positions[joint_name]
+
+            delta = self.shortest_joint_delta(
+                joint_name,
+                target_position,
+                current_position,
+            )
+
+            requested_velocity = abs(delta) / duration_sec
+
+            allowed_velocity = (
+                JOINT_VELOCITY_LIMITS[joint_name]
+                * velocity_scale
+            )
+
+            if requested_velocity > allowed_velocity:
+                self.publish_decision(
+                    msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                    f'REJECTED {msg.command_id}: {joint_name} requested velocity {requested_velocity:.4f} rad/s exceeds {allowed_velocity:.4f} rad/s',
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: '
+                    f'{joint_name} requested velocity '
+                    f'{requested_velocity:.4f} rad/s exceeds '
+                    f'{allowed_velocity:.4f} rad/s'
+                )
+                return False
+
+        return True
+
+    def candidate_command_callback(self, msg):
+        receive_time = self.get_clock().now()
+
+        if len(msg.joint_names) == 0:
+            self.publish_decision(
+                msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                f'REJECTED {msg.command_id}: no joints provided',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: no joints provided'
+            )
+            return
+
+        if len(msg.joint_names) != len(msg.positions):
+            self.publish_decision(
+                msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                f'REJECTED {msg.command_id}: joint_names and positions have different sizes',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: '
+                'joint_names and positions have different sizes'
+            )
+            return
+
+        if not all(math.isfinite(value) for value in msg.positions):
+            self.publish_decision(
+                msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                f'REJECTED {msg.command_id}: non-finite joint position detected',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: '
+                'non-finite joint position detected'
+            )
+            return
+
+        if list(msg.joint_names) != EXPECTED_ARM_JOINTS:
+            self.publish_decision(
+                msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                f'REJECTED {msg.command_id}: expected six arm joints in canonical order',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: '
+                'expected six arm joints in canonical order'
+            )
+            return
+
+        for joint_name, position in zip(
+            msg.joint_names,
+            msg.positions,
+        ):
+            lower, upper = JOINT_LIMITS[joint_name]
+
+            if not lower <= position <= upper:
+                self.publish_decision(
+                    msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                    f'REJECTED {msg.command_id}: {joint_name}={position:.4f} rad outside [{lower:.4f}, {upper:.4f}]',
+                )
+                self.get_logger().warning(
+                    f'REJECTED {msg.command_id}: '
+                    f'{joint_name}={position:.4f} rad outside '
+                    f'[{lower:.4f}, {upper:.4f}]'
+                )
+                return
+
+        duration_sec = (
+            float(msg.duration.sec)
+            + float(msg.duration.nanosec) * 1e-9
+        )
+
+        if not MIN_DURATION_SEC <= duration_sec <= MAX_DURATION_SEC:
+            self.publish_decision(
+                msg, False, 'REJECTED', 'VALIDATION_REJECTED',
+                f'REJECTED {msg.command_id}: duration must be between {MIN_DURATION_SEC:.1f} and {MAX_DURATION_SEC:.1f} seconds',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: '
+                f'duration must be between '
+                f'{MIN_DURATION_SEC:.1f} and '
+                f'{MAX_DURATION_SEC:.1f} seconds'
+            )
+            return
+
+        supervised_msg = self.apply_proximity_policy(
+            msg,
+            duration_sec,
+        )
+        if supervised_msg is None:
+            return
+
+        supervised_duration_sec = (
+            float(supervised_msg.duration.sec)
+            + float(supervised_msg.duration.nanosec) * 1e-9
+        )
+
+        if not self.validate_velocity(
+            supervised_msg,
+            supervised_duration_sec,
+        ):
+            return
+
+        candidate_stamp_ns = (
+            int(msg.stamp.sec) * 1_000_000_000
+            + int(msg.stamp.nanosec)
+        )
+
+        receive_ns = receive_time.nanoseconds
+
+        input_latency_ms = (
+            receive_ns - candidate_stamp_ns
+        ) / 1e6
+
+        self.supervised_publisher.publish(supervised_msg)
+
+        self.get_logger().info(
+            f'{self.last_proximity_decision} FORWARDED '
+            f'id={msg.command_id} | '
+            f'joints={len(msg.joint_names)} | '
+            f'proximity={self.last_proximity_decision} | '
+            f'duration={supervised_duration_sec:.2f} s | '
+            f'input_latency={input_latency_ms:.3f} ms'
+        )
+
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    node = SafetySupervisorNode()
+
+    try:
+        rclpy.spin(node)
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+        node.destroy_node()
+
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+
+-------------------- src/thesis_core/thesis_core/horizon_preview.py --------------------
+"""Render the nominal or accepted short-horizon arm occupancy volume."""
+
+import math
+import time
+
+import rclpy
+from control_msgs.msg import JointTrajectoryControllerState
+from geometry_msgs.msg import Point
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+from visualization_msgs.msg import Marker, MarkerArray
+
+from thesis_core.execution_reference import sample_reference
+from thesis_core.jaco_kinematics import CAPSULE_RADII, capsule_segments
+from thesis_interfaces.msg import (
+    ExecutionControl,
+    ExecutionTrajectory,
+    JointCommand,
+)
+
+
+JOINTS = tuple(f'j2n6s300_joint_{index}' for index in range(1, 7))
+FRAME_ID = 'j2n6s300_link_base'
+VALID_SOURCES = ('auto', 'intent', 'execution')
+
+
+def predict_samples(current, target, duration, horizon, count):
+    """Interpolate a bounded-speed nominal intent over a fixed horizon."""
+    if len(current) != 6 or len(target) != 6:
+        raise ValueError('Expected six joints')
+    if not all(math.isfinite(x) for x in (*current, *target)):
+        raise ValueError('Non-finite positions')
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError('Invalid duration')
+    if not math.isfinite(horizon) or horizon <= 0 or count < 2:
+        raise ValueError('Invalid horizon')
+
+    delta = [b - a for a, b in zip(current, target)]
+    for index in (0, 3, 4, 5):
+        delta[index] = math.atan2(
+            math.sin(delta[index]),
+            math.cos(delta[index]),
+        )
+    limits = [math.radians(value) for value in (18, 18, 18, 24, 24, 24)]
+    effective_duration = max(
+        duration,
+        *(abs(delta_value) / limit
+          for delta_value, limit in zip(delta, limits)),
+    )
+    return [tuple(
+        current_value + delta_value * min(
+            index * horizon / (count - 1) / effective_duration,
+            1.0,
+        )
+        for current_value, delta_value in zip(current, delta)
+    ) for index in range(count)]
+
+
+def message_time_seconds(value):
+    """Convert a ROS time message to seconds."""
+    return float(value.sec) + float(value.nanosec) * 1e-9
+
+
+class HorizonPreview(Node):
+    """Render discrete future capsules in the model base frame."""
+
+    def __init__(self):
+        super().__init__('horizon_preview')
+        for name, default in (
+            ('horizon_sec', 1.0),
+            ('rate_hz', 10.0),
+            ('samples', 21),
+            ('margin_m', 0.02),
+            ('source', 'auto'),
+            ('model_frame', FRAME_ID),
+        ):
+            self.declare_parameter(name, default)
+
+        self.horizon = float(self.get_parameter('horizon_sec').value)
+        self.rate = float(self.get_parameter('rate_hz').value)
+        self.count = int(self.get_parameter('samples').value)
+        self.margin = float(self.get_parameter('margin_m').value)
+        self.source = str(self.get_parameter('source').value).lower()
+        self.frame_id = str(self.get_parameter('model_frame').value)
+        if (not all(math.isfinite(value) for value in (
+                self.horizon, self.rate, self.margin)) or
+                not 0 < self.horizon <= 5 or
+                not 0 < self.rate <= 30 or
+                not 2 <= self.count <= 101 or
+                not 0 <= self.margin <= 0.2 or
+                self.source not in VALID_SOURCES or not self.frame_id):
+            raise ValueError('Invalid preview parameters')
+
+        self.state = None
+        self.intent = None
+        self.jog = None
+        self.execution = None
+        self.control = None
+        self.controller_feedback = None
+        self.state_time = -math.inf
+        self.intent_time = -math.inf
+        self.jog_time = -math.inf
+        self.execution_time = -math.inf
+        self.control_time = -math.inf
+        self.controller_time = -math.inf
+        self.publisher = self.create_publisher(
+            MarkerArray,
+            '/thesis/horizon_volume',
+            10,
+        )
+        self.state_sub = self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.receive_state,
+            10,
+        )
+        self.intent_sub = self.create_subscription(
+            JointCommand,
+            '/thesis/preview_intent',
+            self.receive_intent,
+            10,
+        )
+        self.jog_sub = self.create_subscription(
+            JointCommand,
+            '/thesis/supervised_jog_command',
+            self.receive_jog,
+            10,
+        )
+        self.execution_sub = self.create_subscription(
+            ExecutionTrajectory,
+            '/thesis/execution_trajectory',
+            self.receive_execution,
+            10,
+        )
+        self.control_sub = self.create_subscription(
+            ExecutionControl,
+            '/thesis/execution_control',
+            self.receive_control,
+            10,
+        )
+        self.controller_sub = self.create_subscription(
+            JointTrajectoryControllerState,
+            '/arm_controller/controller_state',
+            self.receive_controller_state,
+            10,
+        )
+        self.timer = self.create_timer(1 / self.rate, self.tick)
+        self.previous_tick = None
+        self.get_logger().info(
+            f'Horizon preview started: source={self.source}, '
+            f'horizon={self.horizon:.2f}s, rate={self.rate:.1f}Hz'
+        )
+
+    def receive_state(self, msg):
+        if len(msg.name) != len(msg.position):
+            return
+        values = dict(zip(msg.name, msg.position))
+        if all(joint in values and math.isfinite(values[joint])
+               for joint in JOINTS):
+            self.state = tuple(values[joint] for joint in JOINTS)
+            self.state_time = time.monotonic()
+
+    def receive_intent(self, msg):
+        self.intent = msg if tuple(msg.joint_names) == JOINTS else None
+        self.intent_time = time.monotonic()
+
+    def receive_jog(self, msg):
+        self.jog = msg if tuple(msg.joint_names) == JOINTS else None
+        self.jog_time = time.monotonic()
+
+    def receive_execution(self, msg):
+        if msg.status == 'ACCEPTED':
+            self.execution = msg
+            self.execution_time = time.monotonic()
+
+    def receive_control(self, msg):
+        self.control = msg
+        self.control_time = time.monotonic()
+
+    def receive_controller_state(self, msg):
+        positions = dict(zip(
+            msg.joint_names,
+            msg.feedback.positions,
+        ))
+        if all(joint in positions and math.isfinite(positions[joint])
+               for joint in JOINTS):
+            self.controller_feedback = tuple(
+                positions[joint] for joint in JOINTS
+            )
+            self.controller_time = time.monotonic()
+
+    def state_is_fresh(self, now):
+        return self.state is not None and now - self.state_time <= 0.5
+
+    def intent_is_fresh(self, now):
+        return self.intent is not None and now - self.intent_time <= 0.5
+
+    def jog_is_fresh(self, now):
+        return self.jog is not None and now - self.jog_time <= 0.25
+
+    def execution_is_active(self, now_ros):
+        if self.execution is None:
+            return False
+        if len(self.execution.start_positions) != 6:
+            return False
+        if len(self.execution.target_positions) != 6:
+            return False
+        if not math.isfinite(self.execution.duration_sec):
+            return False
+        start = message_time_seconds(self.execution.start_time)
+        if now_ros <= start + self.execution.duration_sec + 0.5:
+            return True
+        return (
+            self.control is not None
+            and self.control.command_id == self.execution.command_id
+            and self.control.state == 'STOP'
+            and time.monotonic() - self.control_time <= 1.0
+        )
+
+    def runtime_state(self):
+        if (
+            self.control is None
+            or time.monotonic() - self.control_time > 1.0
+            or self.execution is None
+            or self.control.command_id != self.execution.command_id
+        ):
+            return 'ALLOW', 1.0, None
+        return (
+            self.control.state,
+            self.control.speed_scale,
+            self.control.minimum_clearance,
+        )
+
+    def runtime_minimum(self):
+        """Return where the supervisor found its minimum in the horizon."""
+        if (
+            self.control is None
+            or time.monotonic() - self.control_time > 1.0
+            or self.execution is None
+            or self.control.command_id != self.execution.command_id
+            or self.control.minimum_sample_count < 2
+        ):
+            return None
+        sample_count = int(self.control.minimum_sample_count)
+        sample_number = min(
+            int(self.control.minimum_sample_index) + 1,
+            sample_count,
+        )
+        return (
+            float(self.control.minimum_time_from_now),
+            sample_number,
+            sample_count,
+        )
+
+    def select_source(self, now_monotonic, now_ros):
+        execution_active = self.execution_is_active(now_ros)
+        intent_active = self.intent_is_fresh(now_monotonic)
+        if self.source == 'execution':
+            return 'execution' if execution_active else None
+        if self.source == 'intent':
+            return 'intent' if intent_active else None
+        if execution_active:
+            return 'execution'
+        if self.jog_is_fresh(now_monotonic):
+            return 'jog'
+        if intent_active:
+            return 'intent'
+        return None
+
+    def make_poses(self, source, now_ros):
+        if source in ('intent', 'jog'):
+            command = self.jog if source == 'jog' else self.intent
+            duration = message_time_seconds(command.duration)
+            poses = predict_samples(
+                self.state,
+                tuple(command.positions),
+                duration,
+                self.horizon,
+                self.count,
+            )
+            return poses, {
+                'title': (
+                    'CONTROL MANUAL SUPERVISADO'
+                    if source == 'jog'
+                    else 'INTENCIÓN NOMINAL'
+                ),
+                'detail': (
+                    'velocidad limitada y supervisada en tiempo real'
+                    if source == 'jog'
+                    else 'sin referencia aceptada; solo visualización'
+                ),
+                'command_id': command.command_id,
+                'elapsed': None,
+                'tracking_error': None,
+            }
+
+        start = tuple(self.execution.start_positions)
+        target = tuple(self.execution.target_positions)
+        start_time = message_time_seconds(self.execution.start_time)
+        elapsed = max(0.0, now_ros - start_time)
+        runtime_state, speed_scale, clearance = self.runtime_state()
+        runtime_minimum = self.runtime_minimum()
+        if runtime_state == 'STOP':
+            poses = [tuple(self.state) for _ in range(self.count)]
+        else:
+            poses = sample_reference(
+                start,
+                target,
+                float(self.execution.duration_sec),
+                elapsed,
+                self.horizon,
+                self.count,
+            )
+        clearance_text = (
+            'n/a' if clearance is None else f'{clearance:.3f}m'
+        )
+        minimum_text = ''
+        if runtime_minimum is not None:
+            minimum_time, sample_number, sample_count = runtime_minimum
+            minimum_text = (
+                f'\nt_min=+{minimum_time:.2f}s '
+                f'muestra={sample_number}/{sample_count}'
+            )
+        # Anchor the displayed volume at the latest measured configuration.
+        poses[0] = self.state
+        tracking_error = None
+        if (self.controller_feedback is not None and
+                time.monotonic() - self.controller_time <= 0.5):
+            tracking_error = max(
+                abs(a - b)
+                for a, b in zip(target, self.controller_feedback)
+            )
+        return poses, {
+            'title': 'REFERENCIA ACEPTADA',
+            'detail': (
+                f'control={runtime_state} escala={speed_scale:.2f}; '
+                f'd_futuro={clearance_text}{minimum_text}'
+            ),
+            'command_id': self.execution.command_id,
+            'elapsed': elapsed,
+            'tracking_error': tracking_error,
+            'runtime_state': runtime_state,
+        }
+
+    def empty_output(self):
+        clear = Marker()
+        clear.action = Marker.DELETEALL
+        return MarkerArray(markers=[clear])
+
+    def append_volume(self, output, poses, source, stamp):
+        spacing = 0.04
+        if source == 'execution':
+            namespace = 'execution_horizon'
+            state, _, _ = self.runtime_state()
+            colors = {
+                'ALLOW': (0.10, 0.75, 0.35, 0.14),
+                'WARNING': (1.00, 0.75, 0.05, 0.18),
+                'REDUCTION': (1.00, 0.40, 0.02, 0.20),
+                'STOP': (0.90, 0.05, 0.05, 0.30),
+            }
+            red, green, blue, alpha = colors.get(
+                state,
+                colors['ALLOW'],
+            )
+        else:
+            namespace = 'nominal_horizon'
+            red, green, blue, alpha = 0.1, 0.65, 1.0, 0.10
+
+        for index, radius in enumerate(CAPSULE_RADII):
+            marker = Marker()
+            marker.header.frame_id = self.frame_id
+            marker.header.stamp = stamp
+            marker.ns = namespace
+            marker.id = index
+            marker.type = Marker.SPHERE_LIST
+            marker.pose.orientation.w = 1.0
+            diameter = 2 * math.sqrt(
+                (radius + self.margin) ** 2 + (spacing / 2) ** 2
+            )
+            marker.scale.x = marker.scale.y = marker.scale.z = diameter
+            marker.color.r = red
+            marker.color.g = green
+            marker.color.b = blue
+            marker.color.a = alpha
+            marker.lifetime.sec = 1
+            seen = set()
+            for pose in poses:
+                start, end = capsule_segments(pose)[index]
+                length = math.sqrt(sum(
+                    (end[axis] - start[axis]) ** 2
+                    for axis in range(3)
+                ))
+                steps = max(1, math.ceil(length / spacing))
+                for step in range(steps + 1):
+                    point = [
+                        start[axis] + (end[axis] - start[axis])
+                        * step / steps
+                        for axis in range(3)
+                    ]
+                    key = tuple(round(value, 5) for value in point)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    marker.points.append(Point(
+                        x=point[0],
+                        y=point[1],
+                        z=point[2],
+                    ))
+            output.markers.append(marker)
+
+    def append_time_traces(self, output, poses, stamp):
+        """Draw geometric guides at true scale; these are not collision volumes."""
+        segments = [capsule_segments(pose) for pose in poses]
+        maximum_travel = 0.0
+        for link in range(len(CAPSULE_RADII)):
+            trace = Marker()
+            trace.header.frame_id = self.frame_id
+            trace.header.stamp = stamp
+            trace.ns = 'horizon_endpoint_traces'
+            trace.id = link
+            trace.type = Marker.LINE_STRIP
+            trace.pose.orientation.w = 1.0
+            trace.scale.x = 0.006
+            trace.color.r, trace.color.g, trace.color.b = 1.0, 0.8, 0.1
+            trace.color.a = 0.9
+            trace.lifetime.sec = 1
+            endpoints = [sample[link][1] for sample in segments]
+            trace.points = [Point(x=p[0], y=p[1], z=p[2]) for p in endpoints]
+            travel = sum(math.dist(a, b) for a, b in zip(endpoints, endpoints[1:]))
+            maximum_travel = max(maximum_travel, travel)
+            output.markers.append(trace)
+
+        # Skeletons distinguish intermediate/final poses without enlarging occupancy.
+        for slot, fraction in enumerate((0.25, 0.5, 1.0)):
+            index = round(fraction * (len(poses) - 1))
+            skeleton = Marker()
+            skeleton.header.frame_id = self.frame_id
+            skeleton.header.stamp = stamp
+            skeleton.ns = 'horizon_time_poses'
+            skeleton.id = slot
+            skeleton.type = Marker.LINE_LIST
+            skeleton.pose.orientation.w = 1.0
+            skeleton.scale.x = 0.008
+            skeleton.color.r = fraction
+            skeleton.color.g = 1.0 - 0.5 * fraction
+            skeleton.color.b = 1.0
+            skeleton.color.a = 0.9
+            skeleton.lifetime.sec = 1
+            for a, b in segments[index]:
+                skeleton.points.extend([Point(x=p[0], y=p[1], z=p[2]) for p in (a, b)])
+            output.markers.append(skeleton)
+            if maximum_travel > 0.015:
+                label = Marker()
+                label.header = skeleton.header
+                label.ns = 'horizon_time_labels'
+                label.id = slot
+                label.type = Marker.TEXT_VIEW_FACING
+                label.pose.orientation.w = 1.0
+                p = segments[index][-1][1]
+                label.pose.position = Point(x=p[0], y=p[1], z=p[2] + 0.05 + slot * 0.035)
+                label.scale.z = 0.025
+                label.color = skeleton.color
+                label.lifetime.sec = 1
+                label.text = f'+{index * self.horizon / (len(poses) - 1):.2f} s'
+                output.markers.append(label)
+        return maximum_travel
+
+    def append_label(self, output, source, description, metadata, hz, elapsed):
+        label = Marker()
+        stamp = self.get_clock().now().to_msg()
+        label.header.frame_id = self.frame_id
+        label.header.stamp = stamp
+        label.ns = 'horizon_label'
+        label.id = 6
+        label.type = Marker.TEXT_VIEW_FACING
+        label.pose.orientation.w = 1.0
+        label.pose.position.z = 1.5
+        label.scale.z = 0.045
+        label.color.r = label.color.g = label.color.b = 1.0
+        label.color.a = 1.0
+        label.lifetime.sec = 1
+        if source == 'execution':
+            error = metadata['tracking_error']
+            error_text = 'n/a' if error is None else f'{error:.3f}rad'
+            label.text = (
+                f'EJECUCIÓN H={self.horizon:.1f}s N={self.count} '
+                f'cmd={metadata["command_id"]}\n'
+                f't={elapsed:.2f}s cycle={hz:.1f}Hz '
+                f'error={error_text}\n{description}'
+            )
+        else:
+            label.text = (
+                f'PREVIEW H={self.horizon:.1f}s N={self.count} '
+                f'margin={self.margin:.3f}m\n'
+                f'cycle={hz:.1f}Hz compute={metadata:.1f}ms\n'
+                f'{description}'
+            )
+        output.markers.append(label)
+
+    def tick(self):
+        start = time.monotonic()
+        hz = 0.0 if self.previous_tick is None else 1 / max(
+            start - self.previous_tick,
+            1e-9,
+        )
+        self.previous_tick = start
+        output = self.empty_output()
+        now_ros = self.get_clock().now().nanoseconds / 1e9
+        if not self.state_is_fresh(start):
+            self.publisher.publish(output)
+            return
+
+        source = self.select_source(start, now_ros)
+        if source is None:
+            self.publisher.publish(output)
+            return
+
+        try:
+            poses, metadata = self.make_poses(source, now_ros)
+        except (TypeError, ValueError, ZeroDivisionError):
+            self.publisher.publish(output)
+            return
+
+        stamp = self.get_clock().now().to_msg()
+        self.append_volume(output, poses, source, stamp)
+        travel = self.append_time_traces(output, poses, stamp)
+        metadata['detail'] += (
+            f'\nRecorrido máximo de extremos: {travel * 100:.1f} cm'
+            '\nAmarillo: trazas; líneas de color: posturas futuras'
+        )
+        compute_ms = (time.monotonic() - start) * 1000
+        self.append_label(
+            output,
+            source,
+            metadata['detail'],
+            metadata if source == 'execution' else compute_ms,
+            hz,
+            metadata['elapsed'] if source == 'execution' else 0.0,
+        )
+        self.publisher.publish(output)
+
+
+def main(args=None):
+    """Run the short-horizon occupancy visualizer."""
+    rclpy.init(args=args)
+    node = HorizonPreview()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+
+-------------------- src/thesis_core/thesis_core/execution_reference.py --------------------
+"""Helpers for sampling an accepted joint trajectory reference."""
+
+import math
+
+
+JOINT_COUNT = 6
+CONTINUOUS_JOINT_INDEXES = (0, 3, 4, 5)
+
+
+def _validate_vector(values, name):
+    if len(values) != JOINT_COUNT:
+        raise ValueError(f'{name} must contain six joint positions')
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError(f'{name} contains a non-finite position')
+
+
+def normalize_target(start, target):
+    """Return the target using the shortest continuous-joint turn."""
+    _validate_vector(start, 'start')
+    _validate_vector(target, 'target')
+
+    normalized = list(target)
+    for index in CONTINUOUS_JOINT_INDEXES:
+        delta = math.atan2(
+            math.sin(target[index] - start[index]),
+            math.cos(target[index] - start[index]),
+        )
+        normalized[index] = start[index] + delta
+    return tuple(normalized)
+
+
+def sample_reference(start, target, duration, elapsed, horizon, count):
+    """Sample an absolute-time reference from the current execution point.
+
+    ``elapsed`` is measured from the reference start time. Samples after the
+    requested duration remain at the target, so a late visualizer does not
+    extrapolate beyond the command sent to the controller.
+    """
+    _validate_vector(start, 'start')
+    _validate_vector(target, 'target')
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError('duration must be positive and finite')
+    if not math.isfinite(elapsed):
+        raise ValueError('elapsed must be finite')
+    if not math.isfinite(horizon) or horizon < 0:
+        raise ValueError('horizon must be finite and non-negative')
+    if count < 2:
+        raise ValueError('count must be at least two')
+
+    target = normalize_target(start, target)
+    elapsed = max(0.0, elapsed)
+    samples = []
+    for index in range(count):
+        offset = horizon * index / float(count - 1)
+        time_from_start = min(duration, elapsed + offset)
+        fraction = time_from_start / duration
+        samples.append(tuple(
+            start_value + fraction * (target_value - start_value)
+            for start_value, target_value in zip(start, target)
+        ))
+    return samples
+
+-------------------- src/thesis_simulation/thesis_simulation/simulation_command_adapter.py --------------------
+"""Forward supervised commands and apply runtime safety controls."""
+
+import math
+import time
+
+import rclpy
+from control_msgs.action import FollowJointTrajectory
+from rclpy.action import ActionClient
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import JointState
+from thesis_interfaces.msg import (
+    ExecutionControl,
+    ExecutionTrajectory,
+    JointCommand,
+)
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+from thesis_core.execution_reference import normalize_target
+
+
+JOINTS = tuple(f'j2n6s300_joint_{index}' for index in range(1, 7))
+MIN_REPLAN_DURATION_SEC = 0.15
+MAX_REPLAN_DURATION_SEC = 30.0
+
+
+class SimulationCommandAdapter(Node):
+    """Send accepted commands to Gazebo and control the active goal."""
+
+    def __init__(self):
+        super().__init__('simulation_command_adapter')
+
+        self.declare_parameter('simulation_output_enabled', False)
+        self.declare_parameter(
+            'action_name',
+            '/arm_controller/follow_joint_trajectory',
+        )
+        self.declare_parameter('max_state_age_sec', 0.5)
+        self.declare_parameter('control_replan_cooldown_sec', 0.75)
+        self.declare_parameter('jog_control_period_sec', 0.10)
+        self.declare_parameter('jog_command_timeout_sec', 0.25)
+
+        action_name = self.get_parameter('action_name').value
+        self.action_client = ActionClient(
+            self,
+            FollowJointTrajectory,
+            action_name,
+        )
+
+        self.execution_publisher = self.create_publisher(
+            ExecutionTrajectory,
+            '/thesis/execution_trajectory',
+            10,
+        )
+        self.state_subscription = self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.state_callback,
+            10,
+        )
+        self.command_subscription = self.create_subscription(
+            JointCommand,
+            '/thesis/supervised_command',
+            self.command_callback,
+            10,
+        )
+        self.control_subscription = self.create_subscription(
+            ExecutionControl,
+            '/thesis/execution_control',
+            self.control_callback,
+            10,
+        )
+        jog_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        self.jog_publisher = self.create_publisher(
+            JointTrajectory,
+            '/arm_controller/joint_trajectory',
+            jog_qos,
+        )
+        self.jog_subscription = self.create_subscription(
+            JointCommand,
+            '/thesis/supervised_jog_command',
+            self.jog_command_callback,
+            10,
+        )
+
+        self.current_positions = {}
+        self.last_state_monotonic = None
+        self.goal_active = False
+        self.goal_handle = None
+        self.active_metadata = None
+        self.goal_generation = 0
+        self.control_in_progress = False
+        self.pending_control = None
+        self.applied_speed_scale = 1.0
+        self.last_control_change_monotonic = None
+        self.jog_active = False
+        self.last_jog_receive_monotonic = None
+        self.jog_hold_sent = False
+        self.jog_watchdog = self.create_timer(
+            0.05,
+            self.jog_watchdog_callback,
+        )
+
+        output_enabled = bool(
+            self.get_parameter('simulation_output_enabled').value
+        )
+        output_state = 'habilitada' if output_enabled else 'desactivada'
+        self.get_logger().info(
+            f'Adaptador Gazebo preparado; salida simulada {output_state}'
+        )
+
+    def state_callback(self, msg):
+        positions = {}
+        for name, position in zip(msg.name, msg.position):
+            if name in JOINTS and math.isfinite(position):
+                positions[name] = float(position)
+
+        if all(name in positions for name in JOINTS):
+            self.current_positions = positions
+            self.last_state_monotonic = time.monotonic()
+
+    def duration_seconds(self, msg):
+        return float(msg.duration.sec) + float(msg.duration.nanosec) * 1e-9
+
+    def current_state(self):
+        if self.last_state_monotonic is None:
+            return None
+
+        max_age = float(self.get_parameter('max_state_age_sec').value)
+        if time.monotonic() - self.last_state_monotonic > max_age:
+            return None
+
+        return tuple(self.current_positions[name] for name in JOINTS)
+
+    def publish_status(
+        self,
+        command_id,
+        status,
+        detail,
+        start_time=None,
+        start_positions=(),
+        target_positions=(),
+        duration=0.0,
+    ):
+        """Publish one execution lifecycle update."""
+        msg = ExecutionTrajectory()
+        msg.stamp = self.get_clock().now().to_msg()
+        msg.command_id = command_id
+        msg.status = status
+        msg.detail = detail
+        if start_time is not None:
+            msg.start_time = start_time
+        msg.joint_names = list(JOINTS)
+        msg.start_positions = list(start_positions)
+        msg.target_positions = list(target_positions)
+        msg.duration_sec = float(duration)
+        self.execution_publisher.publish(msg)
+
+    def reject(self, msg, status, detail):
+        self.publish_status(
+            msg.command_id,
+            status,
+            detail,
+            target_positions=msg.positions,
+            duration=self.duration_seconds(msg),
+        )
+        self.get_logger().warning(f'{status} {msg.command_id}: {detail}')
+
+    @staticmethod
+    def point_time_from_seconds(point, duration):
+        whole_seconds = int(duration)
+        nanoseconds = int(round(
+            (duration - whole_seconds) * 1_000_000_000
+        ))
+        if nanoseconds >= 1_000_000_000:
+            whole_seconds += 1
+            nanoseconds -= 1_000_000_000
+        point.time_from_start.sec = whole_seconds
+        point.time_from_start.nanosec = nanoseconds
+
+    def build_goal(self, start, target, duration):
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory.joint_names = list(JOINTS)
+
+        initial_point = JointTrajectoryPoint()
+        initial_point.positions = list(start)
+        initial_point.time_from_start.nanosec = 1
+
+        target_point = JointTrajectoryPoint()
+        target_point.positions = list(target)
+        self.point_time_from_seconds(target_point, duration)
+
+        goal.trajectory.points = [initial_point, target_point]
+        return goal
+
+    def publish_jog_target(self, target, duration):
+        """Publish one short rolling setpoint to the trajectory controller."""
+        trajectory = JointTrajectory()
+        trajectory.joint_names = list(JOINTS)
+        point = JointTrajectoryPoint()
+        point.positions = list(target)
+        self.point_time_from_seconds(point, duration)
+        trajectory.points = [point]
+        self.jog_publisher.publish(trajectory)
+
+    def jog_command_callback(self, msg):
+        """Convert a safe one-second jog horizon into a short control step."""
+        if not bool(self.get_parameter('simulation_output_enabled').value):
+            return
+        if self.goal_active:
+            return
+        if tuple(msg.joint_names) != JOINTS:
+            return
+
+        horizon = self.duration_seconds(msg)
+        control_period = float(
+            self.get_parameter('jog_control_period_sec').value
+        )
+        if (
+            not math.isfinite(horizon)
+            or horizon <= 0.0
+            or not 0.02 <= control_period <= 0.25
+        ):
+            return
+
+        current = self.current_state()
+        if current is None:
+            return
+        try:
+            horizon_target = normalize_target(
+                current,
+                tuple(msg.positions),
+            )
+        except ValueError:
+            return
+
+        fraction = min(1.0, control_period / horizon)
+        control_target = tuple(
+            current_value + fraction * (target_value - current_value)
+            for current_value, target_value in zip(
+                current,
+                horizon_target,
+            )
+        )
+        self.publish_jog_target(control_target, control_period)
+        self.jog_active = True
+        self.last_jog_receive_monotonic = time.monotonic()
+        self.jog_hold_sent = False
+
+    def jog_watchdog_callback(self):
+        """Hold the measured pose if the continuous command stream stops."""
+        if (
+            not self.jog_active
+            or self.last_jog_receive_monotonic is None
+            or self.jog_hold_sent
+        ):
+            return
+        timeout = float(
+            self.get_parameter('jog_command_timeout_sec').value
+        )
+        if time.monotonic() - self.last_jog_receive_monotonic <= timeout:
+            return
+        current = self.current_state()
+        if current is not None:
+            duration = float(
+                self.get_parameter('jog_control_period_sec').value
+            )
+            self.publish_jog_target(current, duration)
+        self.jog_hold_sent = True
+        self.jog_active = False
+
+    def start_goal(self, metadata, detail):
+        """Send a goal and associate every callback with its generation."""
+        if not self.action_client.wait_for_server(timeout_sec=1.0):
+            self.publish_status(
+                metadata['command_id'],
+                'FAILED',
+                'no se encontró el action server de Gazebo',
+                start_positions=metadata['start'],
+                target_positions=metadata['target'],
+                duration=metadata['duration'],
+            )
+            self.clear_active_goal()
+            return
+
+        self.goal_generation += 1
+        generation = self.goal_generation
+        metadata['generation'] = generation
+        metadata['accepted'] = False
+        metadata['start_time'] = None
+        self.active_metadata = metadata
+        self.goal_handle = None
+        self.goal_active = True
+
+        self.publish_status(
+            metadata['command_id'],
+            'PENDING',
+            detail,
+            start_positions=metadata['start'],
+            target_positions=metadata['target'],
+            duration=metadata['duration'],
+        )
+
+        goal = self.build_goal(
+            metadata['start'],
+            metadata['target'],
+            metadata['duration'],
+        )
+        future = self.action_client.send_goal_async(goal)
+        future.add_done_callback(
+            lambda result_future, token=generation:
+            self.goal_response_callback(result_future, token)
+        )
+        self.get_logger().info(
+            f'GOAL PENDING id={metadata["command_id"]}, '
+            f'duration={metadata["duration"]:.2f} s, '
+            f'scale={metadata["speed_scale"]:.2f}'
+        )
+
+    def initial_metadata(self, msg, start, target, duration):
+        return {
+            'command_id': msg.command_id,
+            'origin_start': tuple(start),
+            'origin_target': tuple(target),
+            'start': tuple(start),
+            'target': tuple(target),
+            'nominal_duration': float(duration),
+            'duration': float(duration),
+            'speed_scale': 1.0,
+        }
+
+    def command_callback(self, msg):
+        duration = self.duration_seconds(msg)
+        output_enabled = bool(
+            self.get_parameter('simulation_output_enabled').value
+        )
+
+        if not output_enabled:
+            self.publish_status(
+                msg.command_id,
+                'DRY_RUN',
+                'Salida a Gazebo desactivada; no existe referencia aceptada.',
+                target_positions=msg.positions,
+                duration=duration,
+            )
+            self.get_logger().info(
+                f'SIMULATION-DRY-RUN id={msg.command_id}: '
+                'salida a Gazebo desactivada'
+            )
+            return
+
+        if self.jog_active:
+            self.reject(
+                msg,
+                'REJECTED',
+                'el control manual continuo está activo',
+            )
+            return
+
+        if self.goal_active:
+            self.reject(
+                msg,
+                'REJECTED',
+                'ya existe una trayectoria activa en Gazebo',
+            )
+            return
+
+        if list(msg.joint_names) != list(JOINTS):
+            self.reject(
+                msg,
+                'REJECTED',
+                'se esperaban las seis articulaciones en orden canónico',
+            )
+            return
+
+        if not math.isfinite(duration) or duration <= 0:
+            self.reject(msg, 'REJECTED', 'duración inválida')
+            return
+
+        if not all(math.isfinite(value) for value in msg.positions):
+            self.reject(msg, 'REJECTED', 'posición articular no finita')
+            return
+
+        start = self.current_state()
+        if start is None:
+            self.reject(
+                msg,
+                'FAILED',
+                'no existe un /joint_states reciente para iniciar',
+            )
+            return
+
+        try:
+            target = normalize_target(start, tuple(msg.positions))
+        except ValueError as exc:
+            self.reject(msg, 'REJECTED', str(exc))
+            return
+
+        metadata = self.initial_metadata(msg, start, target, duration)
+        self.start_goal(
+            metadata,
+            'Esperando aceptación del action server de Gazebo.',
+        )
+
+    def goal_response_callback(self, future, generation):
+        metadata = self.active_metadata
+        if metadata is None or metadata['generation'] != generation:
+            return
+
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self.publish_status(
+                metadata['command_id'],
+                'FAILED',
+                f'Error enviando goal a Gazebo: {exc}',
+                start_positions=metadata['start'],
+                target_positions=metadata['target'],
+                duration=metadata['duration'],
+            )
+            self.clear_active_goal()
+            return
+
+        if not goal_handle.accepted:
+            self.publish_status(
+                metadata['command_id'],
+                'REJECTED',
+                'Gazebo rechazó la trayectoria.',
+                start_positions=metadata['start'],
+                target_positions=metadata['target'],
+                duration=metadata['duration'],
+            )
+            self.clear_active_goal()
+            self.get_logger().warning(
+                f'Gazebo rechazó la trayectoria {metadata["command_id"]}'
+            )
+            return
+
+        self.goal_handle = goal_handle
+        metadata['accepted'] = True
+        metadata['start_time'] = self.get_clock().now().to_msg()
+        self.applied_speed_scale = metadata['speed_scale']
+        self.publish_status(
+            metadata['command_id'],
+            'ACCEPTED',
+            'Referencia aceptada por el action server de Gazebo.',
+            start_time=metadata['start_time'],
+            start_positions=metadata['start'],
+            target_positions=metadata['target'],
+            duration=metadata['duration'],
+        )
+        self.get_logger().info(
+            f'GAZEBO ACCEPTED id={metadata["command_id"]}, '
+            f'scale={metadata["speed_scale"]:.2f}'
+        )
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda result, token=generation:
+            self.result_callback(result, token)
+        )
+
+        if self.pending_control is not None:
+            pending = self.pending_control
+            self.pending_control = None
+            self.control_callback(pending)
+
+    def result_callback(self, future, generation):
+        metadata = self.active_metadata
+        if metadata is None or metadata['generation'] != generation:
+            return
+        if self.control_in_progress:
+            return
+
+        try:
+            result = future.result().result
+            error_code = result.error_code
+            detail = result.error_string or f'error_code={error_code}'
+            if error_code == FollowJointTrajectory.Result.SUCCESSFUL:
+                status = 'SUCCEEDED'
+            else:
+                status = 'FAILED'
+        except Exception as exc:
+            status = 'FAILED'
+            detail = f'Error obteniendo resultado de Gazebo: {exc}'
+
+        self.publish_status(
+            metadata['command_id'],
+            status,
+            detail,
+            start_time=metadata['start_time'],
+            start_positions=metadata['start'],
+            target_positions=metadata['target'],
+            duration=metadata['duration'],
+        )
+        self.get_logger().info(
+            f'GAZEBO {status} id={metadata["command_id"]}: {detail}'
+        )
+        self.clear_active_goal()
+
+    def control_callback(self, msg):
+        """Apply the latest runtime safety decision to the active goal."""
+        metadata = self.active_metadata
+        if (
+            not self.goal_active
+            or metadata is None
+            or msg.command_id != metadata['command_id']
+        ):
+            return
+
+        if not metadata['accepted'] or self.goal_handle is None:
+            self.pending_control = msg
+            return
+
+        if self.control_in_progress:
+            self.pending_control = msg
+            return
+
+        if msg.state == 'STOP' or msg.speed_scale <= 0.0:
+            desired_scale = 0.0
+        elif msg.state == 'REDUCTION':
+            desired_scale = min(max(float(msg.speed_scale), 0.05), 1.0)
+        else:
+            desired_scale = 1.0
+
+        if abs(desired_scale - self.applied_speed_scale) <= 0.05:
+            return
+
+        # Do not immediately restore nominal speed after a reduction.  The
+        # supervisor has hysteresis as well, but this second guard prevents a
+        # cancel/replan storm if consecutive runtime samples disagree.
+        cooldown = float(
+            self.get_parameter('control_replan_cooldown_sec').value
+        )
+        now_monotonic = time.monotonic()
+        restoring_speed = (
+            desired_scale > self.applied_speed_scale + 0.05
+        )
+        if (
+            restoring_speed
+            and self.last_control_change_monotonic is not None
+            and now_monotonic - self.last_control_change_monotonic < cooldown
+        ):
+            self.pending_control = msg
+            return
+
+        self.pending_control = msg
+        self.control_in_progress = True
+        self.last_control_change_monotonic = now_monotonic
+        generation = metadata['generation']
+        cancel_future = self.goal_handle.cancel_goal_async()
+        cancel_future.add_done_callback(
+            lambda result, token=generation:
+            self.cancel_callback(result, token)
+        )
+        self.get_logger().warning(
+            f'CONTROL {metadata["command_id"]}: {msg.state}, '
+            f'scale={desired_scale:.2f}; cancelando goal activo'
+        )
+
+    def trajectory_progress(self, current, metadata):
+        """Estimate progress using the slowest remaining joint."""
+        start = metadata['origin_start']
+        target = metadata['origin_target']
+        remaining_fractions = []
+        for index, (start_value, target_value, current_value) in enumerate(
+                zip(start, target, current)):
+            total_delta = target_value - start_value
+            current_target = target_value
+            if index in (0, 3, 4, 5):
+                current_target = current_value + math.atan2(
+                    math.sin(target_value - current_value),
+                    math.cos(target_value - current_value),
+                )
+                total_delta = math.atan2(
+                    math.sin(total_delta),
+                    math.cos(total_delta),
+                )
+                current_delta = current_target - current_value
+            else:
+                current_delta = target_value - current_value
+
+            if abs(total_delta) <= 1.0e-6:
+                continue
+            remaining_fractions.append(
+                min(1.0, max(0.0, abs(current_delta / total_delta)))
+            )
+
+        if not remaining_fractions:
+            return 1.0
+        return 1.0 - max(remaining_fractions)
+
+    def cancel_callback(self, future, generation):
+        metadata = self.active_metadata
+        if metadata is None or metadata['generation'] != generation:
+            return
+
+        control = self.pending_control
+        self.pending_control = None
+        self.goal_handle = None
+
+        if (
+            control is None
+            or control.state == 'STOP'
+            or control.speed_scale <= 0.0
+        ):
+            detail = (
+                control.reason
+                if control is not None
+                else 'Parada solicitada por el supervisor.'
+            )
+            self.publish_status(
+                metadata['command_id'],
+                'CANCELED',
+                f'Trayectoria cancelada por seguridad: {detail}',
+                start_time=metadata['start_time'],
+                start_positions=metadata['start'],
+                target_positions=metadata['target'],
+                duration=metadata['duration'],
+            )
+            self.get_logger().warning(
+                f'STOPPED id={metadata["command_id"]}: {detail}'
+            )
+            self.clear_active_goal()
+            return
+
+        current = self.current_state()
+        if current is None:
+            self.publish_status(
+                metadata['command_id'],
+                'CANCELED',
+                'Trayectoria cancelada: estado articular no disponible.',
+                start_time=metadata['start_time'],
+                start_positions=metadata['start'],
+                target_positions=metadata['target'],
+                duration=metadata['duration'],
+            )
+            self.clear_active_goal()
+            return
+
+        progress = self.trajectory_progress(current, metadata)
+        remaining_nominal = metadata['nominal_duration'] * (
+            1.0 - progress
+        )
+        scale = min(max(float(control.speed_scale), 0.05), 1.0)
+        duration = max(
+            MIN_REPLAN_DURATION_SEC,
+            remaining_nominal / scale,
+        )
+        duration = min(duration, MAX_REPLAN_DURATION_SEC)
+        try:
+            target = normalize_target(current, metadata['origin_target'])
+        except ValueError as exc:
+            self.publish_status(
+                metadata['command_id'],
+                'CANCELED',
+                f'Trayectoria cancelada: {exc}',
+                start_time=metadata['start_time'],
+                start_positions=metadata['start'],
+                target_positions=metadata['target'],
+                duration=metadata['duration'],
+            )
+            self.clear_active_goal()
+            return
+
+        replacement = {
+            'command_id': metadata['command_id'],
+            'origin_start': metadata['origin_start'],
+            'origin_target': metadata['origin_target'],
+            'start': tuple(current),
+            'target': tuple(target),
+            'nominal_duration': metadata['nominal_duration'],
+            'duration': duration,
+            'speed_scale': scale,
+        }
+        self.control_in_progress = False
+        self.start_goal(
+            replacement,
+            (
+                f'Replanificación preventiva; escala de velocidad '
+                f'{scale:.2f}, duración restante {duration:.2f} s.'
+            ),
+        )
+
+    def clear_active_goal(self):
+        self.goal_active = False
+        self.goal_handle = None
+        self.active_metadata = None
+        self.control_in_progress = False
+        self.pending_control = None
+        self.applied_speed_scale = 1.0
+        self.last_control_change_monotonic = None
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SimulationCommandAdapter()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+
+-------------------- src/thesis_ui/thesis_ui/joint_control_gui.py --------------------
+import math
+import sys
+import time
+from collections import deque
+from PyQt5.QtCore import QEvent
+
+from PyQt5.QtCore import QSignalBlocker
+from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import QHeaderView
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QDoubleSpinBox
+from PyQt5.QtWidgets import QGridLayout
+from PyQt5.QtWidgets import QGroupBox
+from PyQt5.QtWidgets import QHBoxLayout
+from PyQt5.QtWidgets import QLabel
+from PyQt5.QtWidgets import QMainWindow
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtWidgets import QPushButton
+from PyQt5.QtWidgets import QScrollArea
+from PyQt5.QtWidgets import QSlider
+from PyQt5.QtWidgets import QTableWidget
+from PyQt5.QtWidgets import QTableWidgetItem
+from PyQt5.QtWidgets import QVBoxLayout
+from PyQt5.QtWidgets import QWidget
+
+import rclpy
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rclpy.time import Time
+from sensor_msgs.msg import JointState
+from thesis_interfaces.msg import (
+    CommandDecision,
+    ExecutionControl,
+    ExecutionTrajectory,
+    JointCommand,
+    ProximityStatus,
+    TrajectoryPrediction,
+)
+import tf2_ros
+
+
+JOINT_NAMES = [
+    'j2n6s300_joint_1',
+    'j2n6s300_joint_2',
+    'j2n6s300_joint_3',
+    'j2n6s300_joint_4',
+    'j2n6s300_joint_5',
+    'j2n6s300_joint_6',
+]
+
+JOINT_LABELS = [
+    'J1 - Base',
+    'J2 - Hombro',
+    'J3 - Codo',
+    'J4 - Muñeca 1',
+    'J5 - Muñeca 2',
+    'J6 - Muñeca 3',
+]
+
+JOINT_LIMITS_DEG = [
+    (-360.0, 360.0),
+    (47.0, 313.0),
+    (19.0, 341.0),
+    (-360.0, 360.0),
+    (-360.0, 360.0),
+    (-360.0, 360.0),
+]
+
+INITIAL_POSE_DEG = [0.0, 180.0, 180.0, 0.0, 0.0, 0.0]
+TEST_POSE_DEG = [math.degrees(0.20), 180.0, 180.0, 0.0, 0.0, 0.0]
+
+# These values match the current supervisor configuration:
+# nominal J1-J3 = 36 deg/s, nominal J4-J6 = 48 deg/s,
+# with velocity_scale = 0.5.
+ALLOWED_SPEED_DEG = [18.0, 18.0, 18.0, 24.0, 24.0, 24.0]
+MAX_JOG_SPEED_DEG = [36.0, 36.0, 36.0, 48.0, 48.0, 48.0]
+CONTINUOUS_JOINT_INDEXES = {0, 3, 4, 5}
+JOG_INPUT_TIMEOUT_SEC = 0.30
+
+
+class WheelIntention:
+    """Finite-window wheel rate. Excess input is never queued as a target."""
+
+    def __init__(self, window=0.25, degrees_per_notch=1.0):
+        self.window = window
+        self.degrees_per_notch = degrees_per_notch
+        self.events = deque()
+
+    def clear(self):
+        self.events.clear()
+
+    def add(self, now, notches):
+        if not math.isfinite(notches) or notches == 0.0:
+            return
+        if self.events and self.events[-1][1] * notches < 0:
+            self.clear()
+        self.events.append((now, notches))
+
+    def velocity(self, now, maximum):
+        while self.events and now - self.events[0][0] >= self.window:
+            self.events.popleft()
+        rate = sum(value for _, value in self.events)
+        rate *= self.degrees_per_notch / self.window
+        return max(-maximum, min(maximum, rate))
+
+
+def limited_direct_step(
+    current_degrees,
+    requested_degrees,
+    maximum_speed_deg_s,
+    elapsed_sec,
+    continuous=False,
+):
+    """Return the reachable reference and velocity for one mouse event."""
+    elapsed_sec = min(max(float(elapsed_sec), 0.01), 0.25)
+    delta = float(requested_degrees) - float(current_degrees)
+    if continuous:
+        delta = (delta + 180.0) % 360.0 - 180.0
+    maximum_step = max(0.0, float(maximum_speed_deg_s)) * elapsed_sec
+    applied = min(max(delta, -maximum_step), maximum_step)
+    return (
+        float(current_degrees) + applied,
+        applied / elapsed_sec,
+    )
+
+
+def quaternion_to_rpy(x, y, z, w):
+    sin_roll = 2.0 * (w * x + y * z)
+    cos_roll = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sin_roll, cos_roll)
+
+    sin_pitch = 2.0 * (w * y - z * x)
+    sin_pitch = max(-1.0, min(1.0, sin_pitch))
+    pitch = math.asin(sin_pitch)
+
+    sin_yaw = 2.0 * (w * z + x * y)
+    cos_yaw = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(sin_yaw, cos_yaw)
+
+    return roll, pitch, yaw
+
+
+class JointGuiNode(Node):
+
+    def __init__(self):
+        super().__init__(
+            'joint_control_gui_node',
+            parameter_overrides=[
+                Parameter('use_sim_time', value=True),
+            ],
+        )
+
+        self.current_positions = {}
+        self.current_velocities = {}
+        self.last_state_time = None
+        self.last_command_id = None
+        self.last_allowed_id = None
+        self.last_supervised_duration = None
+        self.last_prediction = None
+        self.last_execution = None
+        self.last_execution_control = None
+        self.execution_by_id = {}
+        self.last_proximity = None
+        self.proximity_received_at = None
+        self.control_received_at = None
+        self.end_effector_pose = None
+        self.intent_publisher = self.create_publisher(
+            JointCommand, '/thesis/preview_intent', 10,
+        )
+        self.jog_intent_publisher = self.create_publisher(
+            JointCommand, '/thesis/jog_intent', 10,
+        )
+        self.last_decision = None
+        self.decision_subscription = self.create_subscription(
+            CommandDecision,
+            '/thesis/command_decision',
+            self.decision_callback,
+            10,
+        )
+
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(
+            self.tf_buffer,
+            self,
+        )
+
+        self.candidate_publisher = self.create_publisher(
+            JointCommand,
+            '/thesis/candidate_command',
+            10,
+        )
+
+        self.state_subscription = self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.state_callback,
+            10,
+        )
+
+        self.supervised_subscription = self.create_subscription(
+            JointCommand,
+            '/thesis/supervised_command',
+            self.supervised_callback,
+            10,
+        )
+
+        self.prediction_subscription = self.create_subscription(
+            TrajectoryPrediction,
+            '/thesis/trajectory_prediction',
+            self.prediction_callback,
+            10,
+        )
+
+        self.execution_subscription = self.create_subscription(
+            ExecutionTrajectory,
+            '/thesis/execution_trajectory',
+            self.execution_callback,
+            10,
+        )
+        self.execution_control_subscription = self.create_subscription(
+            ExecutionControl,
+            '/thesis/execution_control',
+            self.execution_control_callback,
+            10,
+        )
+
+        self.proximity_subscription = self.create_subscription(
+            ProximityStatus, '/thesis/proximity_status',
+            self.proximity_callback, 10,
+        )
+
+    def proximity_callback(self, msg):
+        self.last_proximity = msg
+        self.proximity_received_at = time.monotonic()
+
+    def execution_is_active(self):
+        return any(
+            msg.status in ('PENDING', 'ACCEPTED')
+            for msg in self.execution_by_id.values()
+        )
+
+    def state_callback(self, msg):
+        self.current_velocities = {
+            name: float(value) for name, value in zip(msg.name, msg.velocity)
+            if name in JOINT_NAMES and math.isfinite(value)
+        }
+        for name, position in zip(msg.name, msg.position):
+            if name in JOINT_NAMES and math.isfinite(position):
+                self.current_positions[name] = float(position)
+
+        if all(name in self.current_positions for name in JOINT_NAMES):
+            self.last_state_time = time.monotonic()
+
+    def supervised_callback(self, msg):
+        if msg.command_id == self.last_command_id:
+            self.last_allowed_id = msg.command_id
+            self.last_supervised_duration = (
+                float(msg.duration.sec)
+                + float(msg.duration.nanosec) * 1e-9
+            )
+
+    def decision_callback(self, msg):
+        if msg.command_id == self.last_command_id:
+            self.last_decision = msg
+
+    def prediction_callback(self, msg):
+        if msg.command_id == self.last_command_id:
+            self.last_prediction = msg
+
+    def execution_callback(self, msg):
+        self.execution_by_id[msg.command_id] = msg
+        # Keep terminal history bounded, retaining every active execution.
+        if len(self.execution_by_id) > 100:
+            for command_id, execution in list(self.execution_by_id.items()):
+                if execution.status not in ('PENDING', 'ACCEPTED'):
+                    del self.execution_by_id[command_id]
+                    break
+        if (
+            msg.command_id == self.last_command_id
+            or self.last_command_id is None
+        ):
+            self.last_execution = msg
+
+    def execution_control_callback(self, msg):
+        self.last_execution_control = msg
+        self.control_received_at = time.monotonic()
+
+    def state_is_ready(self):
+        if self.last_state_time is None:
+            return False
+
+        return time.monotonic() - self.last_state_time <= 1.0
+
+    def update_end_effector_pose(self):
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                'world',
+                'j2n6s300_end_effector',
+                Time(),
+            )
+        except tf2_ros.TransformException:
+            self.end_effector_pose = None
+            return
+
+        translation = transform.transform.translation
+        rotation = transform.transform.rotation
+        roll, pitch, yaw = quaternion_to_rpy(
+            rotation.x,
+            rotation.y,
+            rotation.z,
+            rotation.w,
+        )
+
+        self.end_effector_pose = (
+            translation.x,
+            translation.y,
+            translation.z,
+            roll,
+            pitch,
+            yaw,
+        )
+
+    def connection_status(self):
+        return {
+            'Gazebo /clock': self.count_publishers('/clock') > 0,
+            '/joint_states': self.count_publishers('/joint_states') > 0,
+            'Supervisor': (
+                self.candidate_publisher.get_subscription_count() > 0
+            ),
+            'Control manual continuo': (
+                self.jog_intent_publisher.get_subscription_count() > 0
+            ),
+            'Salida supervisada': (
+                self.count_publishers('/thesis/supervised_command') > 0
+            ),
+            'Predicción geométrica': (
+                self.count_publishers(
+                    '/thesis/trajectory_prediction'
+                ) > 0
+            ),
+            'Referencia de ejecución': (
+                self.count_publishers(
+                    '/thesis/execution_trajectory'
+                ) > 0
+            ),
+            'Control preventivo': (
+                self.count_publishers(
+                    '/thesis/execution_control'
+                ) > 0
+            ),
+        }
+
+    def publish_candidate(self, positions, duration_sec):
+        msg = JointCommand()
+        now = self.get_clock().now()
+
+        msg.stamp = now.to_msg()
+        msg.command_id = f'gui_{now.nanoseconds}'
+        msg.joint_names = list(JOINT_NAMES)
+        msg.positions = list(positions)
+
+        seconds = int(duration_sec)
+        nanoseconds = int((duration_sec - seconds) * 1e9)
+        msg.duration.sec = seconds
+        msg.duration.nanosec = nanoseconds
+
+        self.last_command_id = msg.command_id
+        self.last_allowed_id = None
+        self.last_supervised_duration = None
+        self.last_prediction = None
+        self.last_decision = None
+        self.last_execution = None
+        self.last_execution_control = None
+        self.candidate_publisher.publish(msg)
+
+        return (
+            msg.command_id,
+            self.candidate_publisher.get_subscription_count(),
+        )
+
+
+class JointControlWindow(QMainWindow):
+
+    def __init__(self, ros_node):
+        super().__init__()
+
+        self.ros_node = ros_node
+        self.target_inputs = []
+        self.target_sliders = []
+        self.current_degree_labels = []
+        self.current_radian_labels = []
+        self.target_radian_labels = []
+        self.jog_speed_inputs = []
+        self.wheel_intentions = [WheelIntention() for _ in JOINT_NAMES]
+        self.decrease_buttons = []
+        self.increase_buttons = []
+        self.jog_velocity_labels = []
+        self.jog_reference_deg = list(INITIAL_POSE_DEG)
+        self.jog_velocity_deg_s = [0.0] * len(JOINT_NAMES)
+        self.jog_last_input_time = [None] * len(JOINT_NAMES)
+        self.jog_last_motion_time = [None] * len(JOINT_NAMES)
+        self.pending_command_id = None
+        self.pending_since = None
+        self.connection_indicators = {}
+        self.pose_labels = []
+        self.minimum_safe_duration = None
+        self.prediction_is_stale = False
+
+        self.setWindowTitle('Tesis 2 - Control articular JACO2')
+        self.resize(1050, 760)
+        self.setMinimumSize(760, 520)
+
+        self.build_ui()
+        self.apply_style()
+
+        self.ros_timer = QTimer(self)
+        self.ros_timer.timeout.connect(self.spin_ros)
+        self.ros_timer.start(10)
+
+        self.ui_timer = QTimer(self)
+        self.ui_timer.timeout.connect(self.refresh_ui)
+        self.ui_timer.start(100)
+
+        self.jog_timer = QTimer(self)
+        self.jog_timer.timeout.connect(self.publish_jog_intent)
+        self.jog_timer.start(50)
+
+    def build_ui(self):
+        content_widget = QWidget()
+        main_layout = QVBoxLayout(content_widget)
+
+        title = QLabel('Control articular supervisado - JACO2')
+        title.setObjectName('titleLabel')
+        main_layout.addWidget(title)
+
+        safety_banner = QLabel(
+            'MODO SIMULACIÓN: los comandos se publican únicamente en '
+            '/thesis/candidate_command y deben pasar por el supervisor.'
+        )
+        safety_banner.setObjectName('safetyBanner')
+        safety_banner.setWordWrap(True)
+        main_layout.addWidget(safety_banner)
+
+        state_group = QGroupBox('Estado y objetivos articulares')
+        state_layout = QGridLayout(state_group)
+
+        headers = [
+            'Articulación',
+            'Actual (°)',
+            'Actual (rad)',
+            'Objetivo (°)',
+            'Ajuste',
+            'Objetivo (rad)',
+        ]
+
+        for column, header in enumerate(headers):
+            label = QLabel(header)
+            label.setObjectName('headerLabel')
+            state_layout.addWidget(label, 0, column)
+
+        for index, joint_label in enumerate(JOINT_LABELS):
+            row = index + 1
+            name_label = QLabel(joint_label)
+            current_degrees = QLabel('--')
+            current_radians = QLabel('--')
+            target_radians = QLabel('0.0000')
+            target_input = QDoubleSpinBox()
+            target_slider = QSlider(Qt.Horizontal)
+            target_slider.installEventFilter(self)
+            target_slider.setToolTip(
+                'Control manual: coloque el cursor aquí y gire la rueda. '
+                'La barra muestra el ángulo medido.'
+            )
+            adjustment_widget = QWidget()
+            adjustment_layout = QHBoxLayout(adjustment_widget)
+            decrease_button = QPushButton('−1°')
+            increase_button = QPushButton('+1°')
+
+            lower, upper = JOINT_LIMITS_DEG[index]
+            target_input.setRange(lower, upper)
+            target_input.setDecimals(2)
+            target_input.setSingleStep(1.0)
+            target_input.setSuffix(' °')
+            target_input.setValue(INITIAL_POSE_DEG[index])
+            target_input.valueChanged.connect(
+                lambda value, item=index: self.target_spin_changed(
+                    item,
+                    value,
+                )
+            )
+
+            target_slider.setRange(
+                int(lower * 10.0),
+                int(upper * 10.0),
+            )
+            target_slider.setSingleStep(10)
+            target_slider.setPageStep(50)
+            target_slider.setValue(
+                int(round(INITIAL_POSE_DEG[index] * 10.0))
+            )
+            target_slider.valueChanged.connect(
+                lambda value, item=index: self.target_slider_changed(
+                    item,
+                    value,
+                )
+            )
+            target_slider.sliderPressed.connect(
+                lambda item=index: self.begin_direct_drag(item)
+            )
+            target_slider.sliderReleased.connect(
+                lambda item=index: self.end_direct_drag(item)
+            )
+
+            decrease_button.clicked.connect(
+                lambda checked=False, item=index: self.jog_joint(
+                    item,
+                    -1.0,
+                )
+            )
+            increase_button.clicked.connect(
+                lambda checked=False, item=index: self.jog_joint(
+                    item,
+                    1.0,
+                )
+            )
+
+            adjustment_layout.setContentsMargins(0, 0, 0, 0)
+            adjustment_layout.addWidget(decrease_button)
+            adjustment_layout.addWidget(target_slider, 1)
+            adjustment_layout.addWidget(increase_button)
+
+            self.current_degree_labels.append(current_degrees)
+            self.current_radian_labels.append(current_radians)
+            self.target_inputs.append(target_input)
+            self.target_sliders.append(target_slider)
+            self.target_radian_labels.append(target_radians)
+            self.decrease_buttons.append(decrease_button)
+            self.increase_buttons.append(increase_button)
+
+            state_layout.addWidget(name_label, row, 0)
+            state_layout.addWidget(current_degrees, row, 1)
+            state_layout.addWidget(current_radians, row, 2)
+            state_layout.addWidget(target_input, row, 3)
+            state_layout.addWidget(adjustment_widget, row, 4)
+            state_layout.addWidget(target_radians, row, 5)
+
+        main_layout.addWidget(state_group)
+
+        jog_group = QGroupBox('Control manual articular continuo')
+        jog_layout = QGridLayout(jog_group)
+        self.jog_mode_button = QPushButton(
+            'ACTIVAR CONTROL MANUAL CONTINUO'
+        )
+        self.jog_mode_button.setCheckable(True)
+        self.jog_mode_button.toggled.connect(self.toggle_jog_mode)
+        jog_layout.addWidget(self.jog_mode_button, 0, 0, 1, 4)
+        jog_note = QLabel(
+            'Gire la rueda sobre la barra del joint. La barra muestra el '
+            'ángulo medido. Más pulsos = mayor velocidad, limitada por Vmáx '
+            'y supervisión. Sin pulsos durante 0.25 s: intención cero. '
+            'Sensibilidad: 1° por paso estándar de rueda; ventana: 0.25 s.'
+        )
+        jog_note.setWordWrap(True)
+        jog_layout.addWidget(jog_note, 1, 0, 1, 4)
+        for index, joint_label in enumerate(JOINT_LABELS):
+            row = index + 2
+            jog_layout.addWidget(QLabel(joint_label), row, 0)
+            jog_layout.addWidget(QLabel('Vmáx:'), row, 1)
+            speed_input = QDoubleSpinBox()
+            speed_input.setRange(1.0, MAX_JOG_SPEED_DEG[index])
+            speed_input.setDecimals(1)
+            speed_input.setSingleStep(1.0)
+            speed_input.setValue(ALLOWED_SPEED_DEG[index])
+            speed_input.setSuffix(' °/s')
+            self.jog_speed_inputs.append(speed_input)
+            jog_layout.addWidget(speed_input, row, 2)
+            velocity_label = QLabel('v mouse: 0.0 °/s')
+            velocity_label.setStyleSheet('font-weight: bold; color: #166534;')
+            self.jog_velocity_labels.append(velocity_label)
+            jog_layout.addWidget(velocity_label, row, 3)
+        main_layout.addWidget(jog_group)
+
+        connection_group = QGroupBox('Conexiones de la simulación')
+        connection_layout = QGridLayout(connection_group)
+
+        for name in [
+            'Gazebo /clock',
+            '/joint_states',
+            'Supervisor',
+            'Control manual continuo',
+            'Salida supervisada',
+            'Predicción geométrica',
+            'Referencia de ejecución',
+            'Control preventivo',
+        ]:
+            indicator = QLabel(f'● {name}')
+            indicator.setStyleSheet('color: #b91c1c; font-weight: bold;')
+            self.connection_indicators[name] = indicator
+            index = len(self.connection_indicators) - 1
+            connection_layout.addWidget(indicator, index // 3, index % 3)
+
+        main_layout.addWidget(connection_group)
+
+        pose_group = QGroupBox(
+            'Pose actual del efector final respecto a world'
+        )
+        pose_layout = QGridLayout(pose_group)
+        pose_names = ['X (m)', 'Y (m)', 'Z (m)', 'Roll', 'Pitch', 'Yaw']
+
+        for index, name in enumerate(pose_names):
+            name_label = QLabel(name)
+            value_label = QLabel('--')
+            value_label.setObjectName('poseValue')
+            self.pose_labels.append(value_label)
+            pose_layout.addWidget(name_label, 0, index)
+            pose_layout.addWidget(value_label, 1, index)
+
+        main_layout.addWidget(pose_group)
+
+        command_group = QGroupBox('Configuración del comando')
+        command_layout = QHBoxLayout(command_group)
+
+        command_layout.addWidget(QLabel('Duración:'))
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0.1, 30.0)
+        self.duration_input.setDecimals(1)
+        self.duration_input.setSingleStep(0.5)
+        self.duration_input.setValue(3.0)
+        self.duration_input.setSuffix(' s')
+        command_layout.addWidget(self.duration_input)
+
+        self.copy_button = QPushButton('Copiar postura actual')
+        self.copy_button.clicked.connect(self.copy_current_pose)
+        command_layout.addWidget(self.copy_button)
+
+        initial_button = QPushButton('Objetivo inicial')
+        initial_button.clicked.connect(
+            lambda: self.load_pose(INITIAL_POSE_DEG)
+        )
+        command_layout.addWidget(initial_button)
+
+        test_button = QPushButton('Objetivo de prueba')
+        test_button.clicked.connect(
+            lambda: self.load_pose(TEST_POSE_DEG)
+        )
+        command_layout.addWidget(test_button)
+
+        main_layout.addWidget(command_group)
+
+        preview_group = QGroupBox(
+            'Previsualización cinemática de velocidad'
+        )
+        preview_layout = QVBoxLayout(preview_group)
+
+        preview_note = QLabel(
+            'Estimación informativa con velocity_scale = 0.5. '
+            'El safety_supervisor conserva la decisión final.'
+        )
+        preview_note.setWordWrap(True)
+        preview_layout.addWidget(preview_note)
+
+        self.velocity_table = QTableWidget(6, 5)
+        self.velocity_table.setHorizontalHeaderLabels([
+            'Joint',
+            'Desplazamiento',
+            'Velocidad solicitada',
+            'Límite permitido',
+            'Previsión',
+        ])
+        self.velocity_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.velocity_table.verticalHeader().setVisible(False)
+        self.velocity_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+        self.velocity_table.setMinimumHeight(220)
+        preview_layout.addWidget(self.velocity_table)
+
+        preview_footer = QHBoxLayout()
+        self.velocity_summary_label = QLabel(
+            'Esperando un estado articular reciente.'
+        )
+        self.velocity_summary_label.setObjectName('velocitySummary')
+        self.adjust_duration_button = QPushButton(
+            'Ajustar duración segura'
+        )
+        self.adjust_duration_button.setEnabled(False)
+        self.adjust_duration_button.clicked.connect(
+            self.adjust_to_safe_duration
+        )
+        preview_footer.addWidget(self.velocity_summary_label, 1)
+        preview_footer.addWidget(self.adjust_duration_button)
+        preview_layout.addLayout(preview_footer)
+
+        main_layout.addWidget(preview_group)
+
+        prediction_group = QGroupBox(
+            'Evaluación geométrica preventiva del supervisor'
+        )
+        prediction_layout = QVBoxLayout(prediction_group)
+        self.prediction_state_label = QLabel('SIN EVALUAR')
+        self.prediction_state_label.setObjectName('predictionState')
+        self.prediction_detail_label = QLabel(
+            'Envíe un comando candidato para evaluar su trayectoria.'
+        )
+        self.prediction_detail_label.setWordWrap(True)
+        prediction_layout.addWidget(self.prediction_state_label)
+        prediction_layout.addWidget(self.prediction_detail_label)
+        self.execution_status_label = QLabel(
+            'Ejecución: sin referencia aceptada por Gazebo.'
+        )
+        self.execution_status_label.setWordWrap(True)
+        prediction_layout.addWidget(self.execution_status_label)
+        main_layout.addWidget(prediction_group)
+
+        metrics_group = QGroupBox('Distancias y horizonte durante la ejecución')
+        metrics_layout = QGridLayout(metrics_group)
+        self.metric_labels = {}
+        for index, name in enumerate([
+            'Distancia actual', 'Mínimo proyectado', 'Instante del mínimo',
+            'Decisión preventiva',
+        ]):
+            metrics_layout.addWidget(QLabel(name), 0, index)
+            label = QLabel('--')
+            label.setWordWrap(True)
+            label.setStyleSheet('font-size: 16px; font-weight: bold;')
+            self.metric_labels[name] = label
+            metrics_layout.addWidget(label, 1, index)
+        note = QLabel(
+            'Distancias entre superficies del modelo geométrico. '
+            't = 0: estado actual; t > 0: configuración futura. '
+            'Las mediciones llegan por separado; no son una pareja sincronizada.'
+        )
+        note.setWordWrap(True)
+        metrics_layout.addWidget(note, 2, 0, 1, 4)
+        main_layout.insertWidget(2, metrics_group)
+
+        self.preview_button = QPushButton(
+            'ACTIVAR VOLUMEN NOMINAL CONTINUO'
+        )
+        self.preview_button.setCheckable(True)
+        main_layout.addWidget(self.preview_button)
+        self.preview_note = QLabel(
+            'Volumen azul: intención nominal, horizonte 1 s y actualización '
+            'solicitada a 10 Hz. Durante la ejecución, el volumen cambia de '
+            'color y el supervisor puede reducir la velocidad o detener '
+            'el goal activo de Gazebo.'
+        )
+        self.preview_note.setWordWrap(True)
+        main_layout.addWidget(self.preview_note)
+        self.preview_timer = QTimer(self)
+        self.preview_timer.timeout.connect(self.publish_preview_intent)
+        self.preview_timer.start(100)
+
+        self.send_button = QPushButton('ENVIAR COMANDO CANDIDATO')
+        self.send_button.setObjectName('sendButton')
+        self.send_button.clicked.connect(self.send_candidate)
+        self.send_button.setEnabled(False)
+        main_layout.addWidget(self.send_button)
+
+        self.connection_label = QLabel('Esperando /joint_states...')
+        self.connection_label.setObjectName('connectionLabel')
+        main_layout.addWidget(self.connection_label)
+
+        self.status_label = QLabel(
+            'Sin comandos enviados desde la interfaz.'
+        )
+        self.status_label.setObjectName('statusLabel')
+        self.status_label.setWordWrap(True)
+        main_layout.addWidget(self.status_label)
+
+        history_group = QGroupBox('Historial de comandos de la GUI')
+        history_layout = QVBoxLayout(history_group)
+        self.history_table = QTableWidget(0, 5)
+        self.history_table.setHorizontalHeaderLabels([
+            'Hora',
+            'ID',
+            'Objetivo J1',
+            'Duración',
+            'Estado',
+        ])
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.history_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+        self.history_table.setMinimumHeight(150)
+        history_layout.addWidget(self.history_table)
+        main_layout.addWidget(history_group)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(content_widget)
+        self.setCentralWidget(scroll_area)
+
+        for index, value in enumerate(INITIAL_POSE_DEG):
+            self.update_target_radians(index, value)
+
+    def apply_style(self):
+        self.setStyleSheet(
+            'QMainWindow { background-color: #f4f6f8; }'
+            'QGroupBox {'
+            '  font-weight: bold; border: 1px solid #b8c2cc;'
+            '  border-radius: 6px; margin-top: 10px; padding: 12px;'
+            '}'
+            'QGroupBox::title {'
+            '  subcontrol-origin: margin; left: 12px; padding: 0 4px;'
+            '}'
+            '#titleLabel {'
+            '  font-size: 20px; font-weight: bold; color: #17365d;'
+            '}'
+            '#safetyBanner {'
+            '  background-color: #dbeafe; color: #17365d;'
+            '  border: 1px solid #60a5fa; border-radius: 5px;'
+            '  padding: 9px; font-weight: bold;'
+            '}'
+            '#headerLabel { font-weight: bold; color: #334155; }'
+            '#poseValue {'
+            '  font-size: 15px; font-weight: bold; color: #17365d;'
+            '}'
+            '#velocitySummary {'
+            '  font-size: 14px; font-weight: bold; padding: 6px;'
+            '}'
+            '#predictionState {'
+            '  font-size: 18px; font-weight: bold; padding: 6px;'
+            '}'
+            '#sendButton {'
+            '  background-color: #166534; color: white;'
+            '  padding: 10px; font-weight: bold; border-radius: 5px;'
+            '}'
+            '#sendButton:disabled { background-color: #94a3b8; }'
+            '#connectionLabel { font-weight: bold; color: #92400e; }'
+            '#statusLabel {'
+            '  background-color: white; border: 1px solid #cbd5e1;'
+            '  border-radius: 5px; padding: 8px;'
+            '}'
+        )
+
+    def spin_ros(self):
+        if rclpy.ok():
+            rclpy.spin_once(self.ros_node, timeout_sec=0.0)
+
+    def refresh_ui(self):
+        state_ready = self.ros_node.state_is_ready()
+        jog_active = self.jog_mode_button.isChecked()
+        busy = (
+            self.pending_command_id is not None
+            or self.ros_node.execution_is_active()
+        )
+        connected = self.ros_node.candidate_publisher.get_subscription_count() > 0
+        self.send_button.setEnabled(
+            state_ready and connected and not busy and not jog_active
+        )
+        self.send_button.setText(
+            'ESPERANDO RESULTADO DEL COMANDO' if busy
+            else 'ENVIAR COMANDO CANDIDATO'
+        )
+        self.copy_button.setEnabled(state_ready)
+
+        if state_ready:
+            self.connection_label.setText(
+                'Estado ROS: /joint_states recibido correctamente.'
+            )
+            self.connection_label.setStyleSheet('color: #166534;')
+        else:
+            self.connection_label.setText(
+                'Estado ROS: esperando datos recientes de /joint_states.'
+            )
+            self.connection_label.setStyleSheet('color: #92400e;')
+
+        for index, joint_name in enumerate(JOINT_NAMES):
+            position = self.ros_node.current_positions.get(joint_name)
+
+            if position is None:
+                self.current_degree_labels[index].setText('--')
+                self.current_radian_labels[index].setText('--')
+                continue
+
+            self.current_degree_labels[index].setText(
+                f'{math.degrees(position):.2f}'
+            )
+            self.current_radian_labels[index].setText(
+                f'{position:.4f}'
+            )
+            if jog_active:
+                actual_degrees = math.degrees(position)
+                self.jog_reference_deg[index] = actual_degrees
+                self.set_joint_reference_display(index, actual_degrees)
+
+            velocity = self.active_jog_velocity(index, time.monotonic())
+            self.jog_velocity_labels[index].setText(
+                f'Intención: {velocity:+.1f} °/s | medida: '
+                + (
+                    f'{math.degrees(self.ros_node.current_velocities[joint_name]):+.1f} °/s'
+                    if state_ready and joint_name in self.ros_node.current_velocities
+                    else 'sin dato'
+                )
+            )
+
+        self.refresh_connections()
+        self.refresh_end_effector_pose()
+        self.refresh_velocity_preview()
+        self.refresh_prediction_status()
+        self.refresh_execution_status()
+        self.refresh_command_status()
+        self.refresh_runtime_metrics()
+
+    def shortest_delta_degrees(
+        self,
+        joint_index,
+        target_degrees,
+        current_degrees,
+    ):
+        delta = target_degrees - current_degrees
+
+        if joint_index in CONTINUOUS_JOINT_INDEXES:
+            delta = (delta + 180.0) % 360.0 - 180.0
+
+        return delta
+
+    def refresh_velocity_preview(self):
+        if not self.ros_node.state_is_ready():
+            self.minimum_safe_duration = None
+            self.adjust_duration_button.setEnabled(False)
+            self.velocity_summary_label.setText(
+                'Esperando un estado articular reciente.'
+            )
+            self.velocity_summary_label.setStyleSheet(
+                'color: #92400e;'
+            )
+            return
+
+        duration_sec = self.duration_input.value()
+        minimum_duration = 0.0
+        limiting_joint = JOINT_LABELS[0]
+        maximum_ratio = -1.0
+        predicted_allow = True
+
+        for index, joint_name in enumerate(JOINT_NAMES):
+            current_radians = self.ros_node.current_positions[joint_name]
+            current_degrees = math.degrees(current_radians)
+            target_degrees = self.target_inputs[index].value()
+            delta_degrees = self.shortest_delta_degrees(
+                index,
+                target_degrees,
+                current_degrees,
+            )
+            requested_speed = abs(delta_degrees) / duration_sec
+            allowed_speed = ALLOWED_SPEED_DEG[index]
+            required_duration = abs(delta_degrees) / allowed_speed
+            ratio = requested_speed / allowed_speed
+            joint_allowed = requested_speed <= allowed_speed + 1e-9
+
+            if required_duration > minimum_duration:
+                minimum_duration = required_duration
+
+            if ratio > maximum_ratio:
+                maximum_ratio = ratio
+                limiting_joint = JOINT_LABELS[index]
+
+            if not joint_allowed:
+                predicted_allow = False
+
+            values = [
+                JOINT_LABELS[index],
+                f'{delta_degrees:+.2f}°',
+                f'{requested_speed:.2f}°/s',
+                f'{allowed_speed:.2f}°/s',
+                'ALLOW' if joint_allowed else 'REJECT',
+            ]
+
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+
+                if column == 4:
+                    color = '#166534' if joint_allowed else '#b91c1c'
+                    item.setForeground(QColor(color))
+
+                self.velocity_table.setItem(index, column, item)
+
+        self.minimum_safe_duration = minimum_duration
+        self.adjust_duration_button.setEnabled(True)
+
+        if predicted_allow:
+            self.velocity_summary_label.setText(
+                'VELOCIDAD: PROBABLE ALLOW | '
+                f'Joint limitante: {limiting_joint} | '
+                f'Duración mínima estimada: {minimum_duration:.2f} s'
+            )
+            self.velocity_summary_label.setStyleSheet(
+                'color: #166534;'
+            )
+        else:
+            self.velocity_summary_label.setText(
+                'VELOCIDAD: PROBABLE REJECT | '
+                f'Joint limitante: {limiting_joint} | '
+                f'Duración mínima estimada: {minimum_duration:.2f} s'
+            )
+            self.velocity_summary_label.setStyleSheet(
+                'color: #b91c1c;'
+            )
+
+    def adjust_to_safe_duration(self):
+        if self.minimum_safe_duration is None:
+            return
+
+        duration_with_margin = (
+            math.ceil((self.minimum_safe_duration + 0.1) * 10.0)
+            / 10.0
+        )
+        duration_with_margin = max(0.1, duration_with_margin)
+        duration_with_margin = min(30.0, duration_with_margin)
+        self.duration_input.setValue(duration_with_margin)
+
+        self.status_label.setText(
+            'Duración ajustada con 0.1 s de margen. '
+            'El supervisor volverá a verificar el comando al enviarlo.'
+        )
+        self.status_label.setStyleSheet('color: #334155;')
+
+    def refresh_connections(self):
+        for name, connected in self.ros_node.connection_status().items():
+            indicator = self.connection_indicators.get(name)
+            if indicator is None:
+                continue
+            color = '#166534' if connected else '#b91c1c'
+            text = '●' if connected else '○'
+            indicator.setText(f'{text} {name}')
+            indicator.setStyleSheet(
+                f'color: {color}; font-weight: bold;'
+            )
+
+    def refresh_runtime_metrics(self):
+        node = self.ros_node
+        now = time.monotonic()
+        proximity = node.last_proximity
+        if proximity is not None and now - node.proximity_received_at <= 1.0:
+            actual = f'{proximity.minimum_clearance:.3f} m'
+        else:
+            actual = 'Sin dato reciente'
+        self.metric_labels['Distancia actual'].setText(actual)
+        control = node.last_execution_control
+        active = node.execution_by_id.get(
+            control.command_id if control is not None else ''
+        )
+        fresh = (
+            control is not None
+            and node.control_received_at is not None
+            and now - node.control_received_at <= 1.0
+            and (
+                (
+                    active is not None
+                    and active.status in ('PENDING', 'ACCEPTED')
+                )
+                or (
+                    self.jog_mode_button.isChecked()
+                    and control.command_id == 'jog_continuous'
+                )
+            )
+        )
+        values = ['Sin evaluación activa', '--', '--']
+        color = '#475569'
+        if fresh:
+            values = [
+                f'{control.minimum_clearance:.3f} m',
+                (f'+{control.minimum_time_from_now:.2f} s | '
+                 f'{control.minimum_sample_index + 1}/'
+                 f'{control.minimum_sample_count}')
+                if control.minimum_sample_count >= 2 else 'Sin muestra válida',
+                f'{control.state} | escala {control.speed_scale:.2f}',
+            ]
+            color = {
+                'ALLOW': '#166534', 'WARNING': '#a16207',
+                'REDUCTION': '#c2410c', 'STOP': '#b91c1c',
+            }.get(control.state, '#475569')
+        for name, value in zip([
+            'Mínimo proyectado', 'Instante del mínimo', 'Decisión preventiva',
+        ], values):
+            self.metric_labels[name].setText(value)
+            self.metric_labels[name].setStyleSheet(
+                f'color: {color}; font-size: 16px; font-weight: bold;'
+            )
+
+    def refresh_end_effector_pose(self):
+        self.ros_node.update_end_effector_pose()
+        pose = self.ros_node.end_effector_pose
+
+        if pose is None:
+            for label in self.pose_labels:
+                label.setText('--')
+            return
+
+        values = [
+            f'{pose[0]:.3f}',
+            f'{pose[1]:.3f}',
+            f'{pose[2]:.3f}',
+            f'{math.degrees(pose[3]):.1f}°',
+            f'{math.degrees(pose[4]):.1f}°',
+            f'{math.degrees(pose[5]):.1f}°',
+        ]
+
+        for label, value in zip(self.pose_labels, values):
+            label.setText(value)
+
+    def refresh_prediction_status(self):
+        if self.prediction_is_stale:
+            self.prediction_state_label.setText(
+                'GEOMETRÍA PROYECTADA: OBJETIVO SIN EVALUAR'
+            )
+            self.prediction_state_label.setStyleSheet(
+                'color: #92400e;'
+            )
+            self.prediction_detail_label.setText(
+                'El objetivo articular cambió. Envíe el comando candidato '
+                'para calcular una nueva predicción geométrica.'
+            )
+            return
+
+        decision = self.ros_node.last_decision
+        if (
+            decision is not None
+            and decision.command_id == self.ros_node.last_command_id
+            and not decision.accepted
+        ):
+            self.prediction_state_label.setText(
+                'COMANDO RECHAZADO POR EL SUPERVISOR'
+            )
+            self.prediction_state_label.setStyleSheet('color: #b91c1c;')
+            self.prediction_detail_label.setText(decision.reason)
+            return
+
+        prediction = self.ros_node.last_prediction
+
+        if prediction is None:
+            return
+
+        colors = {
+            'ALLOW': '#166534',
+            'WARNING': '#a16207',
+            'REDUCTION': '#c2410c',
+            'STOP': '#b91c1c',
+        }
+        state = prediction.state
+        color = colors.get(state, '#334155')
+        sample_number = min(
+            prediction.sample_index + 1,
+            prediction.sample_count,
+        )
+
+        self.prediction_state_label.setText(
+            f'GEOMETRÍA PROYECTADA: {state}'
+        )
+        self.prediction_state_label.setStyleSheet(f'color: {color};')
+        self.prediction_detail_label.setText(
+            f'Distancia mínima: {prediction.minimum_clearance:.3f} m | '
+            f'Segmento: {prediction.limiting_segment} | '
+            f'Muestra: {sample_number}/{prediction.sample_count} | '
+            f'Avance: {prediction.trajectory_fraction:.0%}'
+        )
+
+    def refresh_execution_status(self):
+        execution = self.ros_node.last_execution
+        if execution is None:
+            self.execution_status_label.setText(
+                'Ejecución: sin referencia aceptada por Gazebo.'
+            )
+            self.execution_status_label.setStyleSheet('color: #92400e;')
+            return
+
+        colors = {
+            'PENDING': '#92400e',
+            'ACCEPTED': '#166534',
+            'SUCCEEDED': '#166534',
+            'FAILED': '#b91c1c',
+            'REJECTED': '#b91c1c',
+            'CANCELED': '#b91c1c',
+            'DRY_RUN': '#92400e',
+        }
+        color = colors.get(execution.status, '#334155')
+        duration = execution.duration_sec
+        control = self.ros_node.last_execution_control
+        control_text = ''
+        if (
+            control is not None
+            and control.command_id == execution.command_id
+        ):
+            control_color = {
+                'ALLOW': '#166534',
+                'WARNING': '#a16207',
+                'REDUCTION': '#c2410c',
+                'STOP': '#b91c1c',
+            }.get(control.state, '#334155')
+            minimum_text = ''
+            if control.minimum_sample_count >= 2:
+                sample_number = min(
+                    control.minimum_sample_index + 1,
+                    control.minimum_sample_count,
+                )
+                minimum_text = (
+                    f' Mínimo proyectado en t='
+                    f'{control.minimum_time_from_now:.2f} s '
+                    f'(muestra {sample_number}/'
+                    f'{control.minimum_sample_count}).'
+                )
+            ttc = (
+                f'{control.time_to_collision:.3f} s'
+                if control.time_to_collision >= 0.0
+                else 'sin solapamiento previsto'
+            )
+            control_text = (
+                f' Control: {control.state} '
+                f'(escala {control.speed_scale:.2f}, '
+                f'd_min {control.minimum_clearance:.3f} m, '
+                f'TTC: {ttc}).'
+                f'{minimum_text}'
+            )
+            if execution.status in (
+                'PENDING', 'ACCEPTED',
+            ):
+                color = control_color
+        self.execution_status_label.setText(
+            f'Ejecución {execution.status}: {execution.command_id}. '
+            f'{execution.detail} Duración: {duration:.2f} s.'
+            f'{control_text}'
+        )
+        self.execution_status_label.setStyleSheet(f'color: {color};')
+
+    def refresh_command_status(self):
+        for execution in self.ros_node.execution_by_id.values():
+            self.update_history_state(execution.command_id, execution.status)
+        execution = self.ros_node.execution_by_id.get(
+            self.ros_node.last_command_id
+        )
+        if execution is not None:
+            self.status_label.setText(
+                f'{execution.status}: {execution.command_id}. {execution.detail}'
+            )
+            self.status_label.setStyleSheet(
+                'color: #b91c1c;' if execution.status in (
+                    'REJECTED', 'FAILED', 'CANCELED',
+                ) else 'color: #334155;'
+            )
+            if execution.command_id == self.pending_command_id:
+                self.pending_command_id = None
+            return
+        if self.pending_command_id is None:
+            return
+
+        decision = self.ros_node.last_decision
+        if (
+            decision is not None
+            and decision.command_id == self.pending_command_id
+            and not decision.accepted
+        ):
+            self.status_label.setText(
+                f'RECHAZADO: {self.pending_command_id}. {decision.reason}'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            self.update_history_state(
+                self.pending_command_id,
+                f'RECHAZADO: {decision.reason_code}',
+            )
+            self.pending_command_id = None
+            return
+
+        prediction = self.ros_node.last_prediction
+        prediction_matches = (
+            prediction is not None
+            and prediction.command_id == self.pending_command_id
+        )
+
+        if prediction_matches and prediction.state == 'STOP':
+            self.status_label.setText(
+                f'STOP PREDICTIVO: {self.pending_command_id} rechazado. '
+                f'Distancia mínima '
+                f'{prediction.minimum_clearance:.3f} m en '
+                f'{prediction.limiting_segment}.'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            self.update_history_state(
+                self.pending_command_id,
+                'STOP PREDICTIVO',
+            )
+            self.pending_command_id = None
+            return
+
+        if self.ros_node.last_allowed_id == self.pending_command_id:
+            state = prediction.state if prediction_matches else 'ALLOW'
+            color = {
+                'ALLOW': '#166534',
+                'WARNING': '#a16207',
+                'REDUCTION': '#c2410c',
+            }.get(state, '#166534')
+            duration = self.ros_node.last_supervised_duration
+            duration_text = (
+                f' Duración supervisada: {duration:.2f} s.'
+                if duration is not None
+                else ''
+            )
+            self.status_label.setText(
+                f'{state}: {self.pending_command_id} fue reenviado por '
+                f'el supervisor al adaptador de simulación.'
+                f'{duration_text}'
+            )
+            self.status_label.setStyleSheet(f'color: {color};')
+            self.update_history_state(
+                self.pending_command_id,
+                state,
+            )
+            return
+
+        if time.monotonic() - self.pending_since > 5.0:
+            self.status_label.setText(
+                f'SIN SALIDA SUPERVISADA: {self.pending_command_id}. '
+                'No hay confirmación; revise supervisor y adaptador antes '
+                'de reiniciar la interfaz.'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            self.update_history_state(
+                self.pending_command_id,
+                'SIN CONFIRMACIÓN',
+            )
+
+    def target_spin_changed(self, index, degrees):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is not None and jog_button.isChecked():
+            return
+        self.prediction_is_stale = True
+        blocker = QSignalBlocker(self.target_sliders[index])
+        self.target_sliders[index].setValue(
+            int(round(degrees * 10.0))
+        )
+        del blocker
+        self.update_target_radians(index, degrees)
+
+    def target_slider_changed(self, index, slider_value):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is not None and jog_button.isChecked():
+            position = self.ros_node.current_positions.get(JOINT_NAMES[index])
+            if position is not None:
+                self.set_joint_reference_display(index, math.degrees(position))
+            return
+        self.target_inputs[index].setValue(slider_value / 10.0)
+
+    def begin_direct_drag(self, index):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is None or not jog_button.isChecked():
+            return
+        position = self.ros_node.current_positions.get(JOINT_NAMES[index])
+        if position is not None:
+            self.jog_reference_deg[index] = math.degrees(position)
+        self.jog_velocity_deg_s[index] = 0.0
+        self.jog_last_input_time[index] = time.monotonic()
+        self.jog_last_motion_time[index] = None
+
+    def end_direct_drag(self, index):
+        jog_button = getattr(self, 'jog_mode_button', None)
+        if jog_button is None or not jog_button.isChecked():
+            return
+        self.jog_velocity_deg_s[index] = 0.0
+        self.jog_last_input_time[index] = None
+        self.jog_last_motion_time[index] = None
+        position = self.ros_node.current_positions.get(JOINT_NAMES[index])
+        if position is not None:
+            degrees = math.degrees(position)
+            self.jog_reference_deg[index] = degrees
+            self.set_joint_reference_display(index, degrees)
+
+    def jog_joint(self, index, increment_degrees):
+        if self.jog_mode_button.isChecked():
+            return
+        target_input = self.target_inputs[index]
+        target_input.setValue(
+            target_input.value() + increment_degrees
+        )
+
+    def update_target_radians(self, index, degrees):
+        radians = math.radians(degrees)
+        self.target_radian_labels[index].setText(f'{radians:.4f}')
+
+    def set_joint_reference_display(self, index, degrees):
+        input_blocker = QSignalBlocker(self.target_inputs[index])
+        slider_blocker = QSignalBlocker(self.target_sliders[index])
+        self.target_inputs[index].setValue(degrees)
+        self.target_sliders[index].setValue(
+            int(round(degrees * 10.0))
+        )
+        del input_blocker
+        del slider_blocker
+        self.update_target_radians(index, degrees)
+
+    def reset_direct_jog_state(self):
+        now = time.monotonic()
+        for index, name in enumerate(JOINT_NAMES):
+            position = self.ros_node.current_positions.get(name)
+            if position is None:
+                continue
+            degrees = math.degrees(position)
+            self.jog_reference_deg[index] = degrees
+            self.jog_velocity_deg_s[index] = 0.0
+            self.jog_last_input_time[index] = now
+            self.jog_last_motion_time[index] = None
+            self.set_joint_reference_display(index, degrees)
+
+    def active_jog_velocity(self, index, now=None):
+        now = time.monotonic() if now is None else now
+        if not self.jog_mode_button.isChecked() or not self.ros_node.state_is_ready():
+            self.wheel_intentions[index].clear()
+            return 0.0
+        return self.wheel_intentions[index].velocity(
+            now, self.jog_speed_inputs[index].value(),
+        )
+
+    def eventFilter(self, watched, event):
+        button = getattr(self, 'jog_mode_button', None)
+        if button is not None and button.isChecked() and watched in self.target_sliders:
+            index = self.target_sliders.index(watched)
+            if event.type() == QEvent.Wheel:
+                if self.ros_node.state_is_ready():
+                    # Qt angleDelta: 120 units per conventional wheel notch.
+                    self.wheel_intentions[index].add(
+                        time.monotonic(), event.angleDelta().y() / 120.0,
+                    )
+                event.accept()
+                return True
+            if event.type() in (
+                QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                QEvent.MouseButtonDblClick, QEvent.MouseMove,
+                QEvent.KeyPress, QEvent.KeyRelease,
+            ):
+                return True
+            if event.type() in (QEvent.Leave, QEvent.FocusOut):
+                self.wheel_intentions[index].clear()
+        return super().eventFilter(watched, event)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.ActivationChange and not self.isActiveWindow():
+            for intention in getattr(self, 'wheel_intentions', []):
+                intention.clear()
+        super().changeEvent(event)
+
+    def add_history_row(
+        self,
+        command_id,
+        target_j1,
+        duration_sec,
+        state,
+    ):
+        self.history_table.insertRow(0)
+        values = [
+            time.strftime('%H:%M:%S'),
+            command_id,
+            f'{target_j1:.2f}°',
+            f'{duration_sec:.1f} s',
+            state,
+        ]
+
+        for column, value in enumerate(values):
+            self.history_table.setItem(
+                0,
+                column,
+                QTableWidgetItem(value),
+            )
+
+        while self.history_table.rowCount() > 12:
+            self.history_table.removeRow(
+                self.history_table.rowCount() - 1
+            )
+
+    def update_history_state(self, command_id, state):
+        for row in range(self.history_table.rowCount()):
+            item = self.history_table.item(row, 1)
+
+            if item is not None and item.text() == command_id:
+                self.history_table.setItem(
+                    row,
+                    4,
+                    QTableWidgetItem(state),
+                )
+                return
+
+    def load_pose(self, pose_degrees):
+        for target_input, value in zip(
+            self.target_inputs,
+            pose_degrees,
+        ):
+            target_input.setValue(value)
+
+        self.status_label.setText(
+            'Objetivo cargado. El brazo no se moverá hasta presionar '
+            'ENVIAR COMANDO CANDIDATO.'
+        )
+        self.status_label.setStyleSheet('color: #334155;')
+
+    def copy_current_pose(self):
+        if not self.ros_node.state_is_ready():
+            QMessageBox.warning(
+                self,
+                'Estado no disponible',
+                'No existen datos articulares recientes.',
+            )
+            return
+
+        positions = [
+            self.ros_node.current_positions[name]
+            for name in JOINT_NAMES
+        ]
+
+        for target_input, position in zip(
+            self.target_inputs,
+            positions,
+        ):
+            target_input.setValue(math.degrees(position))
+
+        self.status_label.setText(
+            'La postura actual se copió como objetivo.'
+        )
+        self.status_label.setStyleSheet('color: #334155;')
+
+    def toggle_jog_mode(self, checked):
+        for intention in self.wheel_intentions:
+            intention.clear()
+        if checked and (
+            not self.ros_node.state_is_ready()
+            or self.ros_node.execution_is_active()
+            or self.pending_command_id is not None
+            or self.ros_node.jog_intent_publisher.get_subscription_count() == 0
+        ):
+            blocker = QSignalBlocker(self.jog_mode_button)
+            self.jog_mode_button.setChecked(False)
+            del blocker
+            QMessageBox.warning(
+                self,
+                'Control manual no disponible',
+                'Se requiere /joint_states reciente y ninguna trayectoria '
+                'por objetivo en ejecución.',
+            )
+            return
+
+        if checked:
+            self.copy_current_pose()
+            self.reset_direct_jog_state()
+            self.preview_button.setChecked(False)
+            self.preview_button.setEnabled(False)
+            self.duration_input.setEnabled(False)
+            for target_input in self.target_inputs:
+                target_input.setEnabled(False)
+            for button in self.decrease_buttons + self.increase_buttons:
+                button.setEnabled(False)
+            self.jog_mode_button.setText(
+                'DESACTIVAR CONTROL MANUAL CONTINUO'
+            )
+            self.status_label.setText(
+                'CONTROL POR RUEDA ACTIVO: gire la rueda sobre una barra. '
+                'La barra muestra el ángulo medido; no deja destinos pendientes.'
+            )
+            self.status_label.setStyleSheet('color: #166534;')
+        else:
+            for index in range(len(JOINT_NAMES)):
+                self.jog_velocity_deg_s[index] = 0.0
+                self.jog_last_motion_time[index] = None
+            self.publish_jog_intent(force_hold=True)
+            self.preview_button.setEnabled(True)
+            self.duration_input.setEnabled(True)
+            for target_input in self.target_inputs:
+                target_input.setEnabled(True)
+            for button in self.decrease_buttons + self.increase_buttons:
+                button.setEnabled(True)
+            self.jog_mode_button.setText(
+                'ACTIVAR CONTROL MANUAL CONTINUO'
+            )
+            self.status_label.setText(
+                'Control manual desactivado; se solicitó mantener la '
+                'postura actual.'
+            )
+            self.status_label.setStyleSheet('color: #334155;')
+
+    def publish_jog_intent(self, force_hold=False):
+        if not force_hold and not self.jog_mode_button.isChecked():
+            return
+        if not self.ros_node.state_is_ready():
+            return
+        if self.ros_node.jog_intent_publisher.get_subscription_count() == 0:
+            return
+
+        horizon = 1.0
+        current = [
+            self.ros_node.current_positions[name]
+            for name in JOINT_NAMES
+        ]
+        horizon_target = []
+        for index, current_value in enumerate(current):
+            if force_hold:
+                horizon_target.append(current_value)
+                continue
+            velocity_deg_s = self.active_jog_velocity(index)
+            maximum_speed = self.jog_speed_inputs[index].value()
+            velocity_deg_s = min(
+                max(velocity_deg_s, -maximum_speed),
+                maximum_speed,
+            )
+            lower, upper = map(math.radians, JOINT_LIMITS_DEG[index])
+            delta = math.radians(velocity_deg_s) * horizon
+            # Do not command a jump back into range if the measured joint is outside.
+            if delta > 0:
+                delta = min(delta, max(0.0, upper - current_value))
+            elif delta < 0:
+                delta = max(delta, min(0.0, lower - current_value))
+            horizon_target.append(current_value + delta)
+
+        msg = JointCommand()
+        msg.stamp = self.ros_node.get_clock().now().to_msg()
+        msg.command_id = 'jog_continuous'
+        msg.joint_names = list(JOINT_NAMES)
+        msg.positions = horizon_target
+        msg.duration.sec = 1
+        msg.duration.nanosec = 0
+        self.ros_node.jog_intent_publisher.publish(msg)
+
+    def publish_preview_intent(self):
+        if self.jog_mode_button.isChecked():
+            return
+        if not self.preview_button.isChecked():
+            return
+        if not self.ros_node.state_is_ready():
+            return
+        msg = JointCommand()
+        msg.stamp = self.ros_node.get_clock().now().to_msg()
+        msg.command_id = 'continuous_preview'
+        msg.joint_names = list(JOINT_NAMES)
+        msg.positions = [
+            math.radians(item.value()) for item in self.target_inputs
+        ]
+        duration = self.duration_input.value()
+        msg.duration.sec = int(duration)
+        msg.duration.nanosec = int((duration - int(duration)) * 1e9)
+        self.ros_node.intent_publisher.publish(msg)
+
+    def send_candidate(self):
+        if self.jog_mode_button.isChecked():
+            return
+        if (
+            self.pending_command_id is not None
+            or self.ros_node.execution_is_active()
+        ):
+            return
+        if self.ros_node.candidate_publisher.get_subscription_count() == 0:
+            self.status_label.setText('Inicie el supervisor antes de enviar.')
+            return
+        if not self.ros_node.state_is_ready():
+            QMessageBox.warning(
+                self,
+                'Estado no disponible',
+                'No se enviará el comando sin /joint_states reciente.',
+            )
+            return
+
+        positions = [
+            math.radians(target_input.value())
+            for target_input in self.target_inputs
+        ]
+
+        command_id, subscriber_count = (
+            self.ros_node.publish_candidate(
+                positions,
+                self.duration_input.value(),
+            )
+        )
+
+        self.pending_command_id = command_id
+        self.pending_since = time.monotonic()
+        self.prediction_is_stale = False
+        self.prediction_state_label.setText(
+            'GEOMETRÍA PROYECTADA: EVALUANDO...'
+        )
+        self.prediction_state_label.setStyleSheet('color: #92400e;')
+        self.prediction_detail_label.setText(
+            f'Esperando la predicción para {command_id}.'
+        )
+        self.add_history_row(
+            command_id,
+            self.target_inputs[0].value(),
+            self.duration_input.value(),
+            'PENDIENTE',
+        )
+
+        if subscriber_count == 0:
+            self.status_label.setText(
+                f'ADVERTENCIA: {command_id} fue publicado, pero no hay '
+                'suscriptores en /thesis/candidate_command. Inicie el '
+                'pipeline de seguridad.'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            return
+
+        self.status_label.setText(
+            f'PENDIENTE: {command_id} enviado al supervisor.'
+        )
+        self.status_label.setStyleSheet('color: #92400e;')
+
+    def closeEvent(self, event):
+        if self.jog_mode_button.isChecked():
+            self.publish_jog_intent(force_hold=True)
+        self.jog_timer.stop()
+        self.ros_timer.stop()
+        self.ui_timer.stop()
+        self.ros_node.destroy_node()
+
+        if rclpy.ok():
+            rclpy.shutdown()
+
+        event.accept()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    ros_node = JointGuiNode()
+    app = QApplication([sys.argv[0]])
+    window = JointControlWindow(ros_node)
+    window.show()
+    return app.exec_()
+
+
+if __name__ == '__main__':
+    main()
+
+============================================================
+2. CONSTANTES Y LÓGICA ARTICULAR DUPLICADA
+============================================================
+grep: ( ó \( desemparejados
+
+============================================================
+3. VALIDACIONES DE ENTRADA
+============================================================
+grep: ( ó \( desemparejados
+
+============================================================
+4. DEFINICIONES URDF/XACRO Y CONFIGURACIÓN
+============================================================
+src/thesis_description/urdf/j2n6s300.xacro:53:    <xacro:property name="joint_1" value="joint_1" />
+src/thesis_description/urdf/j2n6s300.xacro:54:    <xacro:property name="joint_1_type" value="continuous" />
+src/thesis_description/urdf/j2n6s300.xacro:55:    <xacro:property name="joint_1_axis_xyz" value="0 0 1" />
+src/thesis_description/urdf/j2n6s300.xacro:56:    <xacro:property name="joint_1_origin_xyz" value="0 0 0.15675" />
+src/thesis_description/urdf/j2n6s300.xacro:57:    <xacro:property name="joint_1_origin_rpy" value="0 ${J_PI} 0" />
+src/thesis_description/urdf/j2n6s300.xacro:58:    <xacro:property name="joint_1_lower_limit" value="${-2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:59:    <xacro:property name="joint_1_upper_limit" value="${2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:60:    <xacro:property name="joint_1_velocity_limit" value="${36*J_PI/180}" />
+src/thesis_description/urdf/j2n6s300.xacro:61:    <xacro:property name="joint_1_torque_limit" value="40" />
+src/thesis_description/urdf/j2n6s300.xacro:63:    <xacro:property name="joint_2" value="joint_2" />
+src/thesis_description/urdf/j2n6s300.xacro:64:    <xacro:property name="joint_2_type" value="revolute" />
+src/thesis_description/urdf/j2n6s300.xacro:65:    <xacro:property name="joint_2_axis_xyz" value="0 0 1" />
+src/thesis_description/urdf/j2n6s300.xacro:66:    <xacro:property name="joint_2_origin_xyz" value="0 0.0016 -0.11875" />
+src/thesis_description/urdf/j2n6s300.xacro:67:    <xacro:property name="joint_2_origin_rpy" value="-${J_PI/2} 0 ${J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:68:    <xacro:property name="joint_2_lower_limit" value="${47/180*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:69:    <xacro:property name="joint_2_upper_limit" value="${313/180*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:70:    <xacro:property name="joint_2_velocity_limit" value="${36*J_PI/180}" />
+src/thesis_description/urdf/j2n6s300.xacro:71:    <xacro:property name="joint_2_torque_limit" value="80" />
+src/thesis_description/urdf/j2n6s300.xacro:73:    <xacro:property name="joint_3" value="joint_3" />
+src/thesis_description/urdf/j2n6s300.xacro:74:    <xacro:property name="joint_3_type" value="revolute" />
+src/thesis_description/urdf/j2n6s300.xacro:75:    <xacro:property name="joint_3_axis_xyz" value="0 0 1" />
+src/thesis_description/urdf/j2n6s300.xacro:76:    <xacro:property name="joint_3_origin_xyz" value="0 -0.410 0" />
+src/thesis_description/urdf/j2n6s300.xacro:77:    <xacro:property name="joint_3_origin_rpy" value="0 ${J_PI} 0" />
+src/thesis_description/urdf/j2n6s300.xacro:78:    <xacro:property name="joint_3_lower_limit" value="${19/180*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:79:    <xacro:property name="joint_3_upper_limit" value="${341/180*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:80:    <xacro:property name="joint_3_velocity_limit" value="${36*J_PI/180}" />
+src/thesis_description/urdf/j2n6s300.xacro:81:    <xacro:property name="joint_3_torque_limit" value="40" />
+src/thesis_description/urdf/j2n6s300.xacro:83:    <xacro:property name="joint_4" value="joint_4" />
+src/thesis_description/urdf/j2n6s300.xacro:84:    <xacro:property name="joint_4_type" value="continuous" />
+src/thesis_description/urdf/j2n6s300.xacro:85:    <xacro:property name="joint_4_axis_xyz" value="0 0 1" />
+src/thesis_description/urdf/j2n6s300.xacro:86:    <xacro:property name="joint_4_origin_xyz" value="0 0.2073 -0.0114" />
+src/thesis_description/urdf/j2n6s300.xacro:87:    <xacro:property name="joint_4_origin_rpy" value="-${J_PI/2} 0 ${J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:88:    <xacro:property name="joint_4_lower_limit" value="${-2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:89:    <xacro:property name="joint_4_upper_limit" value="${2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:90:    <xacro:property name="joint_4_velocity_limit" value="${48*J_PI/180}" />
+src/thesis_description/urdf/j2n6s300.xacro:91:    <xacro:property name="joint_4_torque_limit" value="20" />
+src/thesis_description/urdf/j2n6s300.xacro:93:    <xacro:property name="joint_5" value="joint_5" />
+src/thesis_description/urdf/j2n6s300.xacro:94:    <xacro:property name="joint_5_type" value="continuous" />
+src/thesis_description/urdf/j2n6s300.xacro:95:    <xacro:property name="joint_5_axis_xyz" value="0 0 1" />
+src/thesis_description/urdf/j2n6s300.xacro:96:    <xacro:property name="joint_5_origin_xyz" value="0 -0.03703 -0.06414" />
+src/thesis_description/urdf/j2n6s300.xacro:97:    <xacro:property name="joint_5_origin_rpy" value="${J_PI/3} 0 ${J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:98:    <xacro:property name="joint_5_lower_limit" value="${-2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:99:    <xacro:property name="joint_5_upper_limit" value="${2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:100:    <xacro:property name="joint_5_velocity_limit" value="${48*J_PI/180}" />
+src/thesis_description/urdf/j2n6s300.xacro:101:    <xacro:property name="joint_5_torque_limit" value="20" />
+src/thesis_description/urdf/j2n6s300.xacro:103:    <xacro:property name="joint_6" value="joint_6" />
+src/thesis_description/urdf/j2n6s300.xacro:104:    <xacro:property name="joint_6_type" value="continuous" />
+src/thesis_description/urdf/j2n6s300.xacro:105:    <xacro:property name="joint_6_axis_xyz" value="0 0 1" />
+src/thesis_description/urdf/j2n6s300.xacro:106:    <xacro:property name="joint_6_origin_xyz" value="0 -0.03703 -0.06414" />
+src/thesis_description/urdf/j2n6s300.xacro:107:    <xacro:property name="joint_6_origin_rpy" value="${J_PI/3} 0 ${J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:109:    <!-- <xacro:property name="joint_6_origin_rpy" value="$${-J_PI/3} 0 0" /> -->
+src/thesis_description/urdf/j2n6s300.xacro:110:    <xacro:property name="joint_6_lower_limit" value="${-2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:111:    <xacro:property name="joint_6_upper_limit" value="${2*J_PI}" />
+src/thesis_description/urdf/j2n6s300.xacro:112:    <xacro:property name="joint_6_velocity_limit" value="${48*J_PI/180}" />
+src/thesis_description/urdf/j2n6s300.xacro:113:    <xacro:property name="joint_6_torque_limit" value="20" />
+src/thesis_description/urdf/j2n6s300.xacro:131:        <xacro:kinova_armjoint joint_name="${prefix}_joint_base" type="${joint_base_type}" parent="${base_parent}" child="${prefix}_link_base" joint_axis_xyz="${joint_base_axis_xyz}" joint_origin_xyz="${joint_base_origin_xyz}" joint_origin_rpy="${joint_base_origin_rpy}" joint_lower_limit="0" joint_upper_limit="0" joint_velocity_limit="0" joint_torque_limit="0" fixed="true"/>
+src/thesis_description/urdf/j2n6s300.xacro:134:        <xacro:kinova_armjoint joint_name="${prefix}_joint_1" type="${joint_1_type}" parent="${prefix}_link_base" child="${prefix}_link_1" joint_axis_xyz="${joint_1_axis_xyz}" joint_origin_xyz="${joint_1_origin_xyz}" joint_origin_rpy="${joint_1_origin_rpy}" joint_lower_limit="${joint_1_lower_limit}" joint_upper_limit="${joint_1_upper_limit}" joint_velocity_limit="${joint_1_velocity_limit}" joint_torque_limit="${joint_1_torque_limit}"/>
+src/thesis_description/urdf/j2n6s300.xacro:137:        <xacro:kinova_armjoint joint_name="${prefix}_joint_2" type="${joint_2_type}" parent="${prefix}_link_1" child="${prefix}_link_2" joint_axis_xyz="${joint_2_axis_xyz}" joint_origin_xyz="${joint_2_origin_xyz}" joint_origin_rpy="${joint_2_origin_rpy}" joint_lower_limit="${joint_2_lower_limit}" joint_upper_limit="${joint_2_upper_limit}" joint_velocity_limit="${joint_2_velocity_limit}" joint_torque_limit="${joint_2_torque_limit}"/>
+src/thesis_description/urdf/j2n6s300.xacro:140:        <xacro:kinova_armjoint joint_name="${prefix}_joint_3" type="${joint_3_type}" parent="${prefix}_link_2" child="${prefix}_link_3" joint_axis_xyz="${joint_3_axis_xyz}" joint_origin_xyz="${joint_3_origin_xyz}" joint_origin_rpy="${joint_3_origin_rpy}" joint_lower_limit="${joint_3_lower_limit}" joint_upper_limit="${joint_3_upper_limit}" joint_velocity_limit="${joint_3_velocity_limit}" joint_torque_limit="${joint_3_torque_limit}"/>
+src/thesis_description/urdf/j2n6s300.xacro:143:        <xacro:kinova_armjoint joint_name="${prefix}_joint_4" type="${joint_4_type}" parent="${prefix}_link_3" child="${prefix}_link_4" joint_axis_xyz="${joint_4_axis_xyz}" joint_origin_xyz="${joint_4_origin_xyz}" joint_origin_rpy="${joint_4_origin_rpy}" joint_lower_limit="${joint_4_lower_limit}" joint_upper_limit="${joint_4_upper_limit}" joint_velocity_limit="${joint_4_velocity_limit}" joint_torque_limit="${joint_4_torque_limit}"/>
+src/thesis_description/urdf/j2n6s300.xacro:146:        <xacro:kinova_armjoint joint_name="${prefix}_joint_5" type="${joint_5_type}" parent="${prefix}_link_4" child="${prefix}_link_5" joint_axis_xyz="${joint_5_axis_xyz}" joint_origin_xyz="${joint_5_origin_xyz}" joint_origin_rpy="${joint_5_origin_rpy}" joint_lower_limit="${joint_5_lower_limit}" joint_upper_limit="${joint_5_upper_limit}" joint_velocity_limit="${joint_5_velocity_limit}" joint_torque_limit="${joint_5_torque_limit}"/>
+src/thesis_description/urdf/j2n6s300.xacro:149:        <xacro:kinova_armjoint joint_name="${prefix}_joint_6" type="${joint_6_type}" parent="${prefix}_link_5" child="${prefix}_link_6" joint_axis_xyz="${joint_6_axis_xyz}" joint_origin_xyz="${joint_6_origin_xyz}" joint_origin_rpy="${joint_6_origin_rpy}" joint_lower_limit="${joint_6_lower_limit}" joint_upper_limit="${joint_6_upper_limit}" joint_velocity_limit="${joint_6_velocity_limit}" joint_torque_limit="${joint_6_torque_limit}"/>
+src/thesis_description/urdf/kinova_common.xacro:74:                                              joint_velocity_limit:=${dummy_default_value}
+src/thesis_description/urdf/kinova_common.xacro:83:      <xacro:if value="${joint_velocity_limit == dummy_default_value}"><xacro:ERROR_joint_velocity_limit_needs_to_be_set_for_a_non_fixed_joint/></xacro:if>
+src/thesis_description/urdf/kinova_common.xacro:91:        <limit effort="${joint_torque_limit}" velocity="${joint_velocity_limit}" lower="${joint_lower_limit}" upper="${joint_upper_limit}"/>
+src/thesis_description/urdf/kinova_common.xacro:94:        <limit effort="${joint_torque_limit}" velocity="${joint_velocity_limit}"/>
+src/thesis_description/urdf/kinova_common.xacro:128:        <limit effort="2000" velocity="1" lower="${joint_lower_limit}" upper="${joint_upper_limit}"/>
+src/thesis_description/urdf/kinova_common.xacro:144:            <limit lower="0" upper="1.51" effort="2" velocity="1"/>
+src/thesis_description/urdf/kinova_common.xacro:166:            <limit lower="0" upper="2" effort="2" velocity="1"/>
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:30:    <joint name="j2n6s300_joint_1">
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:33:        <param name="initial_value">0.0</param>
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:37:    <joint name="j2n6s300_joint_2">
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:40:        <param name="initial_value">3.141592653589793</param>
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:44:    <joint name="j2n6s300_joint_3">
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:47:        <param name="initial_value">3.141592653589793</param>
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:51:    <joint name="j2n6s300_joint_4">
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:54:        <param name="initial_value">0.0</param>
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:58:    <joint name="j2n6s300_joint_5">
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:61:        <param name="initial_value">0.0</param>
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:65:    <joint name="j2n6s300_joint_6">
+src/thesis_simulation/urdf/jaco_mock.ros2_control.xacro:68:        <param name="initial_value">0.0</param>
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:47:    <joint name="j2n6s300_joint_1">
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:52:        <param name="initial_value">0.0</param>
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:60:    <joint name="j2n6s300_joint_2">
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:65:        <param name="initial_value">3.141592653589793</param>
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:73:    <joint name="j2n6s300_joint_3">
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:78:        <param name="initial_value">3.141592653589793</param>
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:86:    <joint name="j2n6s300_joint_4">
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:91:        <param name="initial_value">0.0</param>
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:99:    <joint name="j2n6s300_joint_5">
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:104:        <param name="initial_value">0.0</param>
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:112:    <joint name="j2n6s300_joint_6">
+src/thesis_simulation/urdf/jaco_gazebo.ros2_control.xacro:117:        <param name="initial_value">0.0</param>
+src/thesis_simulation/config/jaco_gazebo_controllers.yaml:27:      - j2n6s300_joint_1
+src/thesis_simulation/config/jaco_gazebo_controllers.yaml:28:      - j2n6s300_joint_2
+src/thesis_simulation/config/jaco_gazebo_controllers.yaml:29:      - j2n6s300_joint_3
+src/thesis_simulation/config/jaco_gazebo_controllers.yaml:30:      - j2n6s300_joint_4
+src/thesis_simulation/config/jaco_gazebo_controllers.yaml:31:      - j2n6s300_joint_5
+src/thesis_simulation/config/jaco_gazebo_controllers.yaml:32:      - j2n6s300_joint_6
+src/thesis_simulation/config/jaco_controllers.yaml:27:      - j2n6s300_joint_1
+src/thesis_simulation/config/jaco_controllers.yaml:28:      - j2n6s300_joint_2
+src/thesis_simulation/config/jaco_controllers.yaml:29:      - j2n6s300_joint_3
+src/thesis_simulation/config/jaco_controllers.yaml:30:      - j2n6s300_joint_4
+src/thesis_simulation/config/jaco_controllers.yaml:31:      - j2n6s300_joint_5
+src/thesis_simulation/config/jaco_controllers.yaml:32:      - j2n6s300_joint_6
+
+============================================================
+5. DEPENDENCIAS ENTRE PAQUETES
+============================================================
+
+-------------------- src/thesis_core/package.xml --------------------
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>thesis_core</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="luisito@todo.todo">luisito</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+
+  <exec_depend>thesis_interfaces</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+
+-------------------- src/thesis_core/setup.py --------------------
+from setuptools import find_packages, setup
+
+package_name = 'thesis_core'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='luisito',
+    maintainer_email='luisito@todo.todo',
+    description='TODO: Package description',
+    license='TODO: License declaration',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
+    entry_points={
+        'console_scripts': [
+            'horizon_preview = thesis_core.horizon_preview:main',
+            'safety_supervisor = thesis_core.safety_supervisor_node:main',
+            'proximity_monitor = '
+            'thesis_core.proximity_monitor_node:main',
+        ],
+    },
+)
+
+-------------------- src/thesis_simulation/package.xml --------------------
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd"
+  schematypens="http://www.w3.org/2001/XMLSchema"?>
+
+<package format="3">
+  <name>thesis_simulation</name>
+  <version>0.0.0</version>
+
+  <description>
+    Simulation adapters and virtual test environments for the thesis platform.
+  </description>
+
+  <maintainer email="luisito@todo.todo">luisito</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>thesis_description</exec_depend>
+
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+
+
+  <exec_depend>thesis_core</exec_depend>
+
+
+  <exec_depend>gz_ros2_control</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>ros2controlcli</exec_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+
+  <exec_depend>thesis_interfaces</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+
+-------------------- src/thesis_simulation/setup.py --------------------
+from glob import glob
+from setuptools import find_packages, setup
+
+package_name = 'thesis_simulation'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        (
+            'share/ament_index/resource_index/packages',
+            ['resource/' + package_name]
+        ),
+        (
+            'share/' + package_name,
+            ['package.xml']
+        ),
+        (
+            'share/' + package_name + '/launch',
+            glob('launch/*.launch.py')
+        ),
+        (
+            'share/' + package_name + '/config',
+            glob('config/*.yaml')
+        ),
+        (
+            'share/' + package_name + '/urdf',
+            glob('urdf/*.xacro')
+        ),
+        (
+            'share/' + package_name + '/worlds',
+            glob('worlds/*.sdf')
+        ),
+        (
+            'share/' + package_name + '/models/safety_obstacle',
+            glob('models/safety_obstacle/*.sdf')
+        ),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='luisito',
+    maintainer_email='luisito@todo.todo',
+    description='Simulation adapters and virtual test environments for the thesis platform.',
+    license='TODO: License declaration',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
+    entry_points={
+        'console_scripts': [
+            'test_command = thesis_simulation.test_command_node:main',
+            'dry_run_adapter = thesis_simulation.dry_run_adapter:main',
+            'simulation_command_adapter = '
+            'thesis_simulation.simulation_command_adapter:main',
+            'capsule_visualizer = '
+            'thesis_simulation.capsule_visualizer:main',
+        ],
+    },
+)
+
+-------------------- src/thesis_ui/package.xml --------------------
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>thesis_ui</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="luisito@todo.todo">luisito</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>python3-pyqt5</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>thesis_interfaces</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+
+-------------------- src/thesis_ui/setup.py --------------------
+from setuptools import find_packages, setup
+
+package_name = 'thesis_ui'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='luisito',
+    maintainer_email='luisito@todo.todo',
+    description='TODO: Package description',
+    license='TODO: License declaration',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
+    entry_points={
+        'console_scripts': [
+            'joint_gui = thesis_ui.joint_control_gui:main',
+        ],
+    },
+)
+
+============================================================
+6. PRUEBAS FUNCIONALES EXISTENTES
+============================================================
+
+-------------------- src/thesis_core/test/test_execution_reference.py --------------------
+import math
+import unittest
+
+from thesis_core.execution_reference import normalize_target
+from thesis_core.execution_reference import sample_reference
+
+
+class TestExecutionReference(unittest.TestCase):
+
+    def test_sample_reference_uses_absolute_elapsed_time(self):
+        start = (0.0, 1.0, 2.0, 0.0, 0.0, 0.0)
+        target = (math.pi, 2.0, 3.0, 0.0, 0.0, 0.0)
+
+        samples = sample_reference(start, target, 2.0, 0.5, 1.0, 3)
+
+        self.assertAlmostEqual(samples[0][0], math.pi / 4.0)
+        self.assertAlmostEqual(samples[1][0], math.pi / 2.0)
+        self.assertAlmostEqual(samples[2][0], 3.0 * math.pi / 4.0)
+
+        late = sample_reference(start, target, 2.0, 1.5, 1.0, 3)
+        self.assertAlmostEqual(late[-1][0], math.pi)
+        self.assertEqual(late[-1][1:], (2.0, 3.0, 0.0, 0.0, 0.0))
+
+
+    def test_continuous_joint_uses_shortest_turn(self):
+        start = (math.radians(170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
+        target = (math.radians(-170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
+
+        normalized = normalize_target(start, target)
+
+        self.assertAlmostEqual(normalized[0], math.radians(190.0))
+
+
+    def test_sample_reference_rejects_invalid_input(self):
+        vector = (0.0, 1.0, 2.0, 0.0, 0.0, 0.0)
+
+        with self.assertRaises(ValueError):
+            sample_reference(vector, vector, 0.0, 0.0, 1.0, 3)
+
+        with self.assertRaises(ValueError):
+            sample_reference(vector, vector, 1.0, 0.0, 1.0, 1)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+-------------------- src/thesis_core/test/test_jaco_kinematics.py --------------------
+import math
+
+from thesis_core.jaco_kinematics import (
+    capsule_segments,
+    minimum_sphere_clearance,
+)
+
+
+INITIAL_JOINTS = (0.0, math.pi, math.pi, 0.0, 0.0, 0.0)
+
+
+def test_capsule_segment_count():
+    assert len(capsule_segments(INITIAL_JOINTS)) == 6
+
+
+def test_initial_pose_clearance_matches_tf_measurement():
+    result = minimum_sphere_clearance(
+        INITIAL_JOINTS,
+        (0.60, 0.0, 0.65),
+        0.12,
+    )
+
+    clearance, name, _, _, _ = result
+    assert name == 'upper_arm_to_forearm'
+    assert math.isclose(clearance, 0.395002, abs_tol=1.0e-5)
+
+-------------------- src/thesis_ui/test/test_gui_state.py --------------------
+"""Headless GUI regression checks; run in the sourced ROS workspace."""
+import os
+import time
+import unittest
+from types import SimpleNamespace
+
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+from PyQt5.QtWidgets import QApplication
+from thesis_ui.joint_control_gui import (
+    JOINT_NAMES, JointControlWindow, JointGuiNode,
+)
+
+
+class FakeNode:
+    execution_callback = JointGuiNode.execution_callback
+    execution_is_active = JointGuiNode.execution_is_active
+
+    def __init__(self):
+        self.current_positions = dict(zip(JOINT_NAMES, [0, 3.14, 3.14, 0, 0, 0]))
+        self.last_command_id = 'gui_test'
+        self.last_allowed_id = None
+        self.last_prediction = None
+        self.last_decision = None
+        self.last_execution = None
+        self.last_execution_control = None
+        self.last_proximity = SimpleNamespace(minimum_clearance=0.32)
+        self.proximity_received_at = time.monotonic()
+        self.control_received_at = None
+        self.execution_by_id = {}
+        self.end_effector_pose = (0.485, 0.064, 1.040, 0, 0, 0)
+        self.candidate_publisher = SimpleNamespace(get_subscription_count=lambda: 1)
+
+    def state_is_ready(self):
+        return True
+
+    def update_end_effector_pose(self):
+        pass
+
+    def connection_status(self):
+        return {'Control preventivo': True, '/joint_states': True}
+
+
+def execution(command_id='gui_test', status='ACCEPTED'):
+    return SimpleNamespace(
+        command_id=command_id, status=status,
+        duration_sec=6.0, detail='Resultado de prueba',
+    )
+
+
+class GuiStateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        self.node = FakeNode()
+        self.window = JointControlWindow(self.node)
+        for timer in (self.window.ros_timer, self.window.ui_timer,
+                      self.window.preview_timer):
+            timer.stop()
+        self.window.add_history_row('gui_test', 0, 6, 'PENDIENTE')
+
+    def tearDown(self):
+        self.window.deleteLater()
+
+    def test_refresh_reaches_pose_and_velocity_after_connections(self):
+        self.window.refresh_ui()
+        self.assertIn('Control preventivo', self.window.connection_indicators)
+        self.assertEqual(self.window.pose_labels[0].text(), '0.485')
+        self.assertIsNotNone(self.window.velocity_table.item(0, 0))
+        self.assertTrue(self.window.send_button.isEnabled())
+
+    def test_execution_lifecycle_updates_history_and_send_lock(self):
+        for status in ('PENDING', 'ACCEPTED', 'SUCCEEDED'):
+            self.node.execution_callback(execution(status=status))
+            self.window.refresh_ui()
+            self.assertEqual(self.window.history_table.item(0, 4).text(), status)
+            self.assertEqual(self.window.send_button.isEnabled(), status == 'SUCCEEDED')
+
+    def test_unrelated_rejection_does_not_unlock_active_goal(self):
+        self.node.execution_callback(execution())
+        self.node.execution_callback(execution('another', 'REJECTED'))
+        self.window.refresh_ui()
+        self.assertFalse(self.window.send_button.isEnabled())
+        self.assertEqual(self.node.last_execution.command_id, 'gui_test')
+
+    def test_canceled_execution_keeps_final_state(self):
+        self.node.execution_callback(execution(status='CANCELED'))
+        self.window.refresh_ui()
+        self.assertIn('CANCELED', self.window.status_label.text())
+        self.assertTrue(self.window.send_button.isEnabled())
+
+    def test_stale_projection_is_not_displayed_as_live(self):
+        self.node.execution_callback(execution())
+        self.node.last_execution_control = SimpleNamespace(
+            command_id='gui_test', state='REDUCTION', speed_scale=0.5,
+            minimum_clearance=0.15, minimum_time_from_now=0.65,
+            minimum_sample_index=13, minimum_sample_count=21,
+            time_to_collision=-1.0,
+        )
+        self.node.control_received_at = time.monotonic()
+        self.window.refresh_ui()
+        self.assertIn('+0.65 s', self.window.metric_labels['Instante del mínimo'].text())
+        self.node.control_received_at -= 2.0
+        self.window.refresh_ui()
+        self.assertEqual(self.window.metric_labels['Mínimo proyectado'].text(),
+                         'Sin evaluación activa')
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+============================================================
+7. BÚSQUEDA DE PRUEBAS DE LÍMITES
+============================================================
+src/thesis_core/test/test_flake8.py:13:# limitations under the License.
+src/thesis_core/test/test_pep257.py:13:# limitations under the License.
+src/thesis_core/test/test_execution_reference.py:25:    def test_continuous_joint_uses_shortest_turn(self):
+src/thesis_core/test/test_execution_reference.py:26:        start = (math.radians(170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
+src/thesis_core/test/test_execution_reference.py:27:        target = (math.radians(-170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
+src/thesis_core/test/test_copyright.py:13:# limitations under the License.
+src/thesis_simulation/test/test_flake8.py:13:# limitations under the License.
+src/thesis_simulation/test/test_pep257.py:13:# limitations under the License.
+src/thesis_simulation/test/test_copyright.py:13:# limitations under the License.
+src/thesis_ui/test/test_gui_state.py:10:    JOINT_NAMES, JointControlWindow, JointGuiNode,
+src/thesis_ui/test/test_gui_state.py:19:        self.current_positions = dict(zip(JOINT_NAMES, [0, 3.14, 3.14, 0, 0, 0]))
+src/thesis_ui/test/test_gui_state.py:30:        self.end_effector_pose = (0.485, 0.064, 1.040, 0, 0, 0)
+src/thesis_ui/test/test_gui_state.py:66:    def test_refresh_reaches_pose_and_velocity_after_connections(self):
+src/thesis_ui/test/test_gui_state.py:69:        self.assertEqual(self.window.pose_labels[0].text(), '0.485')
+src/thesis_ui/test/test_gui_state.py:70:        self.assertIsNotNone(self.window.velocity_table.item(0, 0))
+src/thesis_ui/test/test_flake8.py:13:# limitations under the License.
+src/thesis_ui/test/test_pep257.py:13:# limitations under the License.
+src/thesis_ui/test/test_copyright.py:13:# limitations under the License.
+
+============================================================
+8. COMPARACIÓN SOURCE–INSTALL
+============================================================
+
+RELATIVO=thesis_core/thesis_core/safety_supervisor_node.py
+SOURCE:
+fa7dea61245d142658bccd2b4c25dea6d0fafc71035e379f20a080a6d1e5336d  src/thesis_core/thesis_core/safety_supervisor_node.py
+INSTALL_BUSQUEDA:
+
+RELATIVO=thesis_core/thesis_core/horizon_preview.py
+SOURCE:
+c18b5b9022f0b2c401eabc9ef132e387619715255915628d8db182200d44fcae  src/thesis_core/thesis_core/horizon_preview.py
+INSTALL_BUSQUEDA:
+
+RELATIVO=thesis_core/thesis_core/execution_reference.py
+SOURCE:
+dd4565c26bd6ba3c22ec8d572252abbe5ab92117cd1b5697d0569e155545aa61  src/thesis_core/thesis_core/execution_reference.py
+INSTALL_BUSQUEDA:
+
+RELATIVO=thesis_simulation/thesis_simulation/simulation_command_adapter.py
+SOURCE:
+ea1335d72afb9d06dbc301cae7c812536e063a016f9417438e218fff3e7fdb65  src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+INSTALL_BUSQUEDA:
+
+RELATIVO=thesis_ui/thesis_ui/joint_control_gui.py
+SOURCE:
+6163ce7520c7a98d80c0b3ffdd080bdc7a1f6c0d0bc3ac5c80f33adaabe0ae09  src/thesis_ui/thesis_ui/joint_control_gui.py
+INSTALL_BUSQUEDA:
+
+============================================================
+9. ARCHIVOS ARTICULARES CANDIDATOS
+============================================================
+src/thesis_core/thesis_core/horizon_preview.py
+src/thesis_core/thesis_core/safety_supervisor_node.py
+src/thesis_description/urdf/j2n6s300.xacro
+src/thesis_description/urdf/kinova_common.xacro
+src/thesis_simulation/thesis_simulation/dry_run_adapter.py
+src/thesis_simulation/thesis_simulation/simulation_command_adapter.py
+src/thesis_simulation/thesis_simulation/test_command_node.py
+src/thesis_ui/test/test_gui_state.py
+src/thesis_ui/thesis_ui/joint_control_gui.py
+
+============================================================
+FIN DEL DIAGNÓSTICO A
+============================================================

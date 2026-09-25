@@ -226,9 +226,25 @@ Visualization Manager:
         Value: /thesis/robot_capsules
       Name: SafetyCapsules
       Namespaces:
+        current_capsules: true
         prediction: true
         proximity: true
-        robot_capsules: true
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /thesis/horizon_volume
+      Name: HorizonVolume
+      Namespaces:
+        current_capsules: true
+        horizon_endpoint_traces: true
+        horizon_labels: true
+        horizon_time_poses: true
+        predicted_volume: true
       Value: true
   Enabled: true
   Global Options:

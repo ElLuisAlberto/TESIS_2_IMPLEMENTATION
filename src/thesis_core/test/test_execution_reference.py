@@ -21,7 +21,6 @@ class TestExecutionReference(unittest.TestCase):
         self.assertAlmostEqual(late[-1][0], math.pi)
         self.assertEqual(late[-1][1:], (2.0, 3.0, 0.0, 0.0, 0.0))
 
-
     def test_continuous_joint_uses_shortest_turn(self):
         start = (math.radians(170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
         target = (math.radians(-170.0), 1.0, 2.0, 0.0, 0.0, 0.0)
@@ -29,7 +28,6 @@ class TestExecutionReference(unittest.TestCase):
         normalized = normalize_target(start, target)
 
         self.assertAlmostEqual(normalized[0], math.radians(190.0))
-
 
     def test_sample_reference_rejects_invalid_input(self):
         vector = (0.0, 1.0, 2.0, 0.0, 0.0, 0.0)
