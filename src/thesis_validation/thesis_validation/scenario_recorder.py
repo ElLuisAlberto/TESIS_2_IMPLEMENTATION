@@ -7,11 +7,10 @@ from pathlib import Path
 import math
 import re
 import time
-from typing import Any, Dict, Iterable, Optional, Set, Union
+from typing import Any, Dict, Iterable, Optional, Set
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rosidl_runtime_py.utilities import get_message
 from sensor_msgs.msg import JointState
 from thesis_core.joint_model import JOINT_NAMES, JOINT_VELOCITY_LIMITS
@@ -45,7 +44,6 @@ class ScenarioRecorder(Node):
         "/thesis/command_decision",
         "/thesis/execution_trajectory",
         "/thesis/jog_intent",
-        "/arm_controller/joint_trajectory",
         "/thesis/joint_trajectory_prediction",
     }
 
@@ -61,10 +59,11 @@ class ScenarioRecorder(Node):
         self.command_id = "UNAVAILABLE"
         self.controller_status = "UNAVAILABLE"
         self.expected_segment = "UNAVAILABLE"
-        self.last_jog_time: Optional[float] = None
         self.last_joint_positions: Optional[list] = None
         self.jog_hold_age_ms = -1.0
-        self._pending_hold_age_ms = -1.0
+        self._supervisor_receive_monotonic_ns: Dict[str, int] = {}
+        self._controller_publish_monotonic_ns: Dict[str, int] = {}
+        self._hold_publish_monotonic_ns: Dict[str, int] = {}
         self.horizon_update_ms = -1.0
         self.saturation_confirmed = False
         self.joint_velocity_checked = False
@@ -93,18 +92,11 @@ class ScenarioRecorder(Node):
                 continue
             try:
                 message_type = get_message(types[0])
-                qos: Union[int, QoSProfile] = 20
-                if topic == "/arm_controller/joint_trajectory":
-                    qos = QoSProfile(
-                        history=HistoryPolicy.KEEP_LAST,
-                        depth=20,
-                        reliability=ReliabilityPolicy.BEST_EFFORT,
-                    )
                 subscription = self.create_subscription(
                     message_type,
                     topic,
                     lambda msg, source=topic: self._generic_cb(source, msg),
-                    qos,
+                    20,
                 )
             except (AttributeError, ImportError, RuntimeError) as error:
                 self.get_logger().error(
@@ -223,25 +215,70 @@ class ScenarioRecorder(Node):
         if segment is not None:
             self.latest["limiting_segment"] = segment
 
+    def _update_e11_monotonic_timing(self, command_id: str) -> None:
+        """Correlate one E11 command using the shared monotonic clock."""
+        if self.scenario_id != "E11" or command_id != self.command_id:
+            return
+        receive_ns = self._supervisor_receive_monotonic_ns.get(command_id)
+        controller_ns = self._controller_publish_monotonic_ns.get(command_id)
+        hold_ns = self._hold_publish_monotonic_ns.get(command_id)
+        if receive_ns is None:
+            return
+        if controller_ns is not None and controller_ns >= receive_ns:
+            self.latest["latency_end_to_end_ms"] = (
+                controller_ns - receive_ns
+            ) / 1_000_000.0
+        if (hold_ns is not None
+                and hold_ns >= receive_ns
+                and self.jog_hold_age_ms < 0.0):
+            self.jog_hold_age_ms = (hold_ns - receive_ns) / 1_000_000.0
+            self.latest["state"] = "HOLD"
+            self.latest["reason_code"] = "JOG_WATCHDOG_EXPIRED"
+
     def _timing_cb(self, message: Any) -> None:
         stage = str(_walk(message, ("stage",)) or "").upper()
+        source = str(_walk(message, ("source",)) or "").lower()
         stamp = _ros_time_seconds(_walk(message, ("stamp",)))
         intent_stamp = _ros_time_seconds(
             _walk(message, ("intent_stamp",))
         )
+        detail = str(_walk(message, ("detail",)) or "")
+        event_command_id = str(_walk(message, ("command_id",)) or "")
+        monotonic_value = _walk(message, ("monotonic_ns",))
+        try:
+            monotonic_ns = int(monotonic_value)
+        except (TypeError, ValueError, OverflowError):
+            monotonic_ns = -1
         if stage == "CONTROLLER_PUBLISH":
             if stamp is not None and intent_stamp is not None:
                 latency_ms = (stamp - intent_stamp) * 1000.0
                 if latency_ms >= 0.0:
                     self.latest["latency_end_to_end_ms"] = latency_ms
-        if (stage == "STOP_DETECTED"
-                and str(message.detail) == "JOG_WATCHDOG_EXPIRED"):
+        correlated_e11 = (
+            self.scenario_id == "E11"
+            and event_command_id != ""
+            and event_command_id == self.command_id
+        )
+        if (correlated_e11
+                and stage == "STOP_DETECTED"
+                and detail == "JOG_WATCHDOG_EXPIRED"):
             self.latest["reason_code"] = "JOG_WATCHDOG_EXPIRED"
-            if (self.scenario_id == "E11"
-                    and self._pending_hold_age_ms >= 0.0
-                    and self.jog_hold_age_ms < 0.0):
-                self.jog_hold_age_ms = self._pending_hold_age_ms
-                self.latest["state"] = "HOLD"
+        if event_command_id != "" and monotonic_ns > 0:
+            if source == "supervisor" and stage == "SUPERVISOR_RECEIVE":
+                self._supervisor_receive_monotonic_ns[event_command_id] = (
+                    monotonic_ns
+                )
+            elif source == "adapter" and stage == "CONTROLLER_PUBLISH":
+                self._controller_publish_monotonic_ns[event_command_id] = (
+                    monotonic_ns
+                )
+            elif (source == "adapter"
+                    and stage == "HOLD_PUBLISH"
+                    and detail == "JOG_WATCHDOG_EXPIRED"):
+                self._hold_publish_monotonic_ns[event_command_id] = (
+                    monotonic_ns
+                )
+            self._update_e11_monotonic_timing(event_command_id)
         self.latest["last_timing_stage"] = stage
 
     def _generic_cb(self, source: str, message: Any) -> None:
@@ -260,9 +297,8 @@ class ScenarioRecorder(Node):
         elif source == "/thesis/execution_trajectory":
             self.controller_status = str(message.status)
         elif source == "/thesis/jog_intent":
-            self.last_jog_time = time.monotonic()
-            self._pending_hold_age_ms = -1.0
             self.command_id = str(message.command_id)
+            self._update_e11_monotonic_timing(self.command_id)
             if (self.last_joint_positions is not None
                     and tuple(message.joint_names) == JOINT_NAMES
                     and len(message.positions) == 6):
@@ -296,29 +332,6 @@ class ScenarioRecorder(Node):
                         time.monotonic() - self.reversal[0]
                     ) * 1000.0
                     self.reversal = None
-        elif source == "/arm_controller/joint_trajectory":
-            if (self.last_jog_time is not None
-                    and self.last_joint_positions is not None
-                    and len(message.points) == 1
-                    and len(message.points[0].positions) == 6
-                    and len(message.points[0].velocities) == 6
-                    and max(
-                        abs(v) for v in message.points[0].velocities
-                    ) < 1e-9
-                    and all(abs(a - b) < 0.01 for a, b in zip(
-                        message.points[0].positions,
-                        self.last_joint_positions,
-                    ))):
-                if self.scenario_id == "E11":
-                    if self._pending_hold_age_ms < 0.0:
-                        self._pending_hold_age_ms = (
-                            time.monotonic() - self.last_jog_time
-                        ) * 1000.0
-                    if (self.jog_hold_age_ms < 0.0
-                            and self.latest.get("reason_code")
-                            == "JOG_WATCHDOG_EXPIRED"):
-                        self.jog_hold_age_ms = self._pending_hold_age_ms
-                        self.latest["state"] = "HOLD"
 
     def record(self) -> Dict[str, object]:
         """Build one normalized row after the observation interval."""

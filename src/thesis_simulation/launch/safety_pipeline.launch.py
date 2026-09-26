@@ -73,7 +73,7 @@ def generate_launch_description():
                     ),
                 'control_replan_cooldown_sec': 0.75,
                 'jog_control_period_sec': 0.10,
-                'jog_command_timeout_sec': 0.25,
+                'jog_command_timeout_sec': 0.18,
             }],
         ),
     ])

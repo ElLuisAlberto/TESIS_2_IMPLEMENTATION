@@ -46,7 +46,7 @@ class SimulationCommandAdapter(Node):
         self.declare_parameter('max_state_age_sec', 0.5)
         self.declare_parameter('control_replan_cooldown_sec', 0.75)
         self.declare_parameter('jog_control_period_sec', 0.10)
-        self.declare_parameter('jog_command_timeout_sec', 0.25)
+        self.declare_parameter('jog_command_timeout_sec', 0.18)
         self.declare_parameter('jog_reference_max_lead_sec', 0.25)
         self.declare_parameter(
             'controller_reference_max_age_sec', 0.10
@@ -142,7 +142,15 @@ class SimulationCommandAdapter(Node):
             f'Adaptador Gazebo preparado; salida simulada {output_state}'
         )
 
-    def publish_timing(self, command_id, intent_stamp, stage, detail=''):
+    def publish_timing(
+        self,
+        command_id,
+        intent_stamp,
+        stage,
+        detail='',
+        internal_duration_sec=-1.0,
+        monotonic_ns=None,
+    ):
         """Publish one adapter trace event on the shared ROS clock."""
         event = PipelineTiming()
         event.stamp = self.get_clock().now().to_msg()
@@ -152,8 +160,10 @@ class SimulationCommandAdapter(Node):
         event.stage = stage
         self.timing_sequence += 1
         event.sequence = self.timing_sequence
-        event.monotonic_ns = time.monotonic_ns()
-        event.internal_duration_sec = -1.0
+        event.monotonic_ns = int(
+            time.monotonic_ns() if monotonic_ns is None else monotonic_ns
+        )
+        event.internal_duration_sec = float(internal_duration_sec)
         event.detail = str(detail)
         self.timing_publisher.publish(event)
 
@@ -415,6 +425,23 @@ class SimulationCommandAdapter(Node):
                 (0.0,) * len(JOINT_NAMES),
                 duration,
             )
+            hold_publish_monotonic = time.monotonic()
+            hold_age_sec = max(
+                0.0,
+                hold_publish_monotonic
+                - self.last_jog_receive_monotonic,
+            )
+            if (
+                self.last_jog_intent_stamp is not None
+                and self.last_jog_command_id is not None
+            ):
+                self.publish_timing(
+                    self.last_jog_command_id,
+                    self.last_jog_intent_stamp,
+                    'HOLD_PUBLISH',
+                    'JOG_WATCHDOG_EXPIRED',
+                    internal_duration_sec=hold_age_sec,
+                )
         self.jog_hold_sent = True
         self.jog_active = False
         self.jog_reference_target = None
