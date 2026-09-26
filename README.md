@@ -70,6 +70,7 @@ Una nueva integración debe proporcionar el estado articular, el modelo cinemát
 | `thesis_validation` | Registro y evaluación reproducible de escenarios |
 | `thesis_hardware` / `thesis_hardware_bridge` | Adaptación al hardware de la plataforma experimental, fuera de la validación actual |
 | `tools/validation` | Estímulos, verificadores y ejecutores por lotes |
+| `evidence/avance2` | Matriz base seleccionada para la validación E01–E08 |
 
 ## Principio de funcionamiento
 
@@ -183,7 +184,7 @@ Los ejecutores reproducibles incorporados son:
 | `run_e14_rejection_batch.sh` | Rechazo de un objetivo inválido |
 | `run_e15_controller_failure_batch.sh` | `STOP` ante rechazo o fallo del controlador |
 
-Los ejecutores generan matrices CSV, manifiestos de integridad y registros de ejecución fuera del repositorio. Los ensayos preliminares y los archivos voluminosos se mantienen separados del código versionado.
+Los ejecutores generan matrices CSV, manifiestos de integridad y registros de ejecución fuera del repositorio. Como referencia compacta y trazable, `evidence/avance2/` conserva la matriz base validada de E01–E08; los lotes completos, los ensayos preliminares y los archivos voluminosos se mantienen separados del código versionado.
 
 ## Alcance de validez y limitaciones
 
@@ -329,8 +330,6 @@ Desactivar el control manual y cerrar con `Ctrl+C` en este orden: GUI, horizonte
 ## Atribución
 
 La procedencia del modelo Kinova se documenta en [`src/thesis_description/UPSTREAM.md`](src/thesis_description/UPSTREAM.md). Deben conservarse las licencias incluidas con los recursos derivados.
-
-El historial de fases anteriores está disponible en [`docs/historico/README_ANTES_FASE4.md`](docs/historico/README_ANTES_FASE4.md). Sus comandos y estados no describen necesariamente la versión actual.
 
 ## Aporte de conocimiento
 
