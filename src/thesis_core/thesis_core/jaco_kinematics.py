@@ -16,7 +16,7 @@ SEGMENT_NAMES = (
     'wrist_2_to_tool',
 )
 
-CAPSULE_RADII = (0.105, 0.095, 0.085, 0.075, 0.070, 0.090)
+CAPSULE_RADII = (0.105, 0.105, 0.085, 0.075, 0.085, 0.090)
 
 JOINT_ORIGINS = (
     ((0.0, 0.0, 0.15675), (0.0, math.pi, 0.0)),

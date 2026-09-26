@@ -26,6 +26,7 @@ class ProximityMonitorNode(Node):
 
         self.declare_parameter('reference_frame', 'world')
         self.declare_parameter('evaluation_rate_hz', 20.0)
+        self.declare_parameter('status_publishing_enabled', True)
         self.declare_parameter('status_topic', '/thesis/proximity_status')
         self.declare_parameter('segment_names', ['segment'])
         self.declare_parameter('segment_start_frames', ['world'])
@@ -235,6 +236,10 @@ class ProximityMonitorNode(Node):
         return 'ALLOW'
 
     def evaluate(self):
+        # Test hook: retain all geometry and subscriptions while
+        # intentionally withholding fresh status publications.
+        if not bool(self.get_parameter('status_publishing_enabled').value):
+            return
         obstacle, obstacle_radius, obstacle_velocity = self._obstacle()
         unavailable = set()
         segments = []

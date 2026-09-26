@@ -328,7 +328,7 @@ class SafetySupervisorNode(Node):
         )
 
     def execution_callback(self, msg):
-        """Track the trajectory currently accepted by the adapter."""
+        """Track execution and fail closed on controller failure."""
         now_ns = self.get_clock().now().nanoseconds
         if msg.status == 'ACCEPTED':
             if self.last_runtime_command_id != msg.command_id:
@@ -341,6 +341,32 @@ class SafetySupervisorNode(Node):
             self.last_runtime_command_id = msg.command_id
             return
 
+        active_matches = (
+            self.active_execution is not None
+            and msg.command_id == self.active_execution.command_id
+        )
+
+        # A repeated candidate can be rejected while its first instance is
+        # already executing.  That duplicate must not stop or invalidate the
+        # accepted execution.
+        if msg.status == 'REJECTED' and active_matches:
+            return
+
+        if msg.status in {'FAILED', 'REJECTED'}:
+            reason_code = f'CONTROLLER_{msg.status}'
+            detail = str(msg.detail).strip()
+            reason = (
+                f'El controlador reportó {msg.status} para '
+                f'{msg.command_id}.'
+            )
+            if detail:
+                reason += f' Detalle: {detail}'
+            self.publish_runtime_stop(
+                msg.command_id,
+                reason_code,
+                reason,
+            )
+
         terminal_statuses = {
             'SUCCEEDED',
             'FAILED',
@@ -348,11 +374,7 @@ class SafetySupervisorNode(Node):
             'REJECTED',
             'DRY_RUN',
         }
-        if (
-            msg.status in terminal_statuses
-            and self.active_execution is not None
-            and msg.command_id == self.active_execution.command_id
-        ):
+        if msg.status in terminal_statuses and active_matches:
             self.active_execution = None
             self.last_execution_receive_ns = None
             self.last_runtime_command_id = None
@@ -428,10 +450,12 @@ class SafetySupervisorNode(Node):
             decision.state,
             decision.speed_scale,
             -1.0,
-            '',
+            'UNAVAILABLE',
             NO_EVENT_TIME,
             reason_code,
             reason,
+            current_clearance=-1.0,
+            nominal_clearance=-1.0,
             stability=stability,
             requested_reason_code=reason_code,
         )

@@ -28,12 +28,14 @@ capsule_visualizer:
       - j2n6s300_link_4
       - j2n6s300_link_5
       - j2n6s300_end_effector
+    # Conservative calibration for independently observable overlaps.
+    # Keep synchronized with thesis_core.jaco_kinematics.CAPSULE_RADII.
     segment_radii:
       - 0.105
-      - 0.095
+      - 0.105
       - 0.085
       - 0.075
-      - 0.070
+      - 0.085
       - 0.090
 
     color_rgba: [0.05, 0.80, 0.35, 0.38]
@@ -65,7 +67,8 @@ proximity_monitor:
       - j2n6s300_link_4
       - j2n6s300_link_5
       - j2n6s300_end_effector
-    segment_radii: [0.105, 0.095, 0.085, 0.075, 0.070, 0.090]
+    # Same conservative calibration used by the predictive geometry.
+    segment_radii: [0.105, 0.105, 0.085, 0.075, 0.085, 0.090]
 
     # The launch file uses the same pose to spawn the physical Gazebo model.
     obstacle_x: 0.60

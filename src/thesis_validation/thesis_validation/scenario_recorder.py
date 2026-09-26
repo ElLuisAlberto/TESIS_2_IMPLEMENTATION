@@ -64,6 +64,8 @@ class ScenarioRecorder(Node):
         self._supervisor_receive_monotonic_ns: Dict[str, int] = {}
         self._controller_publish_monotonic_ns: Dict[str, int] = {}
         self._hold_publish_monotonic_ns: Dict[str, int] = {}
+        self._terminal_decision: Optional[Dict[str, Any]] = None
+        self._terminal_decision_receive_monotonic_ns: Dict[str, int] = {}
         self.horizon_update_ms = -1.0
         self.saturation_confirmed = False
         self.joint_velocity_checked = False
@@ -190,6 +192,7 @@ class ScenarioRecorder(Node):
             if value is not None:
                 self.latest[key] = value
         self.command_id = str(_walk(message, ("command_id",)) or "UNAVAILABLE")
+        self._update_e11_monotonic_timing(self.command_id)
         self.controls.append((
             str(self.latest.get("state", "UNKNOWN")),
             float(self.latest.get("speed_scale", -1.0)),
@@ -203,7 +206,9 @@ class ScenarioRecorder(Node):
         self._execution_received = True
 
     def _proximity_cb(self, message: Any) -> None:
-        if self._execution_received:
+        # A terminal decision is evidence for one command.  Later
+        # background ALLOW samples must never overwrite it.
+        if self._execution_received or self._terminal_decision is not None:
             return
         state = _walk(message, ("state",))
         clearance = _walk(message, ("minimum_clearance",))
@@ -216,8 +221,8 @@ class ScenarioRecorder(Node):
             self.latest["limiting_segment"] = segment
 
     def _update_e11_monotonic_timing(self, command_id: str) -> None:
-        """Correlate one E11 command using the shared monotonic clock."""
-        if self.scenario_id != "E11" or command_id != self.command_id:
+        """Correlate one command using the shared monotonic clock."""
+        if command_id != self.command_id:
             return
         receive_ns = self._supervisor_receive_monotonic_ns.get(command_id)
         controller_ns = self._controller_publish_monotonic_ns.get(command_id)
@@ -228,12 +233,28 @@ class ScenarioRecorder(Node):
             self.latest["latency_end_to_end_ms"] = (
                 controller_ns - receive_ns
             ) / 1_000_000.0
-        if (hold_ns is not None
+        if (self.scenario_id == "E11"
+                and hold_ns is not None
                 and hold_ns >= receive_ns
                 and self.jog_hold_age_ms < 0.0):
             self.jog_hold_age_ms = (hold_ns - receive_ns) / 1_000_000.0
             self.latest["state"] = "HOLD"
             self.latest["reason_code"] = "JOG_WATCHDOG_EXPIRED"
+
+    def _update_terminal_decision_latency(self, command_id: str) -> None:
+        """Measure supervisor-to-decision latency without the adapter path."""
+        terminal = self._terminal_decision
+        if terminal is None or terminal.get("command_id") != command_id:
+            return
+        receive_ns = self._supervisor_receive_monotonic_ns.get(command_id)
+        decision_ns = self._terminal_decision_receive_monotonic_ns.get(
+            command_id
+        )
+        if (receive_ns is not None and decision_ns is not None
+                and decision_ns >= receive_ns):
+            terminal["latency_end_to_end_ms"] = (
+                decision_ns - receive_ns
+            ) / 1_000_000.0
 
     def _timing_cb(self, message: Any) -> None:
         stage = str(_walk(message, ("stage",)) or "").upper()
@@ -268,6 +289,11 @@ class ScenarioRecorder(Node):
                 self._supervisor_receive_monotonic_ns[event_command_id] = (
                     monotonic_ns
                 )
+                updater = getattr(
+                    self, "_update_terminal_decision_latency", None
+                )
+                if callable(updater):
+                    updater(event_command_id)
             elif source == "adapter" and stage == "CONTROLLER_PUBLISH":
                 self._controller_publish_monotonic_ns[event_command_id] = (
                     monotonic_ns
@@ -290,10 +316,63 @@ class ScenarioRecorder(Node):
             self._timing_cb(message)
         elif source == "/thesis/command_decision":
             self.command_id = str(message.command_id)
-            if not message.accepted:
+            if message.accepted and self.scenario_id == "E12":
+                # E12 establishes capsule identity from an accepted preventive
+                # decision.  Keep it correlated instead of later replacing it
+                # with a background proximity sample.
+                scale_match = re.search(
+                    r"scale=([-+\d.]+)", str(message.reason)
+                )
+                speed_scale = 1.0
+                if scale_match is not None:
+                    try:
+                        speed_scale = float(scale_match.group(1))
+                    except ValueError:
+                        speed_scale = 1.0
+                self.latest.update({
+                    "command_id": self.command_id,
+                    "state": str(message.state).upper(),
+                    "speed_scale": min(max(speed_scale, 0.0), 1.0),
+                    "reason_code": str(message.reason_code),
+                })
+                receive_ns = self._supervisor_receive_monotonic_ns.get(
+                    self.command_id
+                )
+                decision_ns = time.monotonic_ns()
+                if receive_ns is not None and decision_ns >= receive_ns:
+                    self.latest["latency_end_to_end_ms"] = (
+                        decision_ns - receive_ns
+                    ) / 1_000_000.0
+                self.controls.append((
+                    str(self.latest["state"]),
+                    float(self.latest["speed_scale"]),
+                    float(self.latest.get("d_nominal", -1.0)),
+                ))
+                self._execution_received = True
+            elif not message.accepted:
+                # Keep the supervisor state: E09/E10 use STOP and E14 uses
+                # REJECTED.  A rejected candidate never emits execution_control.
+                state = str(message.state).upper()
+                terminal = dict(self.latest)
+                terminal.update({
+                    "command_id": self.command_id,
+                    "state": state,
+                    "speed_scale": 0.0,
+                    "reason_code": str(message.reason_code),
+                })
+                self._terminal_decision = terminal
+                self._terminal_decision_receive_monotonic_ns[self.command_id] = (
+                    time.monotonic_ns()
+                )
+                self._update_terminal_decision_latency(self.command_id)
+                self.latest = terminal
                 self.controller_status = "REJECTED"
-                self.latest["state"] = "REJECTED"
-                self.latest["reason_code"] = message.reason_code
+                self.controls.append((
+                    state,
+                    0.0,
+                    float(terminal.get("d_nominal", -1.0)),
+                ))
+                self._execution_received = True
         elif source == "/thesis/execution_trajectory":
             self.controller_status = str(message.status)
         elif source == "/thesis/jog_intent":
@@ -335,7 +414,7 @@ class ScenarioRecorder(Node):
 
     def record(self) -> Dict[str, object]:
         """Build one normalized row after the observation interval."""
-        selected = self.latest
+        selected = self._terminal_decision or self.latest
         if self.scenario_id == 'E03':
             candidates = [
                 sample for sample in self.control_samples
