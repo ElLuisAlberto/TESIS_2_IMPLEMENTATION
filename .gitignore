@@ -38,3 +38,8 @@ __pycache__/
 /FASE3_CONTROL_DIRECTO.patch
 /FASE4_RUEDA_HORIZONTE.patch
 /ACTUALIZACION_README_FASE4.patch
+/APLICAR_PAQUETE*.py
+/CORREGIR_PAQUETE*.py
+/PAQUETE*.txt
+/VALIDAR_*.py.antes_*
+.pytest_cache/
