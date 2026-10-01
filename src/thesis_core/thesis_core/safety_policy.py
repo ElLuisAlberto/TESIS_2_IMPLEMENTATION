@@ -191,9 +191,23 @@ def withdrawal_path_is_safe(
         return False
     if not all(math.isfinite(value) for value in values):
         return False
-    if any(
-        following < previous - tolerance
-        for previous, following in zip(values, values[1:])
-    ):
+    if not withdrawal_path_is_non_approaching(values, tolerance):
         return False
     return values[-1] >= values[0] + progress
+
+
+def withdrawal_path_is_non_approaching(
+    clearances: Sequence[float],
+    monotonic_tolerance: float = 0.001,
+) -> bool:
+    """Check that every sampled step avoids measurable motion toward danger."""
+    values = tuple(float(value) for value in clearances)
+    tolerance = _finite('monotonic_tolerance', monotonic_tolerance)
+    if len(values) < 2 or tolerance < 0.0:
+        return False
+    if not all(math.isfinite(value) for value in values):
+        return False
+    return not any(
+        following < previous - tolerance
+        for previous, following in zip(values, values[1:])
+    )

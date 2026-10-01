@@ -29,6 +29,16 @@ def test_stop_is_immediate_and_latched():
     assert result.transition_reason == 'STOP_LATCHED'
 
 
+def test_verified_withdrawal_can_start_from_latched_stop():
+    control = make_filter()
+    control.update('jog_continuous', 'STOP', 0.0, 0.0)
+    control.reset('VERIFIED_PROTECTIVE_WITHDRAWAL')
+    result = control.update('jog_continuous', 'REDUCTION', 0.10, 0.01)
+    assert result.state == 'REDUCTION'
+    assert result.speed_scale == pytest.approx(0.10)
+    assert result.transition_reason == 'COMMAND_CHANGED_RESET'
+
+
 def test_five_safe_samples_are_required_before_recovery():
     control = make_filter()
     control.update('jog', 'REDUCTION', 0.5, 0.0)

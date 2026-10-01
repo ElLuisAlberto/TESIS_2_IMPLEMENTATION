@@ -9,6 +9,7 @@ from thesis_core.safety_policy import (
     decide_preventive_state,
     maximum_safe_scale,
     withdrawal_is_non_approaching,
+    withdrawal_path_is_non_approaching,
     withdrawal_path_is_safe,
 )
 
@@ -181,8 +182,19 @@ def test_withdrawal_requires_minimum_final_progress():
     assert not withdrawal_path_is_safe((0.020, 0.021, 0.021))
 
 
+def test_scaled_withdrawal_allows_monotonic_submillimeter_progress():
+    assert withdrawal_path_is_non_approaching((0.020, 0.0202, 0.0204))
+    assert not withdrawal_path_is_safe((0.020, 0.0202, 0.0204))
+
+
 def test_withdrawal_rejects_any_intermediate_approach():
     assert not withdrawal_path_is_safe((0.020, 0.018, 0.030))
+
+
+def test_non_approaching_path_rejects_an_inward_step():
+    assert not withdrawal_path_is_non_approaching(
+        (0.020, 0.022, 0.0205),
+    )
 
 
 def test_invalid_evidence_still_overrides_safe_withdrawal():

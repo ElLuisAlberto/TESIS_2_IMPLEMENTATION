@@ -14,7 +14,7 @@ DIR="${EVID}/pruebas/e09_e10/lote_${STAMP}"
 CSV="${DIR}/matriz_e09_e10_lote.csv"
 MANIFEST="${DIR}/manifest.csv"
 mkdir -p "$DIR"
-printf 'scenario,repetition,recorder_ready,injection_rc,stimulus_rc,restore_rc,recorder_rc\n' > "$MANIFEST"
+printf 'scenario,repetition,recorder_ready,injection_rc,readiness_wait_rc,stimulus_rc,restore_rc,recorder_rc\n' > "$MANIFEST"
 
 if ! ros2 node list | grep -qx '/safety_supervisor_node'; then
     printf '%s\n' 'ERROR: falta /safety_supervisor_node; no se inició el lote.'
@@ -33,12 +33,25 @@ restore_proximity_publication() {
     ros2 param set /proximity_monitor status_publishing_enabled true \
         >/dev/null 2>&1
 }
+wait_for_readiness_waiting() {
+    local expected_fragment="$1"
+    local status
+    for _ in $(seq 1 20); do
+        status="$(timeout 2 ros2 topic echo --once \
+            /thesis/system_readiness 2>/dev/null || true)"
+        if printf '%s\n' "$status" | grep -Fq 'WAITING:' \
+                && printf '%s\n' "$status" | grep -Fq "$expected_fragment"; then
+            return 0
+        fi
+    done
+    return 1
+}
 
 run_one() {
     local scenario="$1" repetition="$2"
     local recorder_log="${DIR}/recorder_${scenario}_r${repetition}.log"
     local stimulus_log="${DIR}/stimulus_${scenario}_r${repetition}.log"
-    local ready=0 injection_rc=0 stimulus_rc=2 restore_rc=0 recorder_rc=0
+    local ready=0 injection_rc=0 readiness_wait_rc=2 stimulus_rc=2 restore_rc=0 recorder_rc=0
     printf '\n===== %s REPETICION %02d =====\n' "$scenario" "$repetition"
 
     ros2 run thesis_validation scenario_recorder "$scenario" "$repetition" \
@@ -47,6 +60,7 @@ run_one() {
     for _ in $(seq 1 48); do
         local count
         count="$(grep -c 'Suscripción activa:' "$recorder_log" 2>/dev/null || true)"
+        count="${count:-0}"
         if [ "$count" -ge 7 ]; then ready=1; break; fi
         sleep 0.25
     done
@@ -56,17 +70,30 @@ run_one() {
             --strict > "${DIR}/inject_${scenario}_r${repetition}.log" 2>&1
         injection_rc=$?
         sleep 1.2
+        if [ "$injection_rc" -eq 0 ] \
+                && wait_for_readiness_waiting 'estado articular'; then
+            readiness_wait_rc=0
+        else
+            readiness_wait_rc=1
+        fi
     elif [ "$ready" -eq 1 ]; then
         ros2 param set /proximity_monitor status_publishing_enabled false \
             > "${DIR}/inject_${scenario}_r${repetition}.log" 2>&1
         injection_rc=$?
         sleep 1.2
+        if [ "$injection_rc" -eq 0 ] \
+                && wait_for_readiness_waiting 'cálculo de proximidad'; then
+            readiness_wait_rc=0
+        else
+            readiness_wait_rc=1
+        fi
     else
         injection_rc=2
         printf '%s\n' 'ERROR: registrador no quedó listo.' > "${DIR}/inject_${scenario}_r${repetition}.log"
     fi
 
-    if [ "$ready" -eq 1 ] && [ "$injection_rc" -eq 0 ]; then
+    if [ "$ready" -eq 1 ] && [ "$injection_rc" -eq 0 ] \
+            && [ "$readiness_wait_rc" -eq 0 ]; then
         python3 tools/validation/candidate_safe_stimulus.py \
             --scenario "$scenario" --repetition "$repetition" \
             > "$stimulus_log" 2>&1
@@ -81,16 +108,19 @@ run_one() {
         restore_proximity_publication; restore_rc=$?
     fi
     wait "$recorder_pid"; recorder_rc=$?
-    printf '%s,%s,%s,%s,%s,%s,%s\n' \
-        "$scenario" "$repetition" "$ready" "$injection_rc" "$stimulus_rc" \
-        "$restore_rc" "$recorder_rc" >> "$MANIFEST"
+    printf '%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$scenario" "$repetition" "$ready" "$injection_rc" \
+        "$readiness_wait_rc" "$stimulus_rc" "$restore_rc" \
+        "$recorder_rc" >> "$MANIFEST"
     grep -E 'RESULTADO_ESCENARIO|REGISTRO=' "$recorder_log" | tail -n 2
     sleep 1
 }
 
 trap 'restore_state_broadcaster; restore_proximity_publication' EXIT INT TERM
 for scenario in ${SCENARIOS:-E09 E10}; do
-    for repetition in $(seq 1 5); do run_one "$scenario" "$repetition"; done
+    for repetition in $(seq 1 "${REPETITIONS:-5}"); do
+        run_one "$scenario" "$repetition"
+    done
 done
 trap - EXIT INT TERM
 

@@ -2,6 +2,7 @@ import math
 import time
 
 import rclpy
+from builtin_interfaces.msg import Duration as DurationMessage
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.time import Time
@@ -10,7 +11,9 @@ from geometry_msgs.msg import Point
 from tf2_ros import Buffer, TransformException, TransformListener
 from tf2_msgs.msg import TFMessage
 
+from thesis_interfaces.msg import Obstacle
 from thesis_interfaces.msg import ProximityStatus
+from visualization_msgs.msg import Marker, MarkerArray
 
 from thesis_core.clearance_geometry import (
     minimum_configuration_clearance,
@@ -41,6 +44,10 @@ class ProximityMonitorNode(Node):
             '/world/jaco_world/pose/info',
         )
         self.declare_parameter('obstacle_frame', 'safety_obstacle')
+        self.declare_parameter('obstacle_source_mode', 'gazebo')
+        self.declare_parameter(
+            'obstacle_input_topic', '/thesis/obstacle_in_model_frame'
+        )
         self.declare_parameter('obstacle_pose_timeout_sec', 0.5)
         self.declare_parameter('warning_distance', 0.30)
         self.declare_parameter('reduction_distance', 0.15)
@@ -70,11 +77,21 @@ class ProximityMonitorNode(Node):
             status_topic,
             10,
         )
+        self.obstacle_marker_publisher = self.create_publisher(
+            MarkerArray,
+            '/thesis/obstacle_visualization',
+            10,
+        )
         self.tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.obstacle_frame = str(
             self.get_parameter('obstacle_frame').value
         )
+        self.obstacle_source_mode = str(
+            self.get_parameter('obstacle_source_mode').value
+        ).lower()
+        if self.obstacle_source_mode not in ('gazebo', 'topic'):
+            raise ValueError('obstacle_source_mode must be gazebo or topic')
         self.obstacle_pose_timeout_sec = float(
             self.get_parameter('obstacle_pose_timeout_sec').value
         )
@@ -90,10 +107,18 @@ class ProximityMonitorNode(Node):
         self.previous_obstacle_center = None
         self.previous_obstacle_time = None
         self.last_obstacle_pose_time = None
+        self.topic_obstacle = None
+        self.last_topic_obstacle_time = None
         self.obstacle_pose_subscription = self.create_subscription(
             TFMessage,
             obstacle_pose_topic,
             self.obstacle_pose_callback,
+            10,
+        )
+        self.obstacle_input_subscription = self.create_subscription(
+            Obstacle,
+            str(self.get_parameter('obstacle_input_topic').value),
+            self.obstacle_input_callback,
             10,
         )
         self.missing_frames = set()
@@ -112,6 +137,29 @@ class ProximityMonitorNode(Node):
             f'Dynamic obstacle pose topic: {obstacle_pose_topic}; '
             f'frame={self.obstacle_frame}'
         )
+
+    def obstacle_input_callback(self, msg):
+        """Store a validated, already transformed obstacle estimate."""
+        if self.obstacle_source_mode != 'topic':
+            return
+        values = (
+            msg.center.x, msg.center.y, msg.center.z,
+            msg.velocity.x, msg.velocity.y, msg.velocity.z,
+            msg.radius, msg.uncertainty,
+        )
+        if (msg.header.frame_id != self.reference_frame or
+                not all(math.isfinite(value) for value in values) or
+                msg.radius <= 0.0 or msg.uncertainty < 0.0):
+            self.get_logger().warning(
+                'Ignoring invalid obstacle or unexpected reference frame'
+            )
+            return
+        self.topic_obstacle = (
+            Point(x=msg.center.x, y=msg.center.y, z=msg.center.z),
+            msg.radius + msg.uncertainty,
+            (msg.velocity.x, msg.velocity.y, msg.velocity.z),
+        )
+        self.last_topic_obstacle_time = time.monotonic()
 
     def obstacle_pose_callback(self, msg):
         """Track the obstacle pose bridged from Gazebo Pose_V."""
@@ -200,6 +248,14 @@ class ProximityMonitorNode(Node):
         )
 
     def _obstacle(self):
+        if self.obstacle_source_mode == 'topic':
+            if (self.topic_obstacle is None or
+                    self.last_topic_obstacle_time is None or
+                    time.monotonic() - self.last_topic_obstacle_time >
+                    self.obstacle_pose_timeout_sec):
+                return None
+            return self.topic_obstacle
+
         x_value = float(self.get_parameter('obstacle_x').value)
         y_value = float(self.get_parameter('obstacle_y').value)
         z_value = float(self.get_parameter('obstacle_z').value)
@@ -235,12 +291,41 @@ class ProximityMonitorNode(Node):
             return 'WARNING'
         return 'ALLOW'
 
+    def _publish_obstacle_marker(self, obstacle, radius):
+        """Show the current spherical estimate in RViz and let it expire."""
+        marker = Marker()
+        marker.header.frame_id = self.reference_frame
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'input_obstacle'
+        marker.id = 0
+        marker.type = Marker.SPHERE
+        marker.action = Marker.ADD
+        marker.pose.position = obstacle
+        marker.pose.orientation.w = 1.0
+        diameter = 2.0 * radius
+        marker.scale.x = diameter
+        marker.scale.y = diameter
+        marker.scale.z = diameter
+        marker.color.r = 0.72
+        marker.color.g = 0.12
+        marker.color.b = 0.92
+        marker.color.a = 0.78
+        marker.lifetime = DurationMessage(sec=0, nanosec=300000000)
+        array = MarkerArray()
+        array.markers.append(marker)
+        self.obstacle_marker_publisher.publish(array)
+
     def evaluate(self):
         # Test hook: retain all geometry and subscriptions while
         # intentionally withholding fresh status publications.
         if not bool(self.get_parameter('status_publishing_enabled').value):
             return
-        obstacle, obstacle_radius, obstacle_velocity = self._obstacle()
+        obstacle_data = self._obstacle()
+        if obstacle_data is None:
+            # Withhold proximity status until a fresh obstacle estimate arrives.
+            return
+        obstacle, obstacle_radius, obstacle_velocity = obstacle_data
+        self._publish_obstacle_marker(obstacle, obstacle_radius)
         unavailable = set()
         segments = []
 

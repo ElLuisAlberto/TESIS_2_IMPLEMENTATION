@@ -30,6 +30,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from thesis_interfaces.msg import (
     CommandDecision,
     ExecutionControl,
@@ -142,6 +143,19 @@ class JointGuiNode(Node):
             parameter_overrides=[
                 Parameter('use_sim_time', value=True),
             ],
+        )
+        self.declare_parameter('require_system_readiness', False)
+        self.require_system_readiness = bool(
+            self.get_parameter('require_system_readiness').value
+        )
+        self.system_readiness = 'WAITING: verificación de disponibilidad'
+        self.readiness_received_at = None
+        self.readiness_timeout_sec = 2.5
+        self.readiness_subscription = self.create_subscription(
+            String,
+            '/thesis/system_readiness',
+            self.readiness_callback,
+            10,
         )
 
         self.current_positions = {}
@@ -284,6 +298,28 @@ class JointGuiNode(Node):
             return False
 
         return time.monotonic() - self.last_state_time <= 1.0
+
+    def readiness_callback(self, msg):
+        """Store the system-wide readiness explanation for the GUI."""
+        self.system_readiness = str(msg.data)
+        self.readiness_received_at = time.monotonic()
+
+    def system_readiness_text(self):
+        """Return a waiting message if the readiness monitor goes silent."""
+        if not self.require_system_readiness:
+            return self.system_readiness
+        if (self.readiness_received_at is None or
+                time.monotonic() - self.readiness_received_at >
+                self.readiness_timeout_sec):
+            return 'WAITING: monitor de disponibilidad sin dato reciente'
+        return self.system_readiness
+
+    def system_is_ready(self):
+        """Check readiness when required by the integrated launch."""
+        return (
+            not self.require_system_readiness
+            or self.system_readiness_text() == 'READY'
+        )
 
     def update_end_effector_pose(self):
         try:
@@ -763,6 +799,13 @@ class JointControlWindow(QMainWindow):
         self.connection_label.setObjectName('connectionLabel')
         main_layout.addWidget(self.connection_label)
 
+        self.readiness_label = QLabel(
+            'Sistema: esperando verificación de disponibilidad.'
+        )
+        self.readiness_label.setObjectName('readinessLabel')
+        self.readiness_label.setWordWrap(True)
+        main_layout.addWidget(self.readiness_label)
+
         self.status_label = QLabel(
             'Sin comandos enviados desde la interfaz.'
         )
@@ -830,11 +873,29 @@ class JointControlWindow(QMainWindow):
             '}'
             '#sendButton:disabled { background-color: #94a3b8; }'
             '#connectionLabel { font-weight: bold; color: #92400e; }'
+            '#readinessLabel {'
+            '  border: 1px solid #cbd5e1; border-radius: 5px;'
+            '  padding: 8px; font-weight: bold;'
+            '}'
             '#statusLabel {'
             '  background-color: white; border: 1px solid #cbd5e1;'
             '  border-radius: 5px; padding: 8px;'
             '}'
         )
+
+    def system_is_ready(self):
+        """Check readiness when the ROS node exposes that feature."""
+        readiness_check = getattr(
+            self.ros_node, 'system_is_ready', None
+        )
+        return True if readiness_check is None else readiness_check()
+
+    def system_readiness_text(self):
+        """Return the readiness status, tolerating legacy test nodes."""
+        status_reader = getattr(
+            self.ros_node, 'system_readiness_text', None
+        )
+        return 'READY' if status_reader is None else status_reader()
 
     def spin_ros(self):
         if rclpy.ok():
@@ -843,6 +904,10 @@ class JointControlWindow(QMainWindow):
     def refresh_ui(self):
         state_ready = self.ros_node.state_is_ready()
         jog_active = self.jog_mode_button.isChecked()
+        system_ready = self.system_is_ready()
+        if jog_active and not system_ready:
+            self.jog_mode_button.setChecked(False)
+            jog_active = False
         busy = (
             self.pending_command_id is not None
             or self.ros_node.execution_is_active()
@@ -850,12 +915,30 @@ class JointControlWindow(QMainWindow):
         connected = self.ros_node.candidate_publisher.get_subscription_count() > 0
         self.send_button.setEnabled(
             state_ready and connected and not busy and not jog_active
+            and system_ready
         )
         self.send_button.setText(
             'ESPERANDO RESULTADO DEL COMANDO' if busy
             else 'ENVIAR COMANDO CANDIDATO'
         )
         self.copy_button.setEnabled(state_ready)
+
+        readiness_text = self.system_readiness_text()
+        self.readiness_label.setText(
+            'Sistema: ' + readiness_text
+        )
+        if readiness_text == 'READY':
+            self.readiness_label.setStyleSheet(
+                'background-color: #dcfce7; color: #166534;'
+            )
+        elif readiness_text.startswith('ERROR'):
+            self.readiness_label.setStyleSheet(
+                'background-color: #fee2e2; color: #991b1b;'
+            )
+        else:
+            self.readiness_label.setStyleSheet(
+                'background-color: #fef3c7; color: #92400e;'
+            )
 
         if state_ready:
             self.connection_label.setText(
@@ -1522,6 +1605,7 @@ class JointControlWindow(QMainWindow):
             intention.clear()
         if checked and (
             not self.ros_node.state_is_ready()
+            or not self.system_is_ready()
             or self.ros_node.execution_is_active()
             or self.pending_command_id is not None
             or self.ros_node.jog_intent_publisher.get_subscription_count() == 0
@@ -1532,8 +1616,9 @@ class JointControlWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 'Control manual no disponible',
-                'Se requiere /joint_states reciente y ninguna trayectoria '
-                'por objetivo en ejecución.',
+                'Se requiere que el sistema esté READY, exista '
+                '/joint_states reciente y no haya una trayectoria por '
+                'objetivo en ejecución.',
             )
             return
 
@@ -1652,6 +1737,13 @@ class JointControlWindow(QMainWindow):
                 self,
                 'Estado no disponible',
                 'No se enviará el comando sin /joint_states reciente.',
+            )
+            return
+        if not self.system_is_ready():
+            QMessageBox.warning(
+                self,
+                'Sistema todavía no disponible',
+                self.system_readiness_text(),
             )
             return
 

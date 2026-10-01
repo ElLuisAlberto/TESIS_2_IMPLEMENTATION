@@ -28,6 +28,10 @@ setup(
             'safety_supervisor = thesis_core.safety_supervisor_node:main',
             'proximity_monitor = '
             'thesis_core.proximity_monitor_node:main',
+            'obstacle_input_bridge = '
+            'thesis_core.obstacle_input_bridge:main',
+            'obstacle_demo_source = '
+            'thesis_core.obstacle_demo_source:main',
         ],
     },
 )

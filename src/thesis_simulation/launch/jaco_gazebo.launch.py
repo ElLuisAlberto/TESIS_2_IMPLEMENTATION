@@ -18,6 +18,7 @@ def generate_launch_description():
     obstacle_x = LaunchConfiguration('obstacle_x')
     obstacle_y = LaunchConfiguration('obstacle_y')
     obstacle_z = LaunchConfiguration('obstacle_z')
+    obstacle_source_mode = LaunchConfiguration('obstacle_source_mode')
 
     simulation_share = get_package_share_directory(
         'thesis_simulation'
@@ -280,6 +281,9 @@ def generate_launch_description():
             capsule_config,
             {
                 'use_sim_time': True,
+                'obstacle_source_mode': obstacle_source_mode,
+                'obstacle_input_topic':
+                    '/thesis/obstacle_in_model_frame',
                 'obstacle_x': ParameterValue(
                     obstacle_x,
                     value_type=float,
@@ -294,6 +298,20 @@ def generate_launch_description():
                 ),
             }
         ]
+    )
+
+    obstacle_input_bridge = Node(
+        package='thesis_core',
+        executable='obstacle_input_bridge',
+        name='obstacle_input_bridge',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'input_topic': '/thesis/obstacle_input',
+            'output_topic': '/thesis/obstacle_in_model_frame',
+            'target_frame': 'world',
+            'max_age_sec': 0.5,
+        }],
     )
 
     return LaunchDescription([
@@ -312,6 +330,13 @@ def generate_launch_description():
             'obstacle_z',
             default_value='0.65',
             description='Gazebo safety obstacle Z position in metres',
+        ),
+        DeclareLaunchArgument(
+            'obstacle_source_mode',
+            default_value='gazebo',
+            description=(
+                'Obstacle source: gazebo (default) or topic (validated input)'
+            ),
         ),
 
         robot_state_publisher,
@@ -353,5 +378,6 @@ def generate_launch_description():
 
         rviz,
         capsule_visualizer,
-        proximity_monitor
+        proximity_monitor,
+        obstacle_input_bridge
     ])

@@ -24,11 +24,13 @@
   <exec_depend>rviz2</exec_depend>
 
   <exec_depend>controller_manager</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>joint_trajectory_controller</exec_depend>
 
 
   <exec_depend>thesis_core</exec_depend>
+  <exec_depend>thesis_ui</exec_depend>
 
 
   <exec_depend>gz_ros2_control</exec_depend>
@@ -38,6 +40,8 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>control_msgs</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>

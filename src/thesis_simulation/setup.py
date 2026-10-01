@@ -56,6 +56,8 @@ setup(
             'thesis_simulation.simulation_command_adapter:main',
             'capsule_visualizer = '
             'thesis_simulation.capsule_visualizer:main',
+            'system_readiness = '
+            'thesis_simulation.system_readiness_node:main',
         ],
     },
 )

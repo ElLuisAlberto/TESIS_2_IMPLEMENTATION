@@ -6,7 +6,7 @@ Implementación experimental en ROS 2 de una capa desacoplada para la validació
 
 La arquitectura separa la lógica preventiva del modelo específico del robot, de la fuente de comandos, del entorno de ejecución y de la futura fuente de percepción. El Kinova JACO2 de seis grados de libertad constituye la instancia experimental utilizada para implementar y validar el Avance 2; no define el alcance conceptual de la propuesta.
 
-**Estado actual (26/09/2026): Avance 2 validado localmente en simulación con el JACO2 como caso de estudio.** La integración física y la percepción RGB-D permanecen como etapas posteriores.
+**Estado actual (30/09/2026):** el sistema integrado se ejecuta localmente en simulación con el JACO2 como caso de estudio. El resumen de pruebas disponible en el workspace registra 149 tests, 0 errores, 0 fallos y 3 omitidos. La matriz de evidencia disponible en `evidence/avance2/` corresponde a E01–E08. La integración física y la percepción RGB-D permanecen como etapas posteriores.
 
 ## Objetivo y alcance
 
@@ -131,6 +131,8 @@ El adaptador genera referencias de trayectoria de corta duración con un periodo
 | `/thesis/candidate_command` | Objetivo articular candidato |
 | `/thesis/supervised_command` | Objetivo autorizado por el supervisor |
 | `/thesis/proximity_status` | Separación geométrica actual y segmento crítico |
+| `/thesis/system_readiness` | Estado `READY` o explicación de dependencias pendientes |
+| `/thesis/system_ready` | Estado lógico de disponibilidad (`Bool`) |
 | `/thesis/trajectory_prediction` | Evaluación predictiva del candidato |
 | `/thesis/execution_control` | Decisión, escala y mínimo previsto durante la ejecución |
 | `/thesis/execution_trajectory` | Referencia y estado de ejecución |
@@ -141,19 +143,14 @@ Publicar directamente al controlador omite la capa preventiva y no constituye un
 
 ## Validación experimental en simulación
 
-El protocolo de validación del Avance 2 comprende los escenarios E01–E15. La matriz consolidada contiene **110 repeticiones aprobadas de 110 requeridas**, todas asociadas a criterios de aceptación explícitos y a identificadores de comando válidos.
+El protocolo de validación del Avance 2 considera escenarios E01–E15. La evidencia versionada disponible en `evidence/avance2/` contiene la matriz `scenario_matrix_e01_e08.csv`, correspondiente a E01–E08. No se afirma aquí una consolidación de resultados E09–E15, ya que sus lotes no están incluidos en esa carpeta.
 
 | Escenarios | Repeticiones `PASS` |
 | --- | ---: |
-| E01–E07 | 5 por escenario |
-| E08 | 10 |
-| E09–E10 | 5 por escenario |
-| E11 | 10 |
-| E12 | 30 |
-| E13–E15 | 5 por escenario |
-| **Total** | **110** |
+| E01–E08 | Revisar los resultados y el conteo registrados en `evidence/avance2/scenario_matrix_e01_e08.csv` |
+| E09–E15 | Escenarios considerados en el protocolo; resultados no consolidados en la evidencia versionada disponible |
 
-E12 incluye cinco repeticiones discriminantes para cada cápsula de la instancia JACO2. La consolidación final incorpora únicamente lotes íntegramente aprobados; los pilotos y fallos históricos permanecen separados de la evidencia seleccionada.
+Los conteos y estados de repetición deben interpretarse directamente desde la matriz disponible. Los resultados de otros escenarios requieren sus archivos de ejecución y criterios de aceptación asociados.
 
 Propiedades verificadas:
 
@@ -166,14 +163,15 @@ Propiedades verificadas:
 - restauración de controladores y fuentes después de las inyecciones de fallo;
 - coherencia entre la parametrización geométrica y la identidad de los segmentos evaluados.
 
-La última comprobación completa registró:
+El último resumen de pruebas registrado localmente, consultado el 30/09/2026, indica:
 
 ```text
-7 paquetes compilados
-156 tests, 0 errors, 0 failures, 3 skipped
+149 tests, 0 errors, 0 failures, 3 skipped
 ```
 
-Los ejecutores reproducibles incorporados son:
+Este resumen corresponde a los resultados disponibles en `build/` para `thesis_core`, `thesis_interfaces`, `thesis_simulation` y `thesis_ui`; debe actualizarse luego de una nueva ejecución de pruebas.
+
+El README previo enumeraba los siguientes ejecutores de escenarios. Su presencia y resultados deben verificarse en el workspace antes de usarlos:
 
 | Ejecutor | Cobertura |
 | --- | --- |
@@ -184,7 +182,7 @@ Los ejecutores reproducibles incorporados son:
 | `run_e14_rejection_batch.sh` | Rechazo de un objetivo inválido |
 | `run_e15_controller_failure_batch.sh` | `STOP` ante rechazo o fallo del controlador |
 
-Los ejecutores generan matrices CSV, manifiestos de integridad y registros de ejecución fuera del repositorio. Como referencia compacta y trazable, `evidence/avance2/` conserva la matriz base validada de E01–E08; los lotes completos, los ensayos preliminares y los archivos voluminosos se mantienen separados del código versionado.
+La matriz disponible `evidence/avance2/scenario_matrix_e01_e08.csv` constituye la evidencia versionada identificada para E01–E08. No se incluyen aquí conteos de lotes que no estén respaldados por archivos disponibles.
 
 ## Alcance de validez y limitaciones
 
@@ -231,55 +229,84 @@ colcon build --symlink-install --packages-select \
 
 Para recompilar, se recomienda utilizar una terminal nueva y evitar que el workspace se cargue como su propio *underlay*.
 
-### 2. Puesta en marcha de la simulación
+### 2. Arranque integrado de la simulación
 
-Terminal 1:
+El launch integrado inicia Gazebo, RViz2, los controladores, el puente de obstáculo, el obstáculo sintético de prueba, el monitor de proximidad, el supervisor, el adaptador de comandos, la predicción de horizonte y la interfaz gráfica. Así se evita abrir procesos manualmente y se previenen nodos duplicados.
 
-```bash
-cd ~/Escritorio/TESIS_2_IMPLEMENTATION
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 launch thesis_simulation jaco_gazebo.launch.py
-```
-
-Continuar únicamente después de que `arm_controller` alcance el estado activo.
-
-Terminal 2:
+En una terminal nueva, carga ROS 2 Humble y el workspace, y ejecuta el lanzamiento integrado:
 
 ```bash
 cd ~/Escritorio/TESIS_2_IMPLEMENTATION
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 launch thesis_simulation safety_pipeline.launch.py \
+ros2 launch thesis_simulation thesis_system.launch.py \
+  obstacle_source_mode:=topic \
   simulation_output_enabled:=true \
-  require_proximity_status:=true \
-  use_sim_time:=true
+  use_demo_obstacle:=true \
+  start_gui:=true
 ```
 
-Terminal 3:
+El comando inicia el sistema completo sin abrir manualmente cada nodo. Los argumentos después del nombre del launch permiten cambiar las entradas de la ejecución. Por ejemplo, para editar la posición y las dimensiones del obstáculo, así como el horizonte de predicción:
 
 ```bash
-cd ~/Escritorio/TESIS_2_IMPLEMENTATION
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run thesis_core horizon_preview --ros-args \
-  -p use_sim_time:=true \
-  -p source:=auto \
-  -p horizon_sec:=1.0 \
-  -p samples:=21 \
-  -p margin_m:=0.02 \
-  -p rate_hz:=10.0
+ros2 launch thesis_simulation thesis_system.launch.py \
+  obstacle_source_mode:=topic \
+  simulation_output_enabled:=true \
+  use_demo_obstacle:=true \
+  start_gui:=true \
+  obstacle_x:=0.60 \
+  obstacle_y:=0.0 \
+  obstacle_z:=0.65 \
+  obstacle_radius:=0.12 \
+  obstacle_uncertainty:=0.02 \
+  obstacle_rate_hz:=10.0 \
+  horizon_sec:=1.0 \
+  samples:=21 \
+  margin_m:=0.02 \
+  preview_rate_hz:=10.0 \
+  preview_source:=auto
 ```
 
-En RViz2 usar `Fixed Frame: world`. El volumen predictivo se publica en `/thesis/horizon_volume` y las cápsulas actuales en `/thesis/robot_capsules`.
+Los argumentos configurables del launch principal son:
 
-Terminal 4:
+| Argumento | Función |
+| --- | --- |
+| `obstacle_source_mode` | Fuente de obstáculos que consume el monitor de proximidad |
+| `use_demo_obstacle` | Activa o desactiva el obstáculo sintético |
+| `obstacle_x`, `obstacle_y`, `obstacle_z` | Coordenadas del obstáculo en el mundo, en metros |
+| `obstacle_radius` | Radio del obstáculo sintético, en metros |
+| `obstacle_uncertainty` | Incertidumbre del obstáculo, en metros |
+| `obstacle_rate_hz` | Frecuencia de publicación del obstáculo sintético |
+| `horizon_sec` | Duración del horizonte predictivo, en segundos |
+| `samples` | Cantidad de muestras discretas del horizonte |
+| `margin_m` | Margen espacial adicional, en metros |
+| `preview_rate_hz` | Frecuencia de actualización de la previsualización |
+| `preview_source` | Fuente de la previsualización: `auto`, `intent` o `execution` |
+| `simulation_output_enabled` | Habilita el envío al controlador de Gazebo de comandos aprobados por el supervisor |
+| `start_gui` | Inicia o desactiva la interfaz gráfica |
+| `readiness_timeout_sec` | Tiempo límite para recibir datos requeridos |
+| `readiness_rate_hz` | Frecuencia de comprobación de disponibilidad |
+
+Los umbrales y parámetros internos del supervisor y del adaptador que no figuran en esta lista mantienen los valores asignados en sus nodos o en `safety_pipeline.launch.py`; no se modifican con argumentos no declarados por el launch.
+
+Para conectar una fuente perceptual que publique `/thesis/obstacle_input`, desactiva el obstáculo sintético:
 
 ```bash
-cd ~/Escritorio/TESIS_2_IMPLEMENTATION
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run thesis_ui joint_gui
+ros2 launch thesis_simulation thesis_system.launch.py \
+  obstacle_source_mode:=topic \
+  use_demo_obstacle:=false \
+  simulation_output_enabled:=true \
+  start_gui:=true
+```
+
+`simulation_output_enabled` habilita únicamente el adaptador hacia Gazebo y no omite la autorización del supervisor.
+
+En RViz2 usar `Fixed Frame: world`. El volumen predictivo se publica en `/thesis/horizon_volume` y las cápsulas actuales en `/thesis/robot_capsules`. Esperar a que los controladores alcancen el estado activo y los indicadores de conexión de la GUI estén verdes antes de probar movimientos.
+
+El nodo `system_readiness` publica `READY` o una lista de dependencias pendientes en `/thesis/system_readiness`, y el estado lógico en `/thesis/system_ready`. La GUI integrada muestra este estado y mantiene deshabilitados los comandos mientras el sistema no esté `READY`. Para revisar el diagnóstico:
+
+```bash
+ros2 topic echo /thesis/system_readiness
 ```
 
 ### 3. Operación de la interfaz
@@ -337,4 +364,4 @@ El aporte central del trabajo es una arquitectura desacoplada y adaptable para e
 
 La implementación aporta, además, una separación explícita entre generación de comandos, decisión preventiva, descripción del robot, adaptación al backend y registro de evidencia. Los aspectos dependientes de la plataforma se concentran en el modelo cinemático y geométrico, sus restricciones, las transformaciones y el adaptador del controlador. En consecuencia, el principio de supervisión y la estructura de trazabilidad pueden conservarse ante cambios de manipulador, interfaz, simulador o fuente perceptual. La correlación por identificador de comando y la conservación de razones terminales proporcionan trazabilidad desde la intención inicial hasta el resultado de ejecución.
 
-Finalmente, la matriz E01–E15 establece un procedimiento reproducible para evaluar condiciones nominales, saturaciones, caducidad de datos, rechazo de objetivos y fallos del controlador. Los resultados obtenidos con el JACO2 como caso de estudio demuestran la consistencia funcional del núcleo preventivo en simulación y definen una base experimental para futuras transferencias a hardware y a otros manipuladores. La generalización arquitectónica está sustentada por la separación de responsabilidades, pero su portabilidad deberá confirmarse mediante nuevas integraciones. Los resultados actuales no constituyen una validación física completa ni una certificación de seguridad.
+Finalmente, el protocolo de escenarios E01–E15 define condiciones para evaluar operación nominal, saturaciones, caducidad de datos, rechazo de objetivos y fallos del controlador. La evidencia versionada identificada actualmente corresponde a E01–E08. Los resultados obtenidos en simulación con el JACO2 definen una base experimental para futuras transferencias a hardware y a otros manipuladores. La generalización arquitectónica está sustentada por la separación de responsabilidades, pero su portabilidad deberá confirmarse mediante nuevas integraciones. Los resultados actuales no constituyen una validación física completa ni una certificación de seguridad.

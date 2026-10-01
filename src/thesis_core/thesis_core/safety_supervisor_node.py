@@ -43,6 +43,7 @@ from thesis_core.safety_policy import (
     SafetyPolicyInput,
     decide_preventive_state,
     maximum_safe_scale,
+    withdrawal_path_is_non_approaching,
     withdrawal_path_is_safe,
 )
 
@@ -392,6 +393,14 @@ class SafetySupervisorNode(Node):
             if channel == 'jog'
             else self.runtime_stability
         )
+        if (
+            channel == 'jog'
+            and decision.reason_code == 'PROTECTIVE_WITHDRAWAL'
+        ):
+            # The geometric policy has verified the full-request withdrawal
+            # and the scaled path. Start that escape at its low safe scale;
+            # normal temporal recovery applies once outside the stop zone.
+            stability_filter.reset('VERIFIED_PROTECTIVE_WITHDRAWAL')
         result = stability_filter.update(
             command_id,
             decision.state,
@@ -705,8 +714,11 @@ class SafetySupervisorNode(Node):
         supervised_geometry = self.last_horizon_clearance
         if inside_stop_zone:
             withdrawal_safe = withdrawal_path_is_safe(
-                supervised_geometry.sample_clearances,
+                nominal_geometry.sample_clearances,
                 minimum_progress,
+                monotonic_tolerance,
+            ) and withdrawal_path_is_non_approaching(
+                supervised_geometry.sample_clearances,
                 monotonic_tolerance,
             )
             if not withdrawal_safe:

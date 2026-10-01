@@ -1,0 +1,58 @@
+VALIDACIÓN DE READINESS EN SIMULACIÓN (E09/E10)
+
+QUÉ COMPRUEBA
+- Que el stack integrado comienza en READY.
+- Cinco pérdidas de /joint_states: readiness debe cambiar a WAITING y volver a READY.
+- Cinco pérdidas de /thesis/proximity_status: readiness debe cambiar a WAITING y volver a READY.
+- Que el supervisor emite STOP ante cada fallo y que el lote deja evidencia CSV.
+- El registrador adicional guarda cada transición de /thesis/system_readiness.
+
+PREPARACIÓN
+1. Mantén todo en la rama main y guarda estos archivos bajo tools/validation/.
+2. Detén con Ctrl+C cualquier launch anterior y espera a que Gazebo cierre.
+3. No conectes el brazo físico. Esta prueba es únicamente para Gazebo.
+4. No debe haber una trayectoria o un JOG en curso antes de empezar.
+
+TERMINAL 1: STACK INTEGRADO
+Desde la raíz del workspace:
+
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch thesis_simulation thesis_system.launch.py \
+  obstacle_source_mode:=topic \
+  use_demo_obstacle:=true \
+  obstacle_x:=0.60 obstacle_y:=0.0 obstacle_z:=0.65 \
+  obstacle_radius:=0.12 obstacle_uncertainty:=0.02 \
+  readiness_timeout_sec:=0.75 readiness_rate_hz:=5.0 \
+  simulation_output_enabled:=true
+
+Espera a que la GUI muestre READY y que el robot esté quieto. La esfera de Gazebo tiene radio 0.12 m; el obstáculo sintético publica radio 0.12 m y 0.02 m de incertidumbre.
+
+TERMINAL 2: LOTE AUTOMÁTICO
+Desde otra terminal, en la raíz del workspace:
+
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+bash tools/validation/run_readiness_runtime_batch.sh
+
+El lote corre E09 y E10 cinco veces cada uno. Desactiva temporalmente el publicador de joint states o de proximidad, publica un comando candidato de prueba durante el fallo y restaura la fuente al terminar cada repetición.
+
+EVIDENCIA
+Se guarda bajo:
+~/Descargas/TESIS_AVANCE2_EVIDENCIAS/pruebas/readiness/lote_FECHA_HORA/
+
+Archivos principales:
+- readiness_transitions.csv
+- e09_e10_batch.log
+- matriz_e09_e10_lote.csv
+- manifest.csv
+- readiness_recorder.log
+
+Éxito esperado: RESULTADO_READINESS=PASS, 10/10 registros E09/E10 con STOP y PASS, al menos cinco transiciones WAITING para cada fuente y retorno a READY después de cada fallo. Si sale FAIL, no repitas el lote todavía: envía los CSV y logs para revisar la causa.
+
+REINTENTO FOCALIZADO DE E10
+Si se necesita repetir solo una ejecución de pérdida de proximidad:
+
+SCENARIOS=E10 REPETITIONS=1 bash tools/validation/run_readiness_runtime_batch.sh
+
+El lote espera a observar WAITING por proximidad antes de emitir el estímulo; luego restaura la publicación y comprueba el regreso a READY.
