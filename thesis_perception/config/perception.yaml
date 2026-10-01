@@ -1,0 +1,27 @@
+pointcloud_preprocessor:
+  ros__parameters:
+    input_topic: /camera/d435i/depth/color/points
+    output_topic: /thesis/perception/points_filtered
+    target_frame: base_link
+    use_latest_transform: true
+    restamp_output: false
+    enable_crop: true
+    enable_voxel: true
+    voxel_leaf_size: 0.02
+    min_x: -1.5
+    max_x: 1.5
+    min_y: -1.5
+    max_y: 1.5
+    min_z: -1.0
+    max_z: 2.5
+
+perception_health:
+  ros__parameters:
+    cloud_topic: /thesis/perception/points_filtered
+    imu_topic: /camera/d435i/imu
+    diagnostics_topic: /thesis/perception/diagnostics
+    imu_required: true
+    min_cloud_hz: 10.0
+    min_imu_hz: 50.0
+    cloud_timeout_s: 0.5
+    imu_timeout_s: 0.2

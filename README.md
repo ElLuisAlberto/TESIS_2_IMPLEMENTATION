@@ -6,7 +6,7 @@ Implementación experimental en ROS 2 de una capa desacoplada para la validació
 
 La arquitectura separa la lógica preventiva del modelo específico del robot, de la fuente de comandos, del entorno de ejecución y de la futura fuente de percepción. El Kinova JACO2 de seis grados de libertad constituye la instancia experimental utilizada para implementar y validar el Avance 2; no define el alcance conceptual de la propuesta.
 
-**Estado actual (30/09/2026):** el sistema integrado se ejecuta localmente en simulación con el JACO2 como caso de estudio. El resumen de pruebas disponible en el workspace registra 149 tests, 0 errores, 0 fallos y 3 omitidos. La matriz de evidencia disponible en `evidence/avance2/` corresponde a E01–E08. La integración física y la percepción RGB-D permanecen como etapas posteriores.
+**Estado actual (01/10/2026):** el sistema integrado se ejecuta localmente en simulación con el JACO2 como caso de estudio. El resumen de pruebas disponible en el workspace registra 149 tests, 0 errores, 0 fallos y 3 omitidos. La matriz de evidencia disponible en `evidence/avance2/` corresponde a E01–E08. Como etapa previa a la integración perceptual, se validó de forma independiente una cámara Intel RealSense D435i con imagen RGB, profundidad, nube de puntos coloreada, acelerómetro, giroscopio, fusión de orientación mediante Madgwick y visualización en RViz2. Esta adquisición todavía no alimenta las decisiones del supervisor preventivo.
 
 ## Objetivo y alcance
 
@@ -69,6 +69,8 @@ Una nueva integración debe proporcionar el estado articular, el modelo cinemát
 | `thesis_telemetry` | Métricas y trazabilidad temporal |
 | `thesis_validation` | Registro y evaluación reproducible de escenarios |
 | `thesis_hardware` / `thesis_hardware_bridge` | Adaptación al hardware de la plataforma experimental, fuera de la validación actual |
+| `thesis_perception` | Base de desarrollo para el futuro adaptador entre la percepción RGB-D y las interfaces desacopladas de obstáculos |
+| `tools/realsense_d435i_test` | Ejecutor reproducible, referencia funcional y reportes locales de la D435i |
 | `tools/validation` | Estímulos, verificadores y ejecutores por lotes |
 | `evidence/avance2` | Matriz base seleccionada para la validación E01–E08 |
 
@@ -189,7 +191,7 @@ La matriz disponible `evidence/avance2/scenario_matrix_e01_e08.csv` constituye l
 - Los resultados corresponden exclusivamente a un entorno controlado de simulación.
 - La adaptabilidad arquitectónica se ha definido, pero todavía no se ha validado experimentalmente con un segundo modelo de manipulador.
 - No se ha demostrado todavía el comportamiento completo sobre la plataforma física utilizada como caso de estudio.
-- La percepción RGB-D y su incertidumbre aún no están integradas.
+- La adquisición RGB-D e inercial de la D435i fue validada de forma independiente, pero todavía no está conectada a `/thesis/obstacle_input` ni participa en las decisiones preventivas.
 - El muestreo discreto no demuestra ausencia de colisión entre muestras.
 - Los límites de intención no equivalen a una caracterización experimental de velocidad, latencia o frenado.
 - La implementación constituye un prototipo de investigación y no reemplaza funciones de seguridad certificadas.
@@ -201,6 +203,8 @@ La matriz disponible `evidence/avance2/scenario_matrix_e01_e08.csv` constituye l
 - Gazebo Fortress
 - `ros_gz` y `gz_ros2_control`
 - RViz2
+- Intel RealSense D435i, `realsense2_camera` y Librealsense 2.58.4 para la preintegración perceptual
+- `imu_filter_madgwick` para la estimación de orientación sin magnetómetro
 - PyQt5
 - `ros2_control` y `joint_trajectory_controller`
 
@@ -224,7 +228,8 @@ colcon build --symlink-install --packages-select \
   thesis_simulation \
   thesis_ui \
   thesis_telemetry \
-  thesis_validation
+  thesis_validation \
+  thesis_perception
 ```
 
 Para recompilar, se recomienda utilizar una terminal nueva y evitar que el workspace se cargue como su propio *underlay*.
@@ -309,7 +314,57 @@ El nodo `system_readiness` publica `READY` o una lista de dependencias pendiente
 ros2 topic echo /thesis/system_readiness
 ```
 
-### 3. Operación de la interfaz
+### 3. Preintegración de la Intel RealSense D435i
+
+La adquisición de la D435i se mantiene separada del lanzamiento de simulación para conservar el desacoplamiento y evitar que una dependencia del sensor afecte al núcleo preventivo. La referencia funcional se encuentra en:
+
+```text
+tools/realsense_d435i_test/baseline/run_pointcloud_imu_rviz_WORKING.sh
+```
+
+La copia de referencia queda identificada mediante `tools/realsense_d435i_test/baseline/SHA256SUMS`. Los registros generados durante la ejecución permanecen en `tools/realsense_d435i_test/reports/` y no forman parte del código versionado.
+
+La configuración comprobada utiliza:
+
+| Flujo | Configuración validada |
+| --- | --- |
+| Profundidad | 640 × 480 a 15 FPS |
+| Color | 640 × 480 a 15 FPS |
+| Nube de puntos | RGB-D sobre `/camera/d435i/depth/color/points` |
+| Acelerómetro | 100 Hz |
+| Giroscopio | 200 Hz |
+| IMU unificada | `/camera/d435i/imu` |
+| Orientación filtrada | `/camera/d435i/imu_filtered` mediante Madgwick |
+| Interfaz USB comprobada | USB 3.2 |
+
+Antes de ejecutar, deben cerrarse otras instancias de `realsense2_camera_node`, `imu_filter_madgwick_node` y RViz2. El sistema funcional completo se abre con:
+
+```bash
+cd ~/Escritorio/TESIS_2_IMPLEMENTATION
+xhost +SI:localuser:root
+sudo -E ./tools/realsense_d435i_test/scripts/run_pointcloud_imu_rviz.sh
+```
+
+El ejecutor inicia la cámara, espera los tópicos de nube e IMU, inicia Madgwick y abre RViz2. Al cerrar RViz2 también finaliza los procesos iniciados. La ejecución actual utiliza privilegios elevados debido al acceso del backend HID/IIO de la IMU; este requisito debe revisarse antes del despliegue físico definitivo.
+
+Para observar la nube compensada por orientación en RViz2:
+
+| Propiedad | Valor |
+| --- | --- |
+| `Fixed Frame` | `world` |
+| Tópico `PointCloud2` | `/camera/d435i/depth/color/points` |
+| `Style` | `Points` |
+| `Size (Pixels)` | `2` |
+| `Position Transformer` | `XYZ` |
+| `Color Transformer` | `RGB8` |
+| `Reliability Policy` | `Best Effort` |
+| `Decay Time` | `0` |
+
+La D435i no incorpora magnetómetro. Por ello, la orientación de Madgwick puede presentar deriva de yaw y no debe utilizarse como referencia absoluta del robot. En la integración física, la nube deberá transformarse a `base_link` mediante una extrínseca calibrada o mediante la cadena cinemática correspondiente al montaje. La IMU permanece disponible para observación, diagnóstico y caracterización dinámica.
+
+La preintegración se considera una validación de adquisición. Aún faltan el recorte de la región de trabajo, la exclusión geométrica del propio manipulador, la representación genérica de obstáculos, el watchdog perceptual y la conexión controlada con `/thesis/obstacle_input`.
+
+### 4. Operación de la interfaz
 
 En control manual:
 
@@ -321,7 +376,7 @@ En control manual:
 
 En control por objetivo, mantener desactivado el modo manual, definir los ángulos y la duración, y enviar el candidato. La previsualización nominal permite inspeccionar la intención, pero no sustituye la autorización preventiva.
 
-### 4. Ejecución de pruebas automatizadas
+### 5. Ejecución de pruebas automatizadas
 
 ```bash
 cd ~/Escritorio/TESIS_2_IMPLEMENTATION
@@ -340,14 +395,14 @@ colcon test-result --verbose
 
 Los ejecutores de `tools/validation/` realizan inyecciones controladas y deben utilizarse conforme a sus precondiciones, con la simulación y los nodos requeridos en ejecución. La publicación directa al controlador invalida la cadena preventiva evaluada.
 
-### 5. Finalización y reinicio
+### 6. Finalización y reinicio
 
 Desactivar el control manual y cerrar con `Ctrl+C` en este orden: GUI, horizonte, pipeline y Gazebo/RViz2. Cuando cambien el supervisor o el adaptador, reiniciar todos los nodos afectados para evitar procesos con versiones anteriores.
 
 ## Trabajo futuro
 
 - Caracterizar latencia, seguimiento y frenado sobre el manipulador físico.
-- Incorporar percepción RGB-D y tratamiento explícito de incertidumbre.
+- Integrar la adquisición RGB-D validada con una representación desacoplada de obstáculos y un tratamiento explícito de incertidumbre.
 - Validar la transformación de obstáculos al marco del robot.
 - Definir zonas de exclusión, condiciones de ensayo y parada externa.
 - Repetir progresivamente la matriz con la plataforma física del caso de estudio.

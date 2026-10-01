@@ -43,3 +43,8 @@ __pycache__/
 /PAQUETE*.txt
 /VALIDAR_*.py.antes_*
 .pytest_cache/
+
+# Archivos locales de compilación y pruebas RealSense
+tools/realsense_d435i_test/reports/*
+!tools/realsense_d435i_test/reports/.gitkeep
+README.md.backup_local
