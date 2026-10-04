@@ -11,6 +11,7 @@ from thesis_core.obstacle_contract import (
     transform_obstacle,
     validate_obstacle,
 )
+from thesis_core.ros_runtime import spin_node
 
 
 def time_seconds(stamp):
@@ -113,15 +114,7 @@ class ObstacleInputBridge(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ObstacleInputBridge()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(ObstacleInputBridge())
 
 
 if __name__ == '__main__':

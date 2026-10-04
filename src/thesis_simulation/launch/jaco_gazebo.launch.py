@@ -23,6 +23,7 @@ def generate_launch_description():
     simulation_share = get_package_share_directory(
         'thesis_simulation'
     )
+    core_share = get_package_share_directory('thesis_core')
 
     description_share = get_package_share_directory(
         'thesis_description'
@@ -102,7 +103,7 @@ def generate_launch_description():
     )
 
     capsule_config = os.path.join(
-        simulation_share,
+        core_share,
         'config',
         'jaco_capsules.yaml'
     )
@@ -262,7 +263,7 @@ def generate_launch_description():
     )
 
     capsule_visualizer = Node(
-        package='thesis_simulation',
+        package='thesis_core',
         executable='capsule_visualizer',
         name='capsule_visualizer',
         output='screen',

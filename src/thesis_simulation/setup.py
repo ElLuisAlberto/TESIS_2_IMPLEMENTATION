@@ -54,8 +54,6 @@ setup(
             'dry_run_adapter = thesis_simulation.dry_run_adapter:main',
             'simulation_command_adapter = '
             'thesis_simulation.simulation_command_adapter:main',
-            'capsule_visualizer = '
-            'thesis_simulation.capsule_visualizer:main',
             'system_readiness = '
             'thesis_simulation.system_readiness_node:main',
         ],

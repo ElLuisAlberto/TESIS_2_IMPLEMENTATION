@@ -6,7 +6,14 @@ Implementación experimental en ROS 2 de una capa desacoplada para la validació
 
 La arquitectura separa la lógica preventiva del modelo específico del robot, de la fuente de comandos, del entorno de ejecución y de la futura fuente de percepción. El Kinova JACO2 de seis grados de libertad constituye la instancia experimental utilizada para implementar y validar el Avance 2; no define el alcance conceptual de la propuesta.
 
-**Estado actual (01/10/2026):** el sistema integrado se ejecuta localmente en simulación con el JACO2 como caso de estudio. El resumen de pruebas disponible en el workspace registra 149 tests, 0 errores, 0 fallos y 3 omitidos. La matriz de evidencia disponible en `evidence/avance2/` corresponde a E01–E08. Como etapa previa a la integración perceptual, se validó de forma independiente una cámara Intel RealSense D435i con imagen RGB, profundidad, nube de puntos coloreada, acelerómetro, giroscopio, fusión de orientación mediante Madgwick y visualización en RViz2. Esta adquisición todavía no alimenta las decisiones del supervisor preventivo.
+**Estado actual (03/10/2026):** la simulación y el sistema físico están
+separados. El adaptador ROS 2 nativo del JACO2 ya validó enumeración USB,
+feedback articular, TF, doble habilitación, armado y HOLD físico a 100 Hz sin
+deriva observable. La última base comprobada registra 167 tests, 0 errores,
+0 fallos y 4 omitidos. El micromovimiento supervisado, el STOP durante
+movimiento y la interfaz física completa permanecen como compuertas antes de
+declarar terminada la integración. La D435i fue validada de forma independiente;
+su adquisición todavía no alimenta las decisiones del supervisor preventivo.
 
 ## Objetivo y alcance
 
@@ -25,7 +32,9 @@ Esta versión comprende:
 - trazabilidad de comandos, decisiones, razones, segmentos y latencias;
 - adaptadores para simulación, visualización y operación interactiva.
 
-El control del gripper, los sensores FSR y la integración física se mantienen como líneas de trabajo separadas.
+El puente físico de esta etapa cubre los seis ejes del brazo. El control del
+gripper y los sensores FSR se mantienen como extensiones separadas y no deben
+confundirse con el contrato de movimiento articular supervisado.
 
 ## Arquitectura del sistema
 
@@ -63,12 +72,12 @@ Una nueva integración debe proporcionar el estado articular, el modelo cinemát
 | --- | --- |
 | `thesis_interfaces` | Mensajes e interfaces compartidas |
 | `thesis_description` | Modelo de la instancia experimental, mallas y configuración de visualización |
-| `thesis_core` | Proximidad, cinemática, predicción y supervisión preventiva |
-| `thesis_simulation` | Gazebo, cápsulas, controladores y adaptadores de simulación |
+| `thesis_core` | Proximidad, cinemática, predicción, cápsulas compartidas y supervisión preventiva |
+| `thesis_simulation` | Gazebo, controladores y adaptadores exclusivos de simulación |
 | `thesis_ui` | Entrada manual, objetivos articulares y presentación de estado |
 | `thesis_telemetry` | Métricas y trazabilidad temporal |
 | `thesis_validation` | Registro y evaluación reproducible de escenarios |
-| `thesis_hardware` / `thesis_hardware_bridge` | Adaptación al hardware de la plataforma experimental, fuera de la validación actual |
+| `thesis_hardware` / `thesis_hardware_bridge` | Adaptador ROS 2 nativo para estado, movimiento supervisado, watchdog y parada del JACO2 |
 | `thesis_perception` | Base de desarrollo para el futuro adaptador entre la percepción RGB-D y las interfaces desacopladas de obstáculos |
 | `tools/realsense_d435i_test` | Ejecutor reproducible, referencia funcional y reportes locales de la D435i |
 | `tools/validation` | Estímulos, verificadores y ejecutores por lotes |
@@ -140,6 +149,9 @@ El adaptador genera referencias de trayectoria de corta duración con un periodo
 | `/thesis/execution_trajectory` | Referencia y estado de ejecución |
 | `/thesis/horizon_volume` | Volumen previsto mostrado en RViz2 |
 | `/arm_controller/follow_joint_trajectory` | Acción del controlador articular |
+| `/thesis/hardware/diagnostics` | Estado del adaptador USB, fallos y modo de ejecución |
+| `/thesis/hardware/armed` | Habilitación efectiva de la salida física |
+| `/thesis/hardware/set_armed` | Servicio explícito para armar o desarmar la salida |
 
 Publicar directamente al controlador omite la capa preventiva y no constituye una prueba válida del sistema.
 
@@ -168,7 +180,7 @@ Propiedades verificadas:
 El último resumen de pruebas registrado localmente, consultado el 30/09/2026, indica:
 
 ```text
-149 tests, 0 errors, 0 failures, 3 skipped
+167 tests, 0 errors, 0 failures, 4 skipped
 ```
 
 Este resumen corresponde a los resultados disponibles en `build/` para `thesis_core`, `thesis_interfaces`, `thesis_simulation` y `thesis_ui`; debe actualizarse luego de una nueva ejecución de pruebas.
@@ -229,7 +241,11 @@ colcon build --symlink-install --packages-select \
   thesis_ui \
   thesis_telemetry \
   thesis_validation \
-  thesis_perception
+  thesis_perception \
+  thesis_hardware_bridge \
+  thesis_hardware \
+  --cmake-args \
+    -DKINOVA_ROOT="$HOME/Escritorio/TESIS_2_DEPENDENCIES/kinova-ros/kinova_driver"
 ```
 
 Para recompilar, se recomienda utilizar una terminal nueva y evitar que el workspace se cargue como su propio *underlay*.
@@ -314,7 +330,50 @@ El nodo `system_readiness` publica `READY` o una lista de dependencias pendiente
 ros2 topic echo /thesis/system_readiness
 ```
 
-### 3. Preintegración de la Intel RealSense D435i
+### 3. Sistema independiente del JACO2 físico
+
+La integración física no ejecuta ROS 1 ni Gazebo. El adaptador ROS 2 usa
+directamente la API USB de Kinova y el launch físico tiene su propia GUI,
+reloj real, disponibilidad y doble habilitación. La configuración predeterminada
+es de solo lectura:
+
+```bash
+ros2 launch thesis_hardware jaco_physical_system.launch.py \
+  mock_hardware:=false \
+  hardware_output_enabled:=false \
+  use_demo_obstacle:=false \
+  start_gui:=true \
+  start_rviz:=true
+```
+
+Para validar sin mover el brazo real, se utiliza el backend simulado del
+adaptador físico y un obstáculo sintético lejano:
+
+```bash
+bash tools/validation/run_hardware_bridge_mock.sh
+```
+
+Después de que la compilación y el mock terminen sin fallos, el primer
+movimiento real reproducible es una ida de 2° de J6 y el retorno a la postura
+inicial. El ejecutor exige confirmación por teclado, recorre siempre el
+supervisor preventivo y desarma tanto al terminar como ante error:
+
+```bash
+bash tools/validation/run_kinova_physical_micro_motion.sh
+```
+
+No deben ejecutarse simultáneamente ROS 1, otro adaptador JACO ni herramientas
+que abran directamente la API USB Kinova. El único proceso autorizado para
+poseer el dispositivo durante la operación normal es `jaco_hardware_node`.
+
+La salida real requiere simultáneamente
+`hardware_output_enabled:=true` y un armado en tiempo de ejecución. La GUI
+física identifica claramente ambos estados, solicita confirmación antes de
+armar y ordena el desarmado al cerrarse. La primera trayectoria real solo debe
+ejecutarse después de completar la validación mock, la lectura física y la
+revisión del espacio de trabajo.
+
+### 4. Preintegración de la Intel RealSense D435i
 
 La adquisición de la D435i se mantiene separada del lanzamiento de simulación para conservar el desacoplamiento y evitar que una dependencia del sensor afecte al núcleo preventivo. La referencia funcional se encuentra en:
 

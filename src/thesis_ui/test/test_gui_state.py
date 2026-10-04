@@ -107,6 +107,22 @@ class GuiStateTests(unittest.TestCase):
         self.assertEqual(self.window.metric_labels['Mínimo proyectado'].text(),
                          'Sin evaluación activa')
 
+    def test_physical_mode_has_explicit_hardware_controls(self):
+        self.window.deleteLater()
+        self.node.operation_mode = 'hardware'
+        self.window = JointControlWindow(self.node)
+        for timer in (
+            self.window.ros_timer,
+            self.window.ui_timer,
+            self.window.preview_timer,
+            self.window.jog_timer,
+        ):
+            timer.stop()
+        self.assertIn('BRAZO FÍSICO', self.window.windowTitle())
+        self.assertIsNotNone(self.window.arm_hardware_button)
+        self.assertIsNotNone(self.window.disarm_hardware_button)
+        self.assertIn('JACO2 USB conectado', self.window.connection_indicators)
+
 
 if __name__ == '__main__':
     unittest.main()

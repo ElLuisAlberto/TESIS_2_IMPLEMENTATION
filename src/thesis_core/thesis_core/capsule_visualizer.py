@@ -11,6 +11,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
 from thesis_core.jaco_kinematics import CAPSULE_RADII
+from thesis_core.ros_runtime import spin_node
 from thesis_interfaces.msg import ProximityStatus, TrajectoryPrediction
 
 
@@ -37,7 +38,7 @@ def quaternion_from_z_axis(dx, dy, dz):
 
 
 class CapsuleVisualizer(Node):
-    """Publish configurable JACO2 link capsules as RViz markers."""
+    """Publish shared JACO2 link capsules as RViz markers."""
 
     def __init__(self):
         super().__init__('capsule_visualizer')
@@ -507,16 +508,7 @@ class CapsuleVisualizer(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CapsuleVisualizer()
-
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(CapsuleVisualizer())
 
 
 if __name__ == '__main__':

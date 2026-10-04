@@ -19,6 +19,7 @@ from thesis_core.clearance_geometry import (
     minimum_configuration_clearance,
 )
 from thesis_core.jaco_kinematics import CAPSULE_RADII, SEGMENT_NAMES
+from thesis_core.ros_runtime import spin_node
 
 
 class ProximityMonitorNode(Node):
@@ -400,16 +401,7 @@ class ProximityMonitorNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ProximityMonitorNode()
-
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(ProximityMonitorNode())
 
 
 if __name__ == '__main__':

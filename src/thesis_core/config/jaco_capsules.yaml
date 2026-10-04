@@ -70,7 +70,7 @@ proximity_monitor:
     # Same conservative calibration used by the predictive geometry.
     segment_radii: [0.105, 0.105, 0.085, 0.075, 0.085, 0.090]
 
-    # The launch file uses the same pose to spawn the physical Gazebo model.
+    # Simulation launch files use the same pose for the Gazebo obstacle.
     obstacle_x: 0.60
     obstacle_y: 0.0
     obstacle_z: 0.65

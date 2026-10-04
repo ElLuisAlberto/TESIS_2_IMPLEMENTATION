@@ -4,6 +4,8 @@ import rclpy
 from rclpy.node import Node
 from thesis_interfaces.msg import Obstacle
 
+from thesis_core.ros_runtime import spin_node
+
 
 class ObstacleDemoSource(Node):
     """Repeat a fixed world-frame sphere estimate for end-to-end testing."""
@@ -52,15 +54,7 @@ class ObstacleDemoSource(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ObstacleDemoSource()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(ObstacleDemoSource())
 
 
 if __name__ == '__main__':

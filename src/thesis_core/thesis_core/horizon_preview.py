@@ -21,6 +21,7 @@ from thesis_core.joint_prediction import (
     is_state_fresh,
     predict_joint_samples,
 )
+from thesis_core.ros_runtime import spin_node
 from thesis_interfaces.msg import (
     ExecutionControl,
     ExecutionTrajectory,
@@ -722,15 +723,7 @@ class HorizonPreview(Node):
 def main(args=None):
     """Run the short-horizon occupancy visualizer."""
     rclpy.init(args=args)
-    node = HorizonPreview()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(HorizonPreview())
 
 
 if __name__ == '__main__':

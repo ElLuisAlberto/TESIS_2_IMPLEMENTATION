@@ -114,6 +114,8 @@ def generate_launch_description():
                 use_sim_time, value_type=bool
             ),
             'require_system_readiness': True,
+            'operation_mode': 'simulation',
+            'allow_hardware_arm_control': False,
         }],
     )
 

@@ -27,10 +27,10 @@ from PyQt5.QtWidgets import QWidget
 
 import rclpy
 from rclpy.node import Node
-from rclpy.parameter import Parameter
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
+from std_srvs.srv import SetBool
 from thesis_interfaces.msg import (
     CommandDecision,
     ExecutionControl,
@@ -138,16 +138,30 @@ def quaternion_to_rpy(x, y, z, w):
 class JointGuiNode(Node):
 
     def __init__(self):
-        super().__init__(
-            'joint_control_gui_node',
-            parameter_overrides=[
-                Parameter('use_sim_time', value=True),
-            ],
-        )
+        super().__init__('joint_control_gui_node')
         self.declare_parameter('require_system_readiness', False)
+        self.declare_parameter('operation_mode', 'simulation')
+        self.declare_parameter('allow_hardware_arm_control', False)
         self.require_system_readiness = bool(
             self.get_parameter('require_system_readiness').value
         )
+        self.operation_mode = str(
+            self.get_parameter('operation_mode').value
+        ).strip().lower()
+        if self.operation_mode not in ('simulation', 'hardware'):
+            raise ValueError(
+                'operation_mode must be simulation or hardware'
+            )
+        self.allow_hardware_arm_control = bool(
+            self.get_parameter('allow_hardware_arm_control').value
+        )
+        if (
+            self.allow_hardware_arm_control
+            and self.operation_mode != 'hardware'
+        ):
+            raise ValueError(
+                'hardware arm control is valid only in hardware mode'
+            )
         self.system_readiness = 'WAITING: verificación de disponibilidad'
         self.readiness_received_at = None
         self.readiness_timeout_sec = 2.5
@@ -172,6 +186,29 @@ class JointGuiNode(Node):
         self.proximity_received_at = None
         self.control_received_at = None
         self.end_effector_pose = None
+        self.hardware_connected = False
+        self.hardware_armed = False
+        self.hardware_connected_received_at = None
+        self.hardware_armed_received_at = None
+        self.arm_request_future = None
+        self.arm_request_value = None
+        self.arm_request_result = None
+        self.hardware_connected_subscription = self.create_subscription(
+            Bool,
+            '/thesis/hardware/connected',
+            self.hardware_connected_callback,
+            10,
+        )
+        self.hardware_armed_subscription = self.create_subscription(
+            Bool,
+            '/thesis/hardware/armed',
+            self.hardware_armed_callback,
+            10,
+        )
+        self.hardware_arm_client = self.create_client(
+            SetBool,
+            '/thesis/hardware/set_armed',
+        )
         self.intent_publisher = self.create_publisher(
             JointCommand, '/thesis/preview_intent', 10,
         )
@@ -240,6 +277,80 @@ class JointGuiNode(Node):
     def proximity_callback(self, msg):
         self.last_proximity = msg
         self.proximity_received_at = time.monotonic()
+
+    def hardware_connected_callback(self, msg):
+        """Store the physical adapter connection latch."""
+        self.hardware_connected = bool(msg.data)
+        self.hardware_connected_received_at = time.monotonic()
+
+    def hardware_armed_callback(self, msg):
+        """Store the physical output latch."""
+        self.hardware_armed = bool(msg.data)
+        self.hardware_armed_received_at = time.monotonic()
+
+    def request_hardware_arm(self, value):
+        """Start one non-blocking physical arm or disarm request."""
+        if self.operation_mode != 'hardware':
+            return False, 'La interfaz no está en modo físico.'
+        if not self.allow_hardware_arm_control:
+            return False, 'El control de armado desde la GUI está deshabilitado.'
+        if self.arm_request_future is not None:
+            return False, 'Ya existe una solicitud de armado pendiente.'
+        if not self.hardware_arm_client.service_is_ready():
+            return False, 'El servicio de armado físico no está disponible.'
+        request = SetBool.Request()
+        request.data = bool(value)
+        self.arm_request_future = self.hardware_arm_client.call_async(request)
+        self.arm_request_value = bool(value)
+        self.arm_request_result = None
+        return True, 'Solicitud enviada al adaptador JACO2.'
+
+    def poll_hardware_arm_request(self):
+        """Return and clear a completed physical arm request."""
+        future = self.arm_request_future
+        if future is None or not future.done():
+            return None
+        requested_value = self.arm_request_value
+        try:
+            response = future.result()
+            success = response is not None and bool(response.success)
+            detail = (
+                'Sin respuesta del adaptador.'
+                if response is None else str(response.message)
+            )
+        except Exception as exception:  # pragma: no cover - ROS transport
+            success = False
+            detail = str(exception)
+        self.arm_request_future = None
+        self.arm_request_value = None
+        self.arm_request_result = (success, requested_value, detail)
+        return self.arm_request_result
+
+    def disarm_before_shutdown(self, timeout_sec=1.5):
+        """Best-effort disarm before the physical interface is destroyed."""
+        if self.operation_mode != 'hardware':
+            return
+        deadline = time.monotonic() + max(0.1, float(timeout_sec))
+        while (
+            self.arm_request_future is not None
+            and not self.arm_request_future.done()
+            and time.monotonic() < deadline
+            and rclpy.ok()
+        ):
+            rclpy.spin_once(self, timeout_sec=0.05)
+        self.poll_hardware_arm_request()
+        if not self.hardware_arm_client.service_is_ready():
+            return
+        deadline = time.monotonic() + max(0.1, float(timeout_sec))
+        request = SetBool.Request()
+        request.data = False
+        future = self.hardware_arm_client.call_async(request)
+        while (
+            not future.done()
+            and time.monotonic() < deadline
+            and rclpy.ok()
+        ):
+            rclpy.spin_once(self, timeout_sec=0.05)
 
     def execution_is_active(self):
         return any(
@@ -351,8 +462,7 @@ class JointGuiNode(Node):
         )
 
     def connection_status(self):
-        return {
-            'Gazebo /clock': self.count_publishers('/clock') > 0,
+        status = {
             '/joint_states': self.count_publishers('/joint_states') > 0,
             'Supervisor': (
                 self.candidate_publisher.get_subscription_count() > 0
@@ -378,6 +488,17 @@ class JointGuiNode(Node):
                     '/thesis/execution_control'
                 ) > 0
             ),
+        }
+        if self.operation_mode == 'hardware':
+            return {
+                'JACO2 USB conectado': self.hardware_connected,
+                'Salida física armada': self.hardware_armed,
+                'Servicio de armado': self.hardware_arm_client.service_is_ready(),
+                **status,
+            }
+        return {
+            'Gazebo /clock': self.count_publishers('/clock') > 0,
+            **status,
         }
 
     def publish_candidate(self, positions, duration_sec):
@@ -423,6 +544,10 @@ class JointControlWindow(QMainWindow):
         super().__init__()
 
         self.ros_node = ros_node
+        self.operation_mode = getattr(
+            ros_node, 'operation_mode', 'simulation'
+        )
+        self.is_hardware_mode = self.operation_mode == 'hardware'
         self.target_inputs = []
         self.target_sliders = []
         self.current_degree_labels = []
@@ -444,7 +569,10 @@ class JointControlWindow(QMainWindow):
         self.minimum_safe_duration = None
         self.prediction_is_stale = False
 
-        self.setWindowTitle('Tesis 2 - Control articular JACO2')
+        mode_title = 'BRAZO FÍSICO' if self.is_hardware_mode else 'SIMULACIÓN'
+        self.setWindowTitle(
+            f'Tesis 2 - JACO2 - {mode_title}'
+        )
         self.resize(1050, 760)
         self.setMinimumSize(760, 520)
 
@@ -467,14 +595,25 @@ class JointControlWindow(QMainWindow):
         content_widget = QWidget()
         main_layout = QVBoxLayout(content_widget)
 
-        title = QLabel('Control articular supervisado - JACO2')
+        mode_title = 'BRAZO FÍSICO' if self.is_hardware_mode else 'SIMULACIÓN'
+        title = QLabel(
+            f'Control articular supervisado - JACO2 - {mode_title}'
+        )
         title.setObjectName('titleLabel')
         main_layout.addWidget(title)
 
-        safety_banner = QLabel(
-            'MODO SIMULACIÓN: los comandos se publican únicamente en '
-            '/thesis/candidate_command y deben pasar por el supervisor.'
-        )
+        if self.is_hardware_mode:
+            banner_text = (
+                'MODO BRAZO FÍSICO: cualquier comando permitido puede mover '
+                'el JACO2 real. La salida inicia desarmada y solamente acepta '
+                'comandos que hayan pasado por el supervisor preventivo.'
+            )
+        else:
+            banner_text = (
+                'MODO SIMULACIÓN: los comandos se publican únicamente en '
+                '/thesis/candidate_command y deben pasar por el supervisor.'
+            )
+        safety_banner = QLabel(banner_text)
         safety_banner.setObjectName('safetyBanner')
         safety_banner.setWordWrap(True)
         main_layout.addWidget(safety_banner)
@@ -618,11 +757,13 @@ class JointControlWindow(QMainWindow):
             jog_layout.addWidget(velocity_label, row, 3)
         main_layout.addWidget(jog_group)
 
-        connection_group = QGroupBox('Conexiones de la simulación')
+        connection_group = QGroupBox(
+            'Conexiones del brazo físico'
+            if self.is_hardware_mode else 'Conexiones de la simulación'
+        )
         connection_layout = QGridLayout(connection_group)
 
-        for name in [
-            'Gazebo /clock',
+        connection_names = [
             '/joint_states',
             'Supervisor',
             'Control manual continuo',
@@ -630,7 +771,18 @@ class JointControlWindow(QMainWindow):
             'Predicción geométrica',
             'Referencia de ejecución',
             'Control preventivo',
-        ]:
+        ]
+        if self.is_hardware_mode:
+            connection_names = [
+                'JACO2 USB conectado',
+                'Salida física armada',
+                'Servicio de armado',
+                *connection_names,
+            ]
+        else:
+            connection_names = ['Gazebo /clock', *connection_names]
+
+        for name in connection_names:
             indicator = QLabel(f'● {name}')
             indicator.setStyleSheet('color: #b91c1c; font-weight: bold;')
             self.connection_indicators[name] = indicator
@@ -638,6 +790,36 @@ class JointControlWindow(QMainWindow):
             connection_layout.addWidget(indicator, index // 3, index % 3)
 
         main_layout.addWidget(connection_group)
+
+        if self.is_hardware_mode:
+            hardware_group = QGroupBox('Habilitación del JACO2 físico')
+            hardware_layout = QGridLayout(hardware_group)
+            self.hardware_state_label = QLabel(
+                'JACO2: esperando estado del adaptador.'
+            )
+            self.hardware_state_label.setWordWrap(True)
+            self.arm_hardware_button = QPushButton(
+                'ARMAR SALIDA FÍSICA'
+            )
+            self.disarm_hardware_button = QPushButton(
+                'DESARMAR / HOLD'
+            )
+            self.arm_hardware_button.clicked.connect(
+                self.request_hardware_arm
+            )
+            self.disarm_hardware_button.clicked.connect(
+                self.request_hardware_disarm
+            )
+            hardware_layout.addWidget(
+                self.hardware_state_label, 0, 0, 1, 2
+            )
+            hardware_layout.addWidget(self.arm_hardware_button, 1, 0)
+            hardware_layout.addWidget(self.disarm_hardware_button, 1, 1)
+            main_layout.addWidget(hardware_group)
+        else:
+            self.hardware_state_label = None
+            self.arm_hardware_button = None
+            self.disarm_hardware_button = None
 
         pose_group = QGroupBox(
             'Pose actual del efector final respecto a world'
@@ -744,7 +926,7 @@ class JointControlWindow(QMainWindow):
         prediction_layout.addWidget(self.prediction_state_label)
         prediction_layout.addWidget(self.prediction_detail_label)
         self.execution_status_label = QLabel(
-            'Ejecución: sin referencia aceptada por Gazebo.'
+            'Ejecución: sin referencia aceptada por el adaptador.'
         )
         self.execution_status_label.setWordWrap(True)
         prediction_layout.addWidget(self.execution_status_label)
@@ -781,7 +963,10 @@ class JointControlWindow(QMainWindow):
             'Volumen azul: intención nominal, horizonte 1 s y actualización '
             'solicitada a 10 Hz. Durante la ejecución, el volumen cambia de '
             'color y el supervisor puede reducir la velocidad o detener '
-            'el goal activo de Gazebo.'
+            + (
+                'el movimiento del JACO2 físico.'
+                if self.is_hardware_mode else 'el goal activo de Gazebo.'
+            )
         )
         self.preview_note.setWordWrap(True)
         main_layout.addWidget(self.preview_note)
@@ -981,6 +1166,7 @@ class JointControlWindow(QMainWindow):
             )
 
         self.refresh_connections()
+        self.refresh_hardware_controls()
         self.refresh_end_effector_pose()
         self.refresh_velocity_preview()
         self.refresh_prediction_status()
@@ -1112,6 +1298,99 @@ class JointControlWindow(QMainWindow):
             indicator.setStyleSheet(
                 f'color: {color}; font-weight: bold;'
             )
+
+    def request_hardware_arm(self):
+        """Ask for explicit confirmation before enabling physical output."""
+        if not self.is_hardware_mode:
+            return
+        if not getattr(
+            self.ros_node, 'allow_hardware_arm_control', False
+        ):
+            QMessageBox.warning(
+                self,
+                'Armado deshabilitado',
+                'El lanzamiento no permite armar el JACO2 desde la interfaz.',
+            )
+            return
+        if not getattr(self.ros_node, 'hardware_connected', False):
+            QMessageBox.warning(
+                self,
+                'JACO2 no conectado',
+                'No se puede armar sin conexión USB y estado articular.',
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            'Confirmar armado físico',
+            'El JACO2 real quedará habilitado para ejecutar comandos que '
+            'apruebe el supervisor. Confirme que el área está libre, el '
+            'pulsador de parada es accesible y nadie toca el brazo.\n\n'
+            '¿Desea armar la salida física?',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        accepted, detail = self.ros_node.request_hardware_arm(True)
+        self.status_label.setText(detail)
+        self.status_label.setStyleSheet(
+            'color: #92400e;' if accepted else 'color: #b91c1c;'
+        )
+
+    def request_hardware_disarm(self):
+        """Request an immediate zero-velocity hold and runtime disarm."""
+        if not self.is_hardware_mode:
+            return
+        accepted, detail = self.ros_node.request_hardware_arm(False)
+        self.status_label.setText(detail)
+        self.status_label.setStyleSheet(
+            'color: #92400e;' if accepted else 'color: #b91c1c;'
+        )
+
+    def refresh_hardware_controls(self):
+        """Refresh the physical-only connection and arming panel."""
+        if not self.is_hardware_mode:
+            return
+        result = self.ros_node.poll_hardware_arm_request()
+        if result is not None:
+            success, requested_value, detail = result
+            action = 'ARMADO' if requested_value else 'DESARMADO'
+            self.status_label.setText(
+                f'{action}: {detail}' if success else f'FALLO: {detail}'
+            )
+            self.status_label.setStyleSheet(
+                'color: #166534;' if success else 'color: #b91c1c;'
+            )
+
+        connected = bool(self.ros_node.hardware_connected)
+        armed = bool(self.ros_node.hardware_armed)
+        service_ready = self.ros_node.hardware_arm_client.service_is_ready()
+        pending = self.ros_node.arm_request_future is not None
+        arm_allowed = bool(self.ros_node.allow_hardware_arm_control)
+        self.arm_hardware_button.setEnabled(
+            arm_allowed and connected and service_ready
+            and not armed and not pending
+        )
+        self.disarm_hardware_button.setEnabled(
+            arm_allowed and service_ready and not pending
+        )
+        if not connected:
+            text = 'JACO2 FÍSICO: DESCONECTADO'
+            color = '#b91c1c'
+        elif armed:
+            text = 'JACO2 FÍSICO: CONECTADO Y ARMADO'
+            color = '#b91c1c'
+        else:
+            text = 'JACO2 FÍSICO: CONECTADO, SALIDA DESARMADA'
+            color = '#92400e'
+        if not arm_allowed:
+            text += ' | armado desde GUI deshabilitado'
+        elif pending:
+            text += ' | solicitud en proceso'
+        self.hardware_state_label.setText(text)
+        self.hardware_state_label.setStyleSheet(
+            f'color: {color}; font-weight: bold; padding: 6px;'
+        )
 
     def refresh_runtime_metrics(self):
         node = self.ros_node
@@ -1245,7 +1524,7 @@ class JointControlWindow(QMainWindow):
         execution = self.ros_node.last_execution
         if execution is None:
             self.execution_status_label.setText(
-                'Ejecución: sin referencia aceptada por Gazebo.'
+                'Ejecución: sin referencia aceptada por el adaptador.'
             )
             self.execution_status_label.setStyleSheet('color: #92400e;')
             return
@@ -1382,7 +1661,8 @@ class JointControlWindow(QMainWindow):
             )
             self.status_label.setText(
                 f'{state}: {self.pending_command_id} fue reenviado por '
-                f'el supervisor al adaptador de simulación.'
+                f'el supervisor al adaptador '
+                f'{"físico" if self.is_hardware_mode else "de simulación"}.'
                 f'{duration_text}'
             )
             self.status_label.setStyleSheet(f'color: {color};')
@@ -1796,6 +2076,8 @@ class JointControlWindow(QMainWindow):
         self.jog_timer.stop()
         self.ros_timer.stop()
         self.ui_timer.stop()
+        if self.is_hardware_mode:
+            self.ros_node.disarm_before_shutdown()
         self.ros_node.destroy_node()
 
         if rclpy.ok():

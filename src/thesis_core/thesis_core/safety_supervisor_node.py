@@ -46,9 +46,22 @@ from thesis_core.safety_policy import (
     withdrawal_path_is_non_approaching,
     withdrawal_path_is_safe,
 )
+from thesis_core.ros_runtime import spin_node
 
 MIN_DURATION_SEC = 0.1
 MAX_DURATION_SEC = 30.0
+MIN_RUNTIME_REMAINING_SEC = 0.10
+
+
+def runtime_remaining_time(duration, elapsed):
+    """Keep monitoring an accepted goal until its terminal adapter status."""
+    if not math.isfinite(duration) or duration <= 0.0:
+        raise ValueError('execution duration must be positive and finite')
+    if not math.isfinite(elapsed) or elapsed < 0.0:
+        raise ValueError(
+            'execution elapsed time must be finite and nonnegative'
+        )
+    return max(duration - elapsed, MIN_RUNTIME_REMAINING_SEC)
 
 
 class SafetySupervisorNode(Node):
@@ -1082,8 +1095,14 @@ class SafetySupervisorNode(Node):
         start_sec = self.message_time_seconds(execution.start_time)
         duration = float(execution.duration_sec)
         elapsed = max(0.0, now_sec - start_sec)
-        remaining = duration - elapsed
-        if not math.isfinite(remaining) or remaining <= 0.05:
+        try:
+            remaining = runtime_remaining_time(duration, elapsed)
+        except ValueError:
+            self.publish_runtime_stop(
+                command_id,
+                'PREDICTION_ERROR',
+                'La referencia activa tiene una temporización inválida.',
+            )
             return
 
         current = tuple(
@@ -1994,20 +2013,7 @@ class SafetySupervisorNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-
-    node = SafetySupervisorNode()
-
-    try:
-        rclpy.spin(node)
-
-    except KeyboardInterrupt:
-        pass
-
-    finally:
-        node.destroy_node()
-
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(SafetySupervisorNode())
 
 
 if __name__ == '__main__':

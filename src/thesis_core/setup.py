@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'thesis_core'
@@ -10,6 +12,10 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (
+            'share/' + package_name + '/config',
+            glob('config/*.yaml'),
+        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -32,6 +38,8 @@ setup(
             'thesis_core.obstacle_input_bridge:main',
             'obstacle_demo_source = '
             'thesis_core.obstacle_demo_source:main',
+            'capsule_visualizer = '
+            'thesis_core.capsule_visualizer:main',
         ],
     },
 )
