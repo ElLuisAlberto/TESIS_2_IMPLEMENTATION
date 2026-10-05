@@ -5,8 +5,10 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <pcl/filters/crop_box.h>
+#include <pcl/filters/filter.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -30,21 +32,26 @@ public:
       "input_topic", "/camera/d435i/depth/color/points");
     output_topic_ = declare_parameter<std::string>(
       "output_topic", "/thesis/perception/points_filtered");
-    target_frame_ = declare_parameter<std::string>("target_frame", "base_link");
+    target_frame_ = declare_parameter<std::string>("target_frame", "");
     use_latest_transform_ = declare_parameter<bool>("use_latest_transform", true);
     restamp_output_ = declare_parameter<bool>("restamp_output", false);
-    enable_crop_ = declare_parameter<bool>("enable_crop", true);
+    transform_timeout_s_ = declare_parameter<double>("transform_timeout_s", 0.10);
+    enable_crop_ = declare_parameter<bool>("enable_crop", false);
     enable_voxel_ = declare_parameter<bool>("enable_voxel", true);
     voxel_leaf_size_ = declare_parameter<double>("voxel_leaf_size", 0.02);
     min_x_ = declare_parameter<double>("min_x", -1.5);
     max_x_ = declare_parameter<double>("max_x", 1.5);
     min_y_ = declare_parameter<double>("min_y", -1.5);
     max_y_ = declare_parameter<double>("max_y", 1.5);
-    min_z_ = declare_parameter<double>("min_z", 0.0);
+    min_z_ = declare_parameter<double>("min_z", -1.0);
     max_z_ = declare_parameter<double>("max_z", 2.5);
 
-    if (voxel_leaf_size_ <= 0.0) {
-      throw std::runtime_error("voxel_leaf_size debe ser mayor que cero");
+    if (voxel_leaf_size_ <= 0.0 || transform_timeout_s_ <= 0.0) {
+      throw std::runtime_error(
+              "voxel_leaf_size y transform_timeout_s deben ser mayores que cero");
+    }
+    if (!(min_x_ < max_x_ && min_y_ < max_y_ && min_z_ < max_z_)) {
+      throw std::runtime_error("los limites de recorte son invalidos");
     }
 
     auto qos = rclcpp::SensorDataQoS().keep_last(5);
@@ -69,7 +76,7 @@ private:
           rclcpp::Time(0, 0, RCL_ROS_TIME) : rclcpp::Time(msg->header.stamp);
         const auto transform = tf_buffer_.lookupTransform(
           target_frame_, msg->header.frame_id, lookup_time,
-          rclcpp::Duration::from_seconds(0.10));
+          rclcpp::Duration::from_seconds(transform_timeout_s_));
         tf2::doTransform(*msg, transformed, transform);
       } else {
         transformed = *msg;
@@ -86,11 +93,16 @@ private:
       new pcl::PointCloud<pcl::PointXYZRGB>());
     pcl::fromROSMsg(transformed, *cloud);
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cropped = cloud;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr finite_cloud(
+      new pcl::PointCloud<pcl::PointXYZRGB>());
+    std::vector<int> finite_indices;
+    pcl::removeNaNFromPointCloud(*cloud, *finite_cloud, finite_indices);
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cropped = finite_cloud;
     if (enable_crop_) {
       cropped.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
       pcl::CropBox<pcl::PointXYZRGB> crop;
-      crop.setInputCloud(cloud);
+      crop.setInputCloud(finite_cloud);
       crop.setMin(Eigen::Vector4f(min_x_, min_y_, min_z_, 1.0F));
       crop.setMax(Eigen::Vector4f(max_x_, max_y_, max_z_, 1.0F));
       crop.filter(*cropped);
@@ -118,6 +130,7 @@ private:
   std::string target_frame_;
   bool use_latest_transform_;
   bool restamp_output_;
+  double transform_timeout_s_;
   bool enable_crop_;
   bool enable_voxel_;
   double voxel_leaf_size_;
