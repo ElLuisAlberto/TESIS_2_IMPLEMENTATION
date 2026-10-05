@@ -59,6 +59,11 @@ While that launch is running, a terminal-only report can be generated with:
 bash tools/realsense_d435i_test/scripts/validate_perception_standalone.sh
 ```
 
+The report uses the lightweight `perception_health` counter for cloud rate.
+Direct `ros2 topic hz` probes are disabled because copying large PointCloud2
+messages can reduce the rate being measured. They can be enabled explicitly
+for troubleshooting with `PERCEPTION_RUN_RATE_PROBES=true`.
+
 This preserves the camera frame and does not publish a fabricated extrinsic.
 The crop is disabled until the actual workspace bounds have been measured.
 Accelerometer and gyroscope acquisition is also disabled by default because a
