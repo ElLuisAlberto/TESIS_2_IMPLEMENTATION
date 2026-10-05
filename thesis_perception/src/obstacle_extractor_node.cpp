@@ -105,7 +105,8 @@ public:
 
     validate_parameters();
 
-    auto sensor_qos = rclcpp::SensorDataQoS().keep_last(5);
+    // Obstacle decisions are time-sensitive: discard queued old clouds.
+    auto sensor_qos = rclcpp::SensorDataQoS().keep_last(1);
     cloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       input_topic_, sensor_qos,
       std::bind(&ObstacleExtractor::cloud_callback, this, std::placeholders::_1));

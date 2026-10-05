@@ -73,8 +73,10 @@ The standalone launch also exposes `enable_crop`, `min_x`, `max_x`, `min_y`,
 `max_y`, `min_z`, `max_z`, `enable_voxel` and `voxel_leaf_size` so the final
 workspace can be tuned from the terminal without modifying source files.
 For a fixed D435i, spatial and temporal depth filters are enabled by default to
-reduce wall flicker. The PointCloud2 publisher uses the `SENSOR_DATA` QoS
-profile to avoid reliable retransmission delays on large sensor messages.
+reduce wall flicker. Depth decimation with magnitude 2 reduces the upstream
+PointCloud2 workload before PCL processing. The camera PointCloud2 publisher
+uses the `SENSOR_DATA` QoS profile, while downstream consumers retain only the
+newest sample so stale geometry is not accumulated.
 
 ## Extrinsic calibration
 

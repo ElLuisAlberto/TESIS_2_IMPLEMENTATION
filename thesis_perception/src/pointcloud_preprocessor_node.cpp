@@ -73,7 +73,9 @@ public:
       throw std::runtime_error("los limites de recorte son invalidos");
     }
 
-    auto qos = rclcpp::SensorDataQoS().keep_last(5);
+    // Perception must process the newest geometry instead of accumulating
+    // stale PointCloud2 samples when a frame temporarily takes too long.
+    auto qos = rclcpp::SensorDataQoS().keep_last(1);
     publisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(output_topic_, qos);
     subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       input_topic_, qos,

@@ -111,12 +111,34 @@ def test_standalone_uses_sensor_qos_and_depth_stabilization():
     launch_text = (
         PACKAGE_ROOT / "launch" / "d435i_standalone.launch.py"
     ).read_text(encoding="utf-8")
-    assert '"pointcloud.pointcloud_qos": "SENSOR_DATA"' in launch_text
+    assert 'name="pointcloud.pointcloud_qos"' in launch_text
+    assert 'value="SENSOR_DATA"' in launch_text
     assert (
         '"spatial_filter.enable": LaunchConfiguration(' in launch_text
     )
     assert (
         '"temporal_filter.enable": LaunchConfiguration(' in launch_text
     )
-    for argument in ("enable_spatial_filter", "enable_temporal_filter"):
+    for argument in (
+        "enable_decimation_filter",
+        "decimation_magnitude",
+        "enable_spatial_filter",
+        "enable_temporal_filter",
+    ):
         assert launch_text.count(f'"{argument}"') >= 2
+
+
+def test_large_cloud_consumers_keep_only_the_newest_sample():
+    """Avoid stale obstacle decisions when processing briefly falls behind."""
+    preprocessor = (
+        PACKAGE_ROOT / "src" / "pointcloud_preprocessor_node.cpp"
+    ).read_text(encoding="utf-8")
+    extractor = (
+        PACKAGE_ROOT / "src" / "obstacle_extractor_node.cpp"
+    ).read_text(encoding="utf-8")
+    rviz = (
+        PACKAGE_ROOT / "rviz" / "d435i_perception.rviz"
+    ).read_text(encoding="utf-8")
+    assert "SensorDataQoS().keep_last(1)" in preprocessor
+    assert "SensorDataQoS().keep_last(1)" in extractor
+    assert "Depth: 1" in rviz

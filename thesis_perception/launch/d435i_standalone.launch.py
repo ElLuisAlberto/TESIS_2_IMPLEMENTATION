@@ -15,11 +15,15 @@
 """Launch D435i acquisition and isolated perception without a robot."""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    GroupAction,
+    IncludeLaunchDescription,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetParameter
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -41,33 +45,46 @@ def generate_launch_description():
         "d435i_perception.rviz",
     ])
 
-    camera = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(camera_launch),
-        condition=IfCondition(LaunchConfiguration("start_camera")),
-        launch_arguments={
-            "camera_namespace": "camera",
-            "camera_name": "d435i",
-            "enable_color": "true",
-            "enable_depth": "true",
-            "enable_gyro": LaunchConfiguration("enable_imu"),
-            "enable_accel": LaunchConfiguration("enable_imu"),
-            "unite_imu_method": "2",
-            "gyro_fps": "200",
-            "accel_fps": "100",
-            "enable_sync": "true",
-            "pointcloud.enable": "true",
-            "pointcloud.stream_filter": "2",
-            "pointcloud.pointcloud_qos": "SENSOR_DATA",
-            "align_depth.enable": "true",
-            "spatial_filter.enable": LaunchConfiguration(
-                "enable_spatial_filter"
+    camera = GroupAction(
+        actions=[
+            SetParameter(
+                name="pointcloud.pointcloud_qos",
+                value="SENSOR_DATA",
             ),
-            "temporal_filter.enable": LaunchConfiguration(
-                "enable_temporal_filter"
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(camera_launch),
+                condition=IfCondition(LaunchConfiguration("start_camera")),
+                launch_arguments={
+                    "camera_namespace": "camera",
+                    "camera_name": "d435i",
+                    "enable_color": "true",
+                    "enable_depth": "true",
+                    "enable_gyro": LaunchConfiguration("enable_imu"),
+                    "enable_accel": LaunchConfiguration("enable_imu"),
+                    "unite_imu_method": "2",
+                    "gyro_fps": "200",
+                    "accel_fps": "100",
+                    "enable_sync": "true",
+                    "pointcloud.enable": "true",
+                    "pointcloud.stream_filter": "2",
+                    "align_depth.enable": "true",
+                    "decimation_filter.enable": LaunchConfiguration(
+                        "enable_decimation_filter"
+                    ),
+                    "decimation_filter.filter_magnitude": LaunchConfiguration(
+                        "decimation_magnitude"
+                    ),
+                    "spatial_filter.enable": LaunchConfiguration(
+                        "enable_spatial_filter"
+                    ),
+                    "temporal_filter.enable": LaunchConfiguration(
+                        "enable_temporal_filter"
+                    ),
+                    "depth_module.depth_profile": "640,480,15",
+                    "rgb_camera.color_profile": "640,480,15",
+                }.items(),
             ),
-            "depth_module.depth_profile": "640,480,15",
-            "rgb_camera.color_profile": "640,480,15",
-        }.items(),
+        ],
     )
 
     processing = IncludeLaunchDescription(
@@ -129,6 +146,16 @@ def generate_launch_description():
                 "Enable accelerometer and gyroscope only when inertial "
                 "data is required and host IIO permissions are configured."
             ),
+        ),
+        DeclareLaunchArgument(
+            "enable_decimation_filter",
+            default_value="true",
+            description="Reduce depth workload before creating PointCloud2.",
+        ),
+        DeclareLaunchArgument(
+            "decimation_magnitude",
+            default_value="2",
+            description="Depth decimation factor; 2 preserves test detail.",
         ),
         DeclareLaunchArgument(
             "enable_spatial_filter",
