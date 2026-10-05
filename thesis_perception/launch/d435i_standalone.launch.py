@@ -49,8 +49,8 @@ def generate_launch_description():
             "camera_name": "d435i",
             "enable_color": "true",
             "enable_depth": "true",
-            "enable_gyro": "true",
-            "enable_accel": "true",
+            "enable_gyro": LaunchConfiguration("enable_imu"),
+            "enable_accel": LaunchConfiguration("enable_imu"),
             "unite_imu_method": "2",
             "gyro_fps": "200",
             "accel_fps": "100",
@@ -101,6 +101,14 @@ def generate_launch_description():
     declarations = [
         DeclareLaunchArgument("start_camera", default_value="true"),
         DeclareLaunchArgument("start_rviz", default_value="false"),
+        DeclareLaunchArgument(
+            "enable_imu",
+            default_value="false",
+            description=(
+                "Enable accelerometer and gyroscope only when inertial "
+                "data is required and host IIO permissions are configured."
+            ),
+        ),
         DeclareLaunchArgument("use_sim_time", default_value="false"),
         DeclareLaunchArgument(
             "target_frame",
