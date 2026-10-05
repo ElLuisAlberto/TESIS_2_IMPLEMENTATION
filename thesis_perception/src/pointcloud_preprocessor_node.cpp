@@ -1,3 +1,13 @@
+// Copyright 2026 Luis Alberto Munoz Marin
+
+#include <pcl/filters/crop_box.h>
+#include <pcl/filters/filter.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <tf2/exceptions.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -7,15 +17,8 @@
 #include <string>
 #include <vector>
 
-#include <pcl/filters/crop_box.h>
-#include <pcl/filters/filter.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include <tf2/exceptions.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
@@ -121,7 +124,11 @@ private:
     sensor_msgs::msg::PointCloud2 output;
     pcl::toROSMsg(*filtered, output);
     output.header.frame_id = target_frame_.empty() ? transformed.header.frame_id : target_frame_;
-    output.header.stamp = restamp_output_ ? this->now().to_msg() : transformed.header.stamp;
+    if (restamp_output_) {
+      output.header.stamp = this->now();
+    } else {
+      output.header.stamp = transformed.header.stamp;
+    }
     publisher_->publish(output);
   }
 
