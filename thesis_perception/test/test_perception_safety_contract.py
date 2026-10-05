@@ -84,3 +84,23 @@ def test_standalone_preserves_source_frame_and_clock():
     assert preprocessor["max_valid_range_m"] > (
         preprocessor["min_valid_range_m"]
     )
+
+
+def test_standalone_exposes_workspace_filter_arguments():
+    """Allow workspace bounds to be tuned without editing source files."""
+    launch_text = (
+        PACKAGE_ROOT / "launch" / "d435i_standalone.launch.py"
+    ).read_text(encoding="utf-8")
+    arguments = (
+        "enable_crop",
+        "enable_voxel",
+        "voxel_leaf_size",
+        "min_x",
+        "max_x",
+        "min_y",
+        "max_y",
+        "min_z",
+        "max_z",
+    )
+    for argument in arguments:
+        assert launch_text.count(f'"{argument}"') >= 2
