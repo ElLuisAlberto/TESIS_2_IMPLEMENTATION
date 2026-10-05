@@ -1,3 +1,5 @@
+// Copyright 2026 Luis Alberto Munoz Marin
+
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -56,9 +58,9 @@ public:
         last_cloud_ = std::chrono::steady_clock::now();
         last_cloud_frame_ = message->header.frame_id;
         last_cloud_points_ = static_cast<std::size_t>(message->width) *
-          static_cast<std::size_t>(message->height);
+        static_cast<std::size_t>(message->height);
         last_cloud_stamp_s_ = static_cast<double>(message->header.stamp.sec) +
-          static_cast<double>(message->header.stamp.nanosec) * 1.0e-9;
+        static_cast<double>(message->header.stamp.nanosec) * 1.0e-9;
       });
     imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
       imu_topic_, sensor_qos,
@@ -157,7 +159,7 @@ private:
     add_value(status, "imu_required", imu_required_ ? "true" : "false");
 
     diagnostic_msgs::msg::DiagnosticArray report;
-    report.header.stamp = this->now().to_msg();
+    report.header.stamp = this->now();
     report.status.push_back(status);
     diagnostics_publisher_->publish(report);
 
