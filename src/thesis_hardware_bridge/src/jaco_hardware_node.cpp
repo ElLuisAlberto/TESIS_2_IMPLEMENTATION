@@ -97,8 +97,10 @@ public:
     declare_parameter("control_rate_hz", 100.0);
     declare_parameter("state_timeout_sec", 0.20);
     declare_parameter("jog_command_timeout_sec", 0.18);
+    declare_parameter("max_jog_message_age_sec", 0.15);
     declare_parameter("execution_control_timeout_sec", 0.35);
     declare_parameter("goal_tolerance_rad", 0.005);
+    declare_parameter("position_tracking_gain", 4.0);
     declare_parameter("goal_timeout_factor", 4.0);
     declare_parameter("goal_timeout_margin_sec", 2.0);
     declare_parameter("maximum_read_failures", 3);
@@ -115,10 +117,14 @@ public:
     state_timeout_sec_ = get_parameter("state_timeout_sec").as_double();
     jog_timeout_sec_ =
       get_parameter("jog_command_timeout_sec").as_double();
+    max_jog_message_age_sec_ =
+      get_parameter("max_jog_message_age_sec").as_double();
     execution_control_timeout_sec_ =
       get_parameter("execution_control_timeout_sec").as_double();
     goal_tolerance_rad_ =
       get_parameter("goal_tolerance_rad").as_double();
+    position_tracking_gain_ =
+      get_parameter("position_tracking_gain").as_double();
     goal_timeout_factor_ =
       get_parameter("goal_timeout_factor").as_double();
     goal_timeout_margin_sec_ =
@@ -185,13 +191,15 @@ private:
 
   void validate_parameters()
   {
-    const std::array<double, 8> positive_values = {
+    const std::array<double, 10> positive_values = {
       state_publish_rate_hz_,
       control_rate_hz_,
       state_timeout_sec_,
       jog_timeout_sec_,
+      max_jog_message_age_sec_,
       execution_control_timeout_sec_,
       goal_tolerance_rad_,
+      position_tracking_gain_,
       goal_timeout_factor_,
       goal_timeout_margin_sec_,
     };
@@ -209,6 +217,16 @@ private:
     if (state_publish_rate_hz_ > control_rate_hz_) {
       throw std::runtime_error(
               "state_publish_rate_hz cannot exceed control_rate_hz");
+    }
+    if (position_tracking_gain_ >= state_publish_rate_hz_) {
+      throw std::runtime_error(
+              "position_tracking_gain must be smaller than the feedback "
+              "rate to avoid target crossings");
+    }
+    if (max_jog_message_age_sec_ >= jog_timeout_sec_) {
+      throw std::runtime_error(
+              "max_jog_message_age_sec must be smaller than "
+              "jog_command_timeout_sec");
     }
     if (
       maximum_read_failures_ < 1 || initialization_read_attempts_ < 1 ||
@@ -251,9 +269,11 @@ private:
       std::bind(
         &JacoHardwareNode::command_callback, this,
         std::placeholders::_1));
+    auto jog_qos = rclcpp::QoS(rclcpp::KeepLast(1))
+      .reliable().durability_volatile();
     jog_subscription_ =
       create_subscription<thesis_interfaces::msg::JointCommand>(
-      "/thesis/supervised_jog_command", 10,
+      "/thesis/supervised_jog_command", jog_qos,
       std::bind(
         &JacoHardwareNode::jog_callback, this,
         std::placeholders::_1));
@@ -700,6 +720,13 @@ private:
            state_timeout_sec_;
   }
 
+  double message_age_seconds(
+    const builtin_interfaces::msg::Time & stamp)
+  {
+    const rclcpp::Time source_time(stamp, get_clock()->get_clock_type());
+    return (get_clock()->now() - source_time).seconds();
+  }
+
   void command_callback(
     const thesis_interfaces::msg::JointCommand::SharedPtr message)
   {
@@ -783,6 +810,16 @@ private:
     if (!output_permitted_ || !armed_ || active_goal_) {
       return;
     }
+    const double source_age = message_age_seconds(message->stamp);
+    if (!thesis_hardware_bridge::message_age_is_fresh(
+        source_age, max_jog_message_age_sec_))
+    {
+      ++stale_jog_commands_;
+      if (jog_active_) {
+        stop_motion("stale supervised jog command", false, "CANCELED");
+      }
+      return;
+    }
     const double horizon = duration_seconds(message->duration);
     JointVector target{};
     std::string error;
@@ -805,6 +842,9 @@ private:
     jog_command_id_ = message->command_id;
     jog_intent_stamp_ = message->stamp;
     last_jog_at_ = std::chrono::steady_clock::now();
+    last_jog_source_age_sec_ = source_age;
+    has_received_jog_ = true;
+    ++jog_messages_since_diagnostics_;
     jog_timing_pending_ = true;
   }
 
@@ -1054,7 +1094,8 @@ private:
           active_goal_->target,
           active_goal_->nominal_velocity,
           active_goal_->speed_scale,
-          1.0 / control_rate_hz_,
+          1.0 / state_publish_rate_hz_,
+          position_tracking_gain_,
           goal_tolerance_rad_);
       }
     }
@@ -1184,9 +1225,13 @@ private:
       measured_output_command_rate_hz_ =
         static_cast<double>(output_commands_since_diagnostics_) /
         rate_interval;
+      measured_jog_input_rate_hz_ =
+        static_cast<double>(jog_messages_since_diagnostics_) /
+        rate_interval;
       control_ticks_since_diagnostics_ = 0;
       feedback_ticks_since_diagnostics_ = 0;
       output_commands_since_diagnostics_ = 0;
+      jog_messages_since_diagnostics_ = 0;
       last_rate_sample_at_ = rate_now;
     }
     diagnostic_msgs::msg::DiagnosticArray array;
@@ -1232,6 +1277,24 @@ private:
         "output_command_rate_hz_measured",
         std::to_string(measured_output_command_rate_hz_)),
       key_value(
+        "position_tracking_gain",
+        std::to_string(position_tracking_gain_)),
+      key_value(
+        "jog_input_rate_hz_measured",
+        std::to_string(measured_jog_input_rate_hz_)),
+      key_value(
+        "jog_stream_age_ms",
+        has_received_jog_ ? std::to_string(
+          std::chrono::duration<double, std::milli>(
+            rate_now - last_jog_at_).count()) : "-1.000000"),
+      key_value(
+        "last_jog_source_age_ms",
+        has_received_jog_ ?
+        std::to_string(last_jog_source_age_sec_ * 1000.0) : "-1.000000"),
+      key_value(
+        "stale_jog_commands",
+        std::to_string(stale_jog_commands_)),
+      key_value(
         "control_deadline_resets",
         std::to_string(control_deadline_resets_.load())),
       key_value(
@@ -1260,8 +1323,10 @@ private:
   double control_rate_hz_{100.0};
   double state_timeout_sec_{0.20};
   double jog_timeout_sec_{0.18};
+  double max_jog_message_age_sec_{0.15};
   double execution_control_timeout_sec_{0.35};
   double goal_tolerance_rad_{0.005};
+  double position_tracking_gain_{4.0};
   double goal_timeout_factor_{4.0};
   double goal_timeout_margin_sec_{2.0};
   int maximum_read_failures_{3};
@@ -1274,14 +1339,19 @@ private:
   std::size_t control_ticks_since_diagnostics_{0};
   std::size_t feedback_ticks_since_diagnostics_{0};
   std::size_t output_commands_since_diagnostics_{0};
+  std::size_t jog_messages_since_diagnostics_{0};
+  std::size_t stale_jog_commands_{0};
   int consecutive_read_failures_{0};
   uint32_t timing_sequence_{0};
   double measured_control_rate_hz_{0.0};
   double measured_feedback_rate_hz_{0.0};
   double measured_output_command_rate_hz_{0.0};
+  double measured_jog_input_rate_hz_{0.0};
+  double last_jog_source_age_sec_{-1.0};
   bool serial_reported_{false};
   bool expected_serial_configured_{false};
   bool usb_lock_held_{false};
+  bool has_received_jog_{false};
   std::string serial_number_;
   std::string usb_lock_file_;
   std::string last_error_;

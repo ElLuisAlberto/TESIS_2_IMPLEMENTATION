@@ -12,6 +12,7 @@ find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/CartesianCommand.msg"
   "msg/JointCommand.msg"
   "msg/ProximityStatus.msg"
   "msg/Obstacle.msg"

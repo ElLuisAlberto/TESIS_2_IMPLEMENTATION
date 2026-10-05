@@ -89,6 +89,48 @@ def translation(matrix):
     return (matrix[0][3], matrix[1][3], matrix[2][3])
 
 
+def rotation_matrix_to_rpy(matrix):
+    """Return intrinsic roll, pitch and yaw from a homogeneous transform."""
+    pitch_sine = -matrix[2][0]
+    pitch_sine = max(-1.0, min(1.0, pitch_sine))
+    pitch = math.asin(pitch_sine)
+    pitch_cosine = math.cos(pitch)
+
+    if abs(pitch_cosine) > 1.0e-9:
+        roll = math.atan2(matrix[2][1], matrix[2][2])
+        yaw = math.atan2(matrix[1][0], matrix[0][0])
+    else:
+        roll = math.atan2(-matrix[1][2], matrix[1][1])
+        yaw = 0.0
+    return roll, pitch, yaw
+
+
+def end_effector_transform(joint_positions):
+    """Return the homogeneous world-to-tool transform for six joints."""
+    if len(joint_positions) != 6:
+        raise ValueError('JACO2 forward kinematics requires six joints')
+    if not all(math.isfinite(value) for value in joint_positions):
+        raise ValueError('JACO2 joint positions must be finite')
+
+    current = identity_matrix()
+    for joint_position, (xyz, rpy) in zip(
+            joint_positions, JOINT_ORIGINS):
+        current = multiply(current, transform_matrix(xyz, rpy))
+        current = multiply(current, rotation_z(joint_position))
+
+    end_xyz, end_rpy = END_EFFECTOR_ORIGIN
+    return multiply(current, transform_matrix(end_xyz, end_rpy))
+
+
+def end_effector_pose(joint_positions):
+    """Return tool X, Y, Z, roll, pitch and yaw in the world frame."""
+    transform = end_effector_transform(joint_positions)
+    return (
+        *translation(transform),
+        *rotation_matrix_to_rpy(transform),
+    )
+
+
 def capsule_segments(joint_positions):
     if len(joint_positions) != 6:
         raise ValueError('JACO2 forward kinematics requires six joints')

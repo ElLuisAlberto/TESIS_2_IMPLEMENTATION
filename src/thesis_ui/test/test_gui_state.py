@@ -30,6 +30,9 @@ class FakeNode:
         self.execution_by_id = {}
         self.end_effector_pose = (0.485, 0.064, 1.040, 0, 0, 0)
         self.candidate_publisher = SimpleNamespace(get_subscription_count=lambda: 1)
+        self.cartesian_candidate_publisher = SimpleNamespace(
+            get_subscription_count=lambda: 1
+        )
 
     def state_is_ready(self):
         return True
@@ -107,6 +110,43 @@ class GuiStateTests(unittest.TestCase):
         self.assertEqual(self.window.metric_labels['Mínimo proyectado'].text(),
                          'Sin evaluación activa')
 
+    def test_volume_label_distinguishes_preview_from_safe_jog(self):
+        self.window.preview_button.setChecked(True)
+        self.window.refresh_volume_mode()
+        self.assertIn('VOLUMEN NOMINAL', self.window.volume_mode_label.text())
+        self.window.jog_mode_button.blockSignals(True)
+        self.window.jog_mode_button.setChecked(True)
+        self.window.jog_mode_button.blockSignals(False)
+        self.window.refresh_volume_mode()
+        self.assertIn(
+            'VOLUMEN SUPERVISADO CONTINUO',
+            self.window.volume_mode_label.text(),
+        )
+
+    def test_velocity_violation_disables_point_command(self):
+        self.window.duration_input.setValue(0.1)
+        self.window.target_inputs[0].setValue(180.0)
+        self.window.refresh_velocity_preview()
+        self.assertFalse(self.window.send_button.isEnabled())
+        self.assertIn(
+            'VELOCIDAD: NO ENVIABLE',
+            self.window.velocity_summary_label.text(),
+        )
+
+    def test_simulation_has_cartesian_pose_controls(self):
+        self.assertEqual(len(self.window.cartesian_target_inputs), 6)
+        self.window.copy_current_cartesian_pose()
+        self.assertTrue(self.window.cartesian_target_initialized)
+        self.assertAlmostEqual(
+            self.window.cartesian_target_inputs[0].value(), 0.485, places=3
+        )
+        self.window.adjust_cartesian_target(0, 0.01)
+        self.assertAlmostEqual(
+            self.window.cartesian_target_inputs[0].value(), 0.495, places=3
+        )
+        self.window.refresh_ui()
+        self.assertTrue(self.window.cartesian_send_button.isEnabled())
+
     def test_physical_mode_has_explicit_hardware_controls(self):
         self.window.deleteLater()
         self.node.operation_mode = 'hardware'
@@ -121,6 +161,7 @@ class GuiStateTests(unittest.TestCase):
         self.assertIn('BRAZO FÍSICO', self.window.windowTitle())
         self.assertIsNotNone(self.window.arm_hardware_button)
         self.assertIsNotNone(self.window.disarm_hardware_button)
+        self.assertIsNone(self.window.cartesian_send_button)
         self.assertIn('JACO2 USB conectado', self.window.connection_indicators)
 
 

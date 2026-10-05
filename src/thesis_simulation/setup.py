@@ -54,6 +54,10 @@ setup(
             'dry_run_adapter = thesis_simulation.dry_run_adapter:main',
             'simulation_command_adapter = '
             'thesis_simulation.simulation_command_adapter:main',
+            'cartesian_command_adapter = '
+            'thesis_simulation.cartesian_command_adapter:main',
+            'cartesian_sim_validator = '
+            'thesis_simulation.cartesian_sim_validator:main',
             'system_readiness = '
             'thesis_simulation.system_readiness_node:main',
         ],

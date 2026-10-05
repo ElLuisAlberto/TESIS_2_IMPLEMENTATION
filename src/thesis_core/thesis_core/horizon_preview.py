@@ -8,6 +8,7 @@ import rclpy
 from control_msgs.msg import JointTrajectoryControllerState
 from geometry_msgs.msg import Point
 from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -164,11 +165,16 @@ class HorizonPreview(Node):
             self.receive_supervised_intent,
             10,
         )
+        jog_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
         self.jog_sub = self.create_subscription(
             JointCommand,
             '/thesis/supervised_jog_command',
             self.receive_jog,
-            10,
+            jog_qos,
         )
         self.execution_sub = self.create_subscription(
             ExecutionTrajectory,

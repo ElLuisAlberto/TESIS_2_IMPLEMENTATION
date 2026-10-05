@@ -9,8 +9,10 @@ jaco_hardware_adapter:
     control_rate_hz: 100.0
     state_timeout_sec: 0.20
     jog_command_timeout_sec: 0.18
+    max_jog_message_age_sec: 0.15
     execution_control_timeout_sec: 0.35
     goal_tolerance_rad: 0.005
+    position_tracking_gain: 4.0
     goal_timeout_factor: 4.0
     goal_timeout_margin_sec: 2.0
     maximum_read_failures: 3

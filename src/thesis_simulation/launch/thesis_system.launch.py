@@ -143,6 +143,21 @@ def generate_launch_description():
         }],
     )
 
+    cartesian_adapter = Node(
+        package='thesis_simulation',
+        executable='cartesian_command_adapter',
+        name='cartesian_command_adapter',
+        output='screen',
+        parameters=[{
+            'use_sim_time': ParameterValue(
+                use_sim_time, value_type=bool
+            ),
+            'maximum_position_step_m': 0.10,
+            'maximum_orientation_step_rad': 0.3490658504,
+            'position_tolerance_m': 0.003,
+        }],
+    )
+
     declarations = [
         DeclareLaunchArgument(
             'use_sim_time', default_value='true',
@@ -229,6 +244,7 @@ def generate_launch_description():
             safety,
             demo_obstacle,
             horizon_preview,
+            cartesian_adapter,
             gui,
             readiness,
         ]

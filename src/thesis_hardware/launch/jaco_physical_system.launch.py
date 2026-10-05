@@ -6,7 +6,11 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import Command, LaunchConfiguration
+from launch.substitutions import (
+    Command,
+    EnvironmentVariable,
+    LaunchConfiguration,
+)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -48,6 +52,7 @@ def generate_launch_description():
     allow_gui_arm_control = LaunchConfiguration(
         'allow_gui_arm_control'
     )
+    kinova_library_dir = LaunchConfiguration('kinova_library_dir')
 
     robot_description = {
         'robot_description': ParameterValue(
@@ -129,6 +134,24 @@ def generate_launch_description():
             default_value='true',
             description='Start RViz2.',
         ),
+        DeclareLaunchArgument(
+            'kinova_library_dir',
+            default_value=os.path.join(
+                os.environ.get(
+                    'KINOVA_ROOT',
+                    os.path.expanduser(
+                        '~/Escritorio/TESIS_2_DEPENDENCIES/'
+                        'kinova-ros/kinova_driver'
+                    ),
+                ),
+                'lib',
+                'x86_64-linux-gnu',
+            ),
+            description=(
+                'Directory containing the Kinova command and communication '
+                'layer shared libraries.'
+            ),
+        ),
     ]
 
     nodes = [
@@ -144,6 +167,15 @@ def generate_launch_description():
             executable='jaco_hardware_node',
             name='jaco_hardware_adapter',
             output='screen',
+            additional_env={
+                'LD_LIBRARY_PATH': [
+                    kinova_library_dir,
+                    ':',
+                    EnvironmentVariable(
+                        'LD_LIBRARY_PATH', default_value=''
+                    ),
+                ],
+            },
             parameters=[
                 hardware_config,
                 {
@@ -224,6 +256,7 @@ def generate_launch_description():
                 'runtime_max_scale_increment': 0.10,
                 'runtime_recovery_sample_period_sec': 0.10,
                 'jog_command_timeout_sec': 0.25,
+                'max_jog_message_age_sec': 0.15,
             }],
         ),
         Node(
