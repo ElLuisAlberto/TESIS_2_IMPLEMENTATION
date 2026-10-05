@@ -1,3 +1,5 @@
+# Copyright 2026 Luis Alberto Munoz Marin
+
 """Launch the robot-independent RGB-D perception processing pipeline."""
 
 from launch import LaunchDescription
