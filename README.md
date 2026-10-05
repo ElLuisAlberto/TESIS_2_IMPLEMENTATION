@@ -17,7 +17,9 @@ El Kinova JACO2 `j2n6s300` es el caso de estudio. La lógica preventiva permanec
 - Se validaron conexión USB, estado articular, TF, diagnóstico, armado, desarmado, ejecución, retorno, HOLD y watchdogs.
 - La base automatizada registra **175 pruebas, 0 errores, 0 fallos y 4 omitidas**.
 - La prueba física de J6 terminó sin fallos, con control a 100 Hz y feedback a 20 Hz.
-- La D435i fue validada de forma independiente, pero todavía no alimenta al supervisor preventivo.
+- La D435i dispone de un pipeline autónomo de preprocesamiento, diagnóstico y
+  extracción de un obstáculo candidato. Su salida permanece aislada del
+  supervisor hasta completar calibración y validación.
 
 Resultados físicos de referencia:
 
@@ -94,7 +96,7 @@ No deben ejecutarse simultáneamente dos adaptadores JACO, ROS 1 ni herramientas
 | `src/thesis_ui` | Interfaz articular para simulación y hardware |
 | `src/thesis_telemetry` | Registro de métricas y eventos |
 | `src/thesis_validation` | Evaluación reproducible de escenarios |
-| `thesis_perception` | Base para el futuro procesamiento de obstáculos RGB-D |
+| `thesis_perception` | Procesamiento RGB-D autónomo y obstáculo candidato aislado |
 | `tools/validation` | Ejecutores mock, físicos y de escenarios |
 | `tools/realsense_d435i_test` | Adquisición y validación independiente de la D435i |
 | `evidence/avance2` | Evidencia seleccionada de escenarios E01–E08 |
@@ -318,6 +320,7 @@ colcon test --packages-select \
   thesis_hardware \
   thesis_simulation \
   thesis_ui \
+  thesis_perception \
   --event-handlers console_direct+
 
 colcon test-result --verbose
@@ -376,13 +379,34 @@ Si el SDK no informa número de serie y solo existe un JACO conectado, el adapta
 
 ## Percepción D435i
 
-La adquisición RGB-D e inercial permanece desacoplada del sistema preventivo. Su referencia funcional y documentación se encuentran en:
+La adquisición RGB-D e inercial permanece desacoplada del sistema preventivo.
+El paquete `thesis_perception` preprocesa la nube, diagnostica frecuencia,
+frame y timestamps, y extrae una esfera conservadora para un obstáculo
+principal. La salida predeterminada es deliberadamente segura:
+
+```text
+/thesis/perception/obstacle_candidate
+```
+
+No se conecta automáticamente a `/thesis/obstacle_input`. Para caracterizar la
+cámara sin Gazebo ni JACO2 puede utilizarse:
+
+```bash
+ros2 launch thesis_perception d435i_standalone.launch.py \
+  start_rviz:=true
+```
+
+La referencia de adquisición y los reportes se encuentran en:
 
 ```text
 tools/realsense_d435i_test/
 ```
 
-La cámara todavía no publica una representación validada de obstáculos hacia `/thesis/obstacle_input`. Permanecen pendientes la extrínseca respecto del robot, el recorte del espacio de trabajo, la exclusión del propio manipulador y el watchdog perceptual.
+La cámara todavía no publica una representación validada hacia
+`/thesis/obstacle_input`. Permanecen como puertas de integración la extrínseca
+medida, el recorte caracterizado del espacio de trabajo, la evaluación de error
+espacial, la exclusión del propio manipulador y la respuesta ante pérdida del
+sensor. La guía específica se encuentra en `thesis_perception/README.md`.
 
 ## Evidencia y documentación
 

@@ -3,6 +3,7 @@ import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from sensor_msgs.msg import JointState
 from thesis_interfaces.msg import (
@@ -51,6 +52,16 @@ from thesis_core.ros_runtime import spin_node
 MIN_DURATION_SEC = 0.1
 MAX_DURATION_SEC = 30.0
 MIN_RUNTIME_REMAINING_SEC = 0.10
+
+
+def message_age_seconds(now_nanoseconds, stamp):
+    """Return message age using the shared ROS clock."""
+    stamp_nanoseconds = (
+        int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+    )
+    if stamp_nanoseconds <= 0:
+        return math.inf
+    return (int(now_nanoseconds) - stamp_nanoseconds) * 1.0e-9
 
 
 def runtime_remaining_time(duration, elapsed):
@@ -136,6 +147,7 @@ class SafetySupervisorNode(Node):
         self.declare_parameter('runtime_max_scale_increment', 0.10)
         self.declare_parameter('runtime_recovery_sample_period_sec', 0.10)
         self.declare_parameter('jog_command_timeout_sec', 0.25)
+        self.declare_parameter('max_jog_message_age_sec', 0.15)
         self.declare_parameter(
             'kinematic_tf_tolerance_m',
             KINEMATIC_TF_TOLERANCE_M,
@@ -197,11 +209,16 @@ class SafetySupervisorNode(Node):
             self.candidate_command_callback,
             10,
         )
+        jog_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
         self.jog_subscription = self.create_subscription(
             JointCommand,
             '/thesis/jog_intent',
             self.jog_intent_callback,
-            10,
+            jog_qos,
         )
 
         self.proximity_subscription = self.create_subscription(
@@ -226,7 +243,7 @@ class SafetySupervisorNode(Node):
         self.supervised_jog_publisher = self.create_publisher(
             JointCommand,
             '/thesis/supervised_jog_command',
-            10,
+            jog_qos,
         )
 
         self.prediction_publisher = self.create_publisher(
@@ -256,6 +273,20 @@ class SafetySupervisorNode(Node):
         )
         if runtime_rate <= 0.0:
             raise ValueError('runtime_rate_hz must be greater than zero')
+        jog_timeout = float(
+            self.get_parameter('jog_command_timeout_sec').value
+        )
+        maximum_jog_age = float(
+            self.get_parameter('max_jog_message_age_sec').value
+        )
+        if (
+            not math.isfinite(maximum_jog_age)
+            or not 0.0 < maximum_jog_age < jog_timeout
+        ):
+            raise ValueError(
+                'max_jog_message_age_sec must be positive and smaller '
+                'than jog_command_timeout_sec'
+            )
         tf_tolerance = float(self.get_parameter(
             'kinematic_tf_tolerance_m'
         ).value)
@@ -810,6 +841,19 @@ class SafetySupervisorNode(Node):
         self.publish_timing(
             msg, 'SUPERVISOR_RECEIVE', receive_monotonic_ns
         )
+        now_ns = self.get_clock().now().nanoseconds
+        message_age = message_age_seconds(now_ns, msg.stamp)
+        maximum_age = float(
+            self.get_parameter('max_jog_message_age_sec').value
+        )
+        if message_age < -0.05 or message_age > maximum_age:
+            self.publish_jog_stop(
+                msg,
+                'JOG_MESSAGE_STALE',
+                f'La intención JOG llegó obsoleta '
+                f'({message_age:.3f} s).',
+            )
+            return
         self.last_jog_intent_monotonic = time.monotonic()
         if self.active_execution is not None:
             self.publish_jog_stop(
@@ -862,7 +906,6 @@ class SafetySupervisorNode(Node):
             for name in JOINT_NAMES
         )
 
-        now_ns = self.get_clock().now().nanoseconds
         state_age = (now_ns - self.last_state_receive_ns) / 1e9
         if state_age > float(
                 self.get_parameter('max_state_age_sec').value):
@@ -1944,6 +1987,11 @@ class SafetySupervisorNode(Node):
                 f'{MIN_DURATION_SEC:.1f} and '
                 f'{MAX_DURATION_SEC:.1f} seconds'
             )
+            return
+
+        # Point commands preserve their requested target. An infeasible
+        # duration is rejected instead of silently shortening the movement.
+        if not self.validate_velocity(msg, duration_sec):
             return
 
         bounded_result = self.bound_candidate_velocity(

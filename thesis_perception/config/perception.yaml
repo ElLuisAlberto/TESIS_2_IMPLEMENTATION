@@ -2,12 +2,19 @@ pointcloud_preprocessor:
   ros__parameters:
     input_topic: /camera/d435i/depth/color/points
     output_topic: /thesis/perception/points_filtered
-    target_frame: base_link
+    # Empty preserves the camera frame for standalone validation. Set world
+    # only after loading a measured camera extrinsic.
+    target_frame: ""
     use_latest_transform: true
     restamp_output: false
-    enable_crop: true
+    transform_timeout_s: 0.10
+    enable_crop: false
     enable_voxel: true
     voxel_leaf_size: 0.02
+    # Sensor-level sanity interval applied before voxelization. It is
+    # independent from the workspace crop calibrated later.
+    min_valid_range_m: 0.10
+    max_valid_range_m: 10.0
     min_x: -1.5
     max_x: 1.5
     min_y: -1.5
@@ -15,13 +22,36 @@ pointcloud_preprocessor:
     min_z: -1.0
     max_z: 2.5
 
+obstacle_extractor:
+  ros__parameters:
+    input_topic: /thesis/perception/points_filtered
+    # Candidate output is deliberately isolated from the safety supervisor.
+    obstacle_topic: /thesis/perception/obstacle_candidate
+    diagnostics_topic: /thesis/perception/extraction_diagnostics
+    marker_topic: /thesis/perception/obstacle_marker
+    cluster_tolerance_m: 0.06
+    min_cluster_points: 30
+    max_cluster_points: 200000
+    min_obstacle_radius_m: 0.02
+    max_obstacle_radius_m: 0.75
+    max_obstacle_distance_m: 2.5
+    base_uncertainty_m: 0.03
+    tracking_timeout_s: 0.5
+    velocity_smoothing: 0.35
+    max_velocity_mps: 2.0
+
 perception_health:
   ros__parameters:
     cloud_topic: /thesis/perception/points_filtered
     imu_topic: /camera/d435i/imu
     diagnostics_topic: /thesis/perception/diagnostics
-    imu_required: true
+    hardware_id: Intel RealSense D435i
+    expected_frame: ""
+    imu_required: false
     min_cloud_hz: 10.0
     min_imu_hz: 50.0
     cloud_timeout_s: 0.5
     imu_timeout_s: 0.2
+    max_stamp_age_s: 0.5
+    future_tolerance_s: 0.05
+    min_cloud_points: 0

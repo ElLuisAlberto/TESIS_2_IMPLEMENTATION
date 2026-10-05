@@ -38,6 +38,10 @@ setup(
         'console_scripts': [
             'hardware_readiness = '
             'thesis_hardware.hardware_readiness_node:main',
+            'continuous_control_validator = '
+            'thesis_hardware.continuous_control_validator:main',
+            'point_settling_validator = '
+            'thesis_hardware.point_settling_validator:main',
         ],
     },
 )

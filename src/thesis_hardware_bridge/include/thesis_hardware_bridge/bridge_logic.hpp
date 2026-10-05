@@ -86,6 +86,16 @@ inline bool finite_vector(const JointVector & values)
     [](double value) {return std::isfinite(value);});
 }
 
+inline bool message_age_is_fresh(
+  double age_sec, double maximum_age_sec,
+  double future_tolerance_sec = 0.05)
+{
+  return std::isfinite(age_sec) && std::isfinite(maximum_age_sec) &&
+         std::isfinite(future_tolerance_sec) && maximum_age_sec > 0.0 &&
+         future_tolerance_sec >= 0.0 && age_sec >= -future_tolerance_sec &&
+         age_sec <= maximum_age_sec;
+}
+
 inline double shortest_delta(
   std::size_t index, double target, double current)
 {
@@ -155,7 +165,8 @@ inline JointVector track_target_velocity(
   const JointVector & target,
   const JointVector & requested_velocity,
   double speed_scale,
-  double control_period_sec,
+  double feedback_period_sec,
+  double position_gain,
   double tolerance_rad)
 {
   if (!finite_vector(current) || !finite_vector(target) ||
@@ -166,8 +177,11 @@ inline JointVector track_target_velocity(
   if (!std::isfinite(speed_scale) || speed_scale < 0.0 || speed_scale > 1.0) {
     throw std::invalid_argument("speed scale must be in [0, 1]");
   }
-  if (!std::isfinite(control_period_sec) || control_period_sec <= 0.0) {
-    throw std::invalid_argument("control period must be positive");
+  if (!std::isfinite(feedback_period_sec) || feedback_period_sec <= 0.0) {
+    throw std::invalid_argument("feedback period must be positive");
+  }
+  if (!std::isfinite(position_gain) || position_gain <= 0.0) {
+    throw std::invalid_argument("position gain must be positive");
   }
   if (!std::isfinite(tolerance_rad) || tolerance_rad <= 0.0) {
     throw std::invalid_argument("tolerance must be positive");
@@ -184,8 +198,10 @@ inline JointVector track_target_velocity(
     const double requested_magnitude = std::abs(requested_velocity[index]);
     const double maximum =
       std::min(kVelocityLimits[index], requested_magnitude) * speed_scale;
-    const double stop_limited = std::abs(error) / control_period_sec;
-    const double magnitude = std::min(maximum, stop_limited);
+    const double stop_limited = std::abs(error) / feedback_period_sec;
+    const double proportional_limited = std::abs(error) * position_gain;
+    const double magnitude = std::min(
+      {maximum, stop_limited, proportional_limited});
     command[index] = std::copysign(magnitude, error);
   }
   return command;

@@ -1,21 +1,37 @@
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <functional>
-#include <memory>
-#include <stdexcept>
-#include <string>
+// Copyright 2026 Luis Alberto Munoz Marin
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2/exceptions.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <stdexcept>
+#include <string>
+
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
 
 class PointCloudPreprocessor : public rclcpp::Node
@@ -30,24 +46,36 @@ public:
       "input_topic", "/camera/d435i/depth/color/points");
     output_topic_ = declare_parameter<std::string>(
       "output_topic", "/thesis/perception/points_filtered");
-    target_frame_ = declare_parameter<std::string>("target_frame", "base_link");
+    target_frame_ = declare_parameter<std::string>("target_frame", "");
     use_latest_transform_ = declare_parameter<bool>("use_latest_transform", true);
     restamp_output_ = declare_parameter<bool>("restamp_output", false);
-    enable_crop_ = declare_parameter<bool>("enable_crop", true);
+    transform_timeout_s_ = declare_parameter<double>("transform_timeout_s", 0.10);
+    enable_crop_ = declare_parameter<bool>("enable_crop", false);
     enable_voxel_ = declare_parameter<bool>("enable_voxel", true);
     voxel_leaf_size_ = declare_parameter<double>("voxel_leaf_size", 0.02);
+    min_valid_range_m_ = declare_parameter<double>("min_valid_range_m", 0.10);
+    max_valid_range_m_ = declare_parameter<double>("max_valid_range_m", 10.0);
     min_x_ = declare_parameter<double>("min_x", -1.5);
     max_x_ = declare_parameter<double>("max_x", 1.5);
     min_y_ = declare_parameter<double>("min_y", -1.5);
     max_y_ = declare_parameter<double>("max_y", 1.5);
-    min_z_ = declare_parameter<double>("min_z", 0.0);
+    min_z_ = declare_parameter<double>("min_z", -1.0);
     max_z_ = declare_parameter<double>("max_z", 2.5);
 
-    if (voxel_leaf_size_ <= 0.0) {
-      throw std::runtime_error("voxel_leaf_size debe ser mayor que cero");
+    if (voxel_leaf_size_ <= 0.0 || transform_timeout_s_ <= 0.0) {
+      throw std::runtime_error(
+              "voxel_leaf_size y transform_timeout_s deben ser mayores que cero");
+    }
+    if (min_valid_range_m_ < 0.0 || min_valid_range_m_ >= max_valid_range_m_) {
+      throw std::runtime_error("el intervalo de distancia valida es incorrecto");
+    }
+    if (!(min_x_ < max_x_ && min_y_ < max_y_ && min_z_ < max_z_)) {
+      throw std::runtime_error("los limites de recorte son invalidos");
     }
 
-    auto qos = rclcpp::SensorDataQoS().keep_last(5);
+    // Perception must process the newest geometry instead of accumulating
+    // stale PointCloud2 samples when a frame temporarily takes too long.
+    auto qos = rclcpp::SensorDataQoS().keep_last(1);
     publisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(output_topic_, qos);
     subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       input_topic_, qos,
@@ -69,7 +97,7 @@ private:
           rclcpp::Time(0, 0, RCL_ROS_TIME) : rclcpp::Time(msg->header.stamp);
         const auto transform = tf_buffer_.lookupTransform(
           target_frame_, msg->header.frame_id, lookup_time,
-          rclcpp::Duration::from_seconds(0.10));
+          rclcpp::Duration::from_seconds(transform_timeout_s_));
         tf2::doTransform(*msg, transformed, transform);
       } else {
         transformed = *msg;
@@ -86,11 +114,33 @@ private:
       new pcl::PointCloud<pcl::PointXYZRGB>());
     pcl::fromROSMsg(transformed, *cloud);
 
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cropped = cloud;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr range_filtered(
+      new pcl::PointCloud<pcl::PointXYZRGB>());
+    range_filtered->points.reserve(cloud->points.size());
+    const double min_range_sq = min_valid_range_m_ * min_valid_range_m_;
+    const double max_range_sq = max_valid_range_m_ * max_valid_range_m_;
+    for (const auto & point : cloud->points) {
+      const double x = static_cast<double>(point.x);
+      const double y = static_cast<double>(point.y);
+      const double z = static_cast<double>(point.z);
+      if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+        continue;
+      }
+      const double range_sq = x * x + y * y + z * z;
+      if (range_sq < min_range_sq || range_sq > max_range_sq) {
+        continue;
+      }
+      range_filtered->points.push_back(point);
+    }
+    range_filtered->width = static_cast<std::uint32_t>(range_filtered->points.size());
+    range_filtered->height = 1;
+    range_filtered->is_dense = true;
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cropped = range_filtered;
     if (enable_crop_) {
       cropped.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
       pcl::CropBox<pcl::PointXYZRGB> crop;
-      crop.setInputCloud(cloud);
+      crop.setInputCloud(range_filtered);
       crop.setMin(Eigen::Vector4f(min_x_, min_y_, min_z_, 1.0F));
       crop.setMax(Eigen::Vector4f(max_x_, max_y_, max_z_, 1.0F));
       crop.filter(*cropped);
@@ -109,7 +159,11 @@ private:
     sensor_msgs::msg::PointCloud2 output;
     pcl::toROSMsg(*filtered, output);
     output.header.frame_id = target_frame_.empty() ? transformed.header.frame_id : target_frame_;
-    output.header.stamp = restamp_output_ ? this->now().to_msg() : transformed.header.stamp;
+    if (restamp_output_) {
+      output.header.stamp = this->now();
+    } else {
+      output.header.stamp = transformed.header.stamp;
+    }
     publisher_->publish(output);
   }
 
@@ -118,9 +172,12 @@ private:
   std::string target_frame_;
   bool use_latest_transform_;
   bool restamp_output_;
+  double transform_timeout_s_;
   bool enable_crop_;
   bool enable_voxel_;
   double voxel_leaf_size_;
+  double min_valid_range_m_;
+  double max_valid_range_m_;
   double min_x_;
   double max_x_;
   double min_y_;

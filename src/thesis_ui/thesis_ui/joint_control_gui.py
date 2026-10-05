@@ -2,6 +2,7 @@ import math
 import sys
 import time
 from collections import deque
+from functools import partial
 from PyQt5.QtCore import QEvent
 
 from PyQt5.QtCore import QSignalBlocker
@@ -27,11 +28,13 @@ from PyQt5.QtWidgets import QWidget
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool
 from thesis_interfaces.msg import (
+    CartesianCommand,
     CommandDecision,
     ExecutionControl,
     ExecutionTrajectory,
@@ -46,7 +49,6 @@ from thesis_core.joint_model import (
     JOINT_NAMES,
     JOINT_POSITION_LIMITS,
     JOINT_VELOCITY_LIMITS,
-    saturate_target_by_velocity,
 )
 
 
@@ -66,6 +68,7 @@ JOINT_LIMITS_DEG = tuple(
 
 INITIAL_POSE_DEG = [0.0, 180.0, 180.0, 0.0, 0.0, 0.0]
 TEST_POSE_DEG = [math.degrees(0.20), 180.0, 180.0, 0.0, 0.0, 0.0]
+CARTESIAN_READY_POSE_DEG = [-45.0, 160.0, 200.0, 0.0, 15.0, 0.0]
 
 ALLOWED_SPEED_DEG = tuple(
     math.degrees(JOINT_VELOCITY_LIMITS[name]) for name in JOINT_NAMES
@@ -212,8 +215,13 @@ class JointGuiNode(Node):
         self.intent_publisher = self.create_publisher(
             JointCommand, '/thesis/preview_intent', 10,
         )
+        jog_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
         self.jog_intent_publisher = self.create_publisher(
-            JointCommand, '/thesis/jog_intent', 10,
+            JointCommand, '/thesis/jog_intent', jog_qos,
         )
         self.last_decision = None
         self.decision_subscription = self.create_subscription(
@@ -232,6 +240,11 @@ class JointGuiNode(Node):
         self.candidate_publisher = self.create_publisher(
             JointCommand,
             '/thesis/candidate_command',
+            10,
+        )
+        self.cartesian_candidate_publisher = self.create_publisher(
+            CartesianCommand,
+            '/thesis/cartesian_candidate',
             10,
         )
 
@@ -470,6 +483,11 @@ class JointGuiNode(Node):
             'Control manual continuo': (
                 self.jog_intent_publisher.get_subscription_count() > 0
             ),
+            'JOG supervisado': (
+                self.count_publishers(
+                    '/thesis/supervised_jog_command'
+                ) > 0
+            ),
             'Salida supervisada': (
                 self.count_publishers('/thesis/supervised_command') > 0
             ),
@@ -498,6 +516,10 @@ class JointGuiNode(Node):
             }
         return {
             'Gazebo /clock': self.count_publishers('/clock') > 0,
+            'Adaptador cartesiano': (
+                self.cartesian_candidate_publisher
+                .get_subscription_count() > 0
+            ),
             **status,
         }
 
@@ -508,15 +530,7 @@ class JointGuiNode(Node):
         msg.stamp = now.to_msg()
         msg.command_id = f'gui_{now.nanoseconds}'
         msg.joint_names = list(JOINT_NAMES)
-        current = tuple(
-            self.current_positions[name] for name in JOINT_NAMES
-        )
-        saturation = saturate_target_by_velocity(
-            current,
-            positions,
-            duration_sec,
-        )
-        msg.positions = list(saturation.positions)
+        msg.positions = list(positions)
 
         seconds = int(duration_sec)
         nanoseconds = int((duration_sec - seconds) * 1e9)
@@ -535,6 +549,40 @@ class JointGuiNode(Node):
         return (
             msg.command_id,
             self.candidate_publisher.get_subscription_count(),
+        )
+
+    def publish_cartesian_candidate(self, pose, duration_sec):
+        """Publish one simulation Cartesian request with a traceable ID."""
+        msg = CartesianCommand()
+        now = self.get_clock().now()
+        msg.stamp = now.to_msg()
+        msg.command_id = f'cartesian_gui_{now.nanoseconds}'
+        msg.frame_id = 'world'
+        (
+            msg.x,
+            msg.y,
+            msg.z,
+            msg.roll,
+            msg.pitch,
+            msg.yaw,
+        ) = pose
+        seconds = int(duration_sec)
+        msg.duration.sec = seconds
+        msg.duration.nanosec = int(
+            (duration_sec - seconds) * 1.0e9
+        )
+
+        self.last_command_id = msg.command_id
+        self.last_allowed_id = None
+        self.last_supervised_duration = None
+        self.last_prediction = None
+        self.last_decision = None
+        self.last_execution = None
+        self.last_execution_control = None
+        self.cartesian_candidate_publisher.publish(msg)
+        return (
+            msg.command_id,
+            self.cartesian_candidate_publisher.get_subscription_count(),
         )
 
 
@@ -564,8 +612,12 @@ class JointControlWindow(QMainWindow):
         self.jog_last_motion_time = [None] * len(JOINT_NAMES)
         self.pending_command_id = None
         self.pending_since = None
+        self.shutdown_started = False
         self.connection_indicators = {}
         self.pose_labels = []
+        self.cartesian_target_inputs = []
+        self.cartesian_target_initialized = False
+        self.cartesian_send_button = None
         self.minimum_safe_duration = None
         self.prediction_is_stale = False
 
@@ -597,7 +649,7 @@ class JointControlWindow(QMainWindow):
 
         mode_title = 'BRAZO FÍSICO' if self.is_hardware_mode else 'SIMULACIÓN'
         title = QLabel(
-            f'Control articular supervisado - JACO2 - {mode_title}'
+            f'Control supervisado JACO2 - {mode_title}'
         )
         title.setObjectName('titleLabel')
         main_layout.addWidget(title)
@@ -610,8 +662,9 @@ class JointControlWindow(QMainWindow):
             )
         else:
             banner_text = (
-                'MODO SIMULACIÓN: los comandos se publican únicamente en '
-                '/thesis/candidate_command y deben pasar por el supervisor.'
+                'MODO SIMULACIÓN: permite objetivos articulares y '
+                'cartesianos X/Y/Z/Roll/Pitch/Yaw. Ambos se convierten en '
+                'comandos articulares y deben pasar por el mismo supervisor.'
             )
         safety_banner = QLabel(banner_text)
         safety_banner.setObjectName('safetyBanner')
@@ -767,6 +820,7 @@ class JointControlWindow(QMainWindow):
             '/joint_states',
             'Supervisor',
             'Control manual continuo',
+            'JOG supervisado',
             'Salida supervisada',
             'Predicción geométrica',
             'Referencia de ejecución',
@@ -780,7 +834,9 @@ class JointControlWindow(QMainWindow):
                 *connection_names,
             ]
         else:
-            connection_names = ['Gazebo /clock', *connection_names]
+            connection_names = [
+                'Gazebo /clock', 'Adaptador cartesiano', *connection_names
+            ]
 
         for name in connection_names:
             indicator = QLabel(f'● {name}')
@@ -836,6 +892,72 @@ class JointControlWindow(QMainWindow):
             pose_layout.addWidget(value_label, 1, index)
 
         main_layout.addWidget(pose_group)
+
+        if not self.is_hardware_mode:
+            cartesian_group = QGroupBox(
+                'Movimiento cartesiano simulado del efector final'
+            )
+            cartesian_layout = QGridLayout(cartesian_group)
+            cartesian_note = QLabel(
+                'Objetivo respecto a world. Pasos máximos por comando: '
+                '10 cm y 20°. La cinemática inversa se ejecuta en un nodo '
+                'separado y el resultado pasa por el supervisor existente.'
+            )
+            cartesian_note.setWordWrap(True)
+            cartesian_layout.addWidget(cartesian_note, 0, 0, 1, 5)
+            labels = ('X', 'Y', 'Z', 'Roll', 'Pitch', 'Yaw')
+            for index, label in enumerate(labels):
+                row = index + 1
+                position_axis = index < 3
+                step = 0.01 if position_axis else 5.0
+                suffix = ' m' if position_axis else ' °'
+                minimum = -1.5 if position_axis else -180.0
+                maximum = 1.5 if position_axis else 180.0
+                if index == 2:
+                    minimum, maximum = -0.20, 1.80
+                target_input = QDoubleSpinBox()
+                target_input.setRange(minimum, maximum)
+                target_input.setDecimals(3 if position_axis else 1)
+                target_input.setSingleStep(step)
+                target_input.setSuffix(suffix)
+                decrease = QPushButton(f'−{step:g}{suffix}')
+                increase = QPushButton(f'+{step:g}{suffix}')
+                decrease.clicked.connect(
+                    partial(self.adjust_cartesian_target, index, -step)
+                )
+                increase.clicked.connect(
+                    partial(self.adjust_cartesian_target, index, step)
+                )
+                self.cartesian_target_inputs.append(target_input)
+                cartesian_layout.addWidget(QLabel(label), row, 0)
+                cartesian_layout.addWidget(target_input, row, 1)
+                cartesian_layout.addWidget(decrease, row, 2)
+                cartesian_layout.addWidget(increase, row, 3)
+
+            copy_cartesian = QPushButton('Copiar pose cartesiana actual')
+            copy_cartesian.clicked.connect(
+                self.copy_current_cartesian_pose
+            )
+            ready_pose = QPushButton(
+                'Cargar postura articular recomendada'
+            )
+            ready_pose.clicked.connect(
+                lambda: self.load_pose(CARTESIAN_READY_POSE_DEG)
+            )
+            self.cartesian_send_button = QPushButton(
+                'ENVIAR OBJETIVO CARTESIANO SIMULADO'
+            )
+            self.cartesian_send_button.setObjectName('cartesianSendButton')
+            self.cartesian_send_button.setEnabled(False)
+            self.cartesian_send_button.clicked.connect(
+                self.send_cartesian_candidate
+            )
+            cartesian_layout.addWidget(copy_cartesian, 7, 0, 1, 2)
+            cartesian_layout.addWidget(ready_pose, 7, 2, 1, 2)
+            cartesian_layout.addWidget(
+                self.cartesian_send_button, 8, 0, 1, 4
+            )
+            main_layout.addWidget(cartesian_group)
 
         command_group = QGroupBox('Configuración del comando')
         command_layout = QHBoxLayout(command_group)
@@ -955,14 +1077,15 @@ class JointControlWindow(QMainWindow):
         main_layout.insertWidget(2, metrics_group)
 
         self.preview_button = QPushButton(
-            'ACTIVAR VOLUMEN NOMINAL CONTINUO'
+            'PREVISUALIZAR VOLUMEN NOMINAL'
         )
         self.preview_button.setCheckable(True)
         main_layout.addWidget(self.preview_button)
         self.preview_note = QLabel(
-            'Volumen azul: intención nominal, horizonte 1 s y actualización '
-            'solicitada a 10 Hz. Durante la ejecución, el volumen cambia de '
-            'color y el supervisor puede reducir la velocidad o detener '
+            'Esta opción solo previsualiza el objetivo; no envía movimiento. '
+            'Durante el control manual y la ejecución, el volumen supervisado '
+            'se activa automáticamente a 10 Hz y refleja la orden segura que '
+            'puede reducir la velocidad o detener '
             + (
                 'el movimiento del JACO2 físico.'
                 if self.is_hardware_mode else 'el goal activo de Gazebo.'
@@ -970,6 +1093,14 @@ class JointControlWindow(QMainWindow):
         )
         self.preview_note.setWordWrap(True)
         main_layout.addWidget(self.preview_note)
+        self.volume_mode_label = QLabel(
+            'VOLUMEN CONTINUO: postura medida, sin intención de movimiento.'
+        )
+        self.volume_mode_label.setWordWrap(True)
+        self.volume_mode_label.setStyleSheet(
+            'color: #334155; font-weight: bold;'
+        )
+        main_layout.addWidget(self.volume_mode_label)
         self.preview_timer = QTimer(self)
         self.preview_timer.timeout.connect(self.publish_preview_intent)
         self.preview_timer.start(100)
@@ -1004,7 +1135,7 @@ class JointControlWindow(QMainWindow):
         self.history_table.setHorizontalHeaderLabels([
             'Hora',
             'ID',
-            'Objetivo J1',
+            'Objetivo',
             'Duración',
             'Estado',
         ])
@@ -1057,6 +1188,13 @@ class JointControlWindow(QMainWindow):
             '  padding: 10px; font-weight: bold; border-radius: 5px;'
             '}'
             '#sendButton:disabled { background-color: #94a3b8; }'
+            '#cartesianSendButton {'
+            '  background-color: #1d4ed8; color: white;'
+            '  padding: 10px; font-weight: bold; border-radius: 5px;'
+            '}'
+            '#cartesianSendButton:disabled {'
+            '  background-color: #94a3b8;'
+            '}'
             '#connectionLabel { font-weight: bold; color: #92400e; }'
             '#readinessLabel {'
             '  border: 1px solid #cbd5e1; border-radius: 5px;'
@@ -1083,8 +1221,16 @@ class JointControlWindow(QMainWindow):
         return 'READY' if status_reader is None else status_reader()
 
     def spin_ros(self):
-        if rclpy.ok():
+        if not rclpy.ok():
+            self.close()
+            return
+        try:
             rclpy.spin_once(self.ros_node, timeout_sec=0.0)
+        except Exception:
+            if not rclpy.ok():
+                self.close()
+                return
+            raise
 
     def refresh_ui(self):
         state_ready = self.ros_node.state_is_ready()
@@ -1102,6 +1248,22 @@ class JointControlWindow(QMainWindow):
             state_ready and connected and not busy and not jog_active
             and system_ready
         )
+        if self.cartesian_send_button is not None:
+            publisher = getattr(
+                self.ros_node, 'cartesian_candidate_publisher', None
+            )
+            cartesian_connected = (
+                publisher is not None
+                and publisher.get_subscription_count() > 0
+            )
+            self.cartesian_send_button.setEnabled(
+                state_ready
+                and cartesian_connected
+                and self.cartesian_target_initialized
+                and not busy
+                and not jog_active
+                and system_ready
+            )
         self.send_button.setText(
             'ESPERANDO RESULTADO DEL COMANDO' if busy
             else 'ENVIAR COMANDO CANDIDATO'
@@ -1166,6 +1328,7 @@ class JointControlWindow(QMainWindow):
             )
 
         self.refresh_connections()
+        self.refresh_volume_mode()
         self.refresh_hardware_controls()
         self.refresh_end_effector_pose()
         self.refresh_velocity_preview()
@@ -1191,6 +1354,7 @@ class JointControlWindow(QMainWindow):
         if not self.ros_node.state_is_ready():
             self.minimum_safe_duration = None
             self.adjust_duration_button.setEnabled(False)
+            self.send_button.setEnabled(False)
             self.velocity_summary_label.setText(
                 'Esperando un estado articular reciente.'
             )
@@ -1235,7 +1399,7 @@ class JointControlWindow(QMainWindow):
                 f'{delta_degrees:+.2f}°',
                 f'{requested_speed:.2f}°/s',
                 f'{allowed_speed:.2f}°/s',
-                'ALLOW' if joint_allowed else 'REJECT',
+                'ENVIABLE' if joint_allowed else 'BLOQUEADO',
             ]
 
             for column, value in enumerate(values):
@@ -1252,7 +1416,7 @@ class JointControlWindow(QMainWindow):
 
         if predicted_allow:
             self.velocity_summary_label.setText(
-                'VELOCIDAD: PROBABLE ALLOW | '
+                'VELOCIDAD: ENVIABLE | '
                 f'Joint limitante: {limiting_joint} | '
                 f'Duración mínima estimada: {minimum_duration:.2f} s'
             )
@@ -1260,8 +1424,9 @@ class JointControlWindow(QMainWindow):
                 'color: #166534;'
             )
         else:
+            self.send_button.setEnabled(False)
             self.velocity_summary_label.setText(
-                'VELOCIDAD: PROBABLE REJECT | '
+                'VELOCIDAD: NO ENVIABLE | '
                 f'Joint limitante: {limiting_joint} | '
                 f'Duración mínima estimada: {minimum_duration:.2f} s'
             )
@@ -1298,6 +1463,37 @@ class JointControlWindow(QMainWindow):
             indicator.setStyleSheet(
                 f'color: {color}; font-weight: bold;'
             )
+
+    def refresh_volume_mode(self):
+        """Explain which safe trajectory feeds the continuous volume."""
+        if self.jog_mode_button.isChecked():
+            text = (
+                'VOLUMEN SUPERVISADO CONTINUO: activo automáticamente con '
+                'el JOG seguro; no requiere activar la previsualización.'
+            )
+            color = '#166534'
+        elif self.ros_node.execution_is_active():
+            text = (
+                'VOLUMEN SUPERVISADO DE EJECUCIÓN: activo automáticamente '
+                'desde el estado medido hasta el objetivo aceptado.'
+            )
+            color = '#166534'
+        elif self.preview_button.isChecked():
+            text = (
+                'VOLUMEN NOMINAL: previsualización activa; no comanda el '
+                'brazo hasta pulsar ENVIAR COMANDO CANDIDATO.'
+            )
+            color = '#1d4ed8'
+        else:
+            text = (
+                'VOLUMEN CONTINUO: postura medida, sin intención de '
+                'movimiento.'
+            )
+            color = '#334155'
+        self.volume_mode_label.setText(text)
+        self.volume_mode_label.setStyleSheet(
+            f'color: {color}; font-weight: bold;'
+        )
 
     def request_hardware_arm(self):
         """Ask for explicit confirmation before enabling physical output."""
@@ -1810,10 +2006,15 @@ class JointControlWindow(QMainWindow):
         state,
     ):
         self.history_table.insertRow(0)
+        target_text = (
+            target_j1
+            if isinstance(target_j1, str)
+            else f'{target_j1:.2f}°'
+        )
         values = [
             time.strftime('%H:%M:%S'),
             command_id,
-            f'{target_j1:.2f}°',
+            target_text,
             f'{duration_sec:.1f} s',
             state,
         ]
@@ -1879,6 +2080,43 @@ class JointControlWindow(QMainWindow):
             'La postura actual se copió como objetivo.'
         )
         self.status_label.setStyleSheet('color: #334155;')
+
+    def copy_current_cartesian_pose(self):
+        """Copy the measured world-to-tool pose into Cartesian inputs."""
+        if self.is_hardware_mode or not self.cartesian_target_inputs:
+            return
+        self.ros_node.update_end_effector_pose()
+        pose = self.ros_node.end_effector_pose
+        if pose is None:
+            QMessageBox.warning(
+                self,
+                'Pose cartesiana no disponible',
+                'No existe TF reciente de world al efector final.',
+            )
+            return
+        values = list(pose[:3]) + [
+            math.degrees(value) for value in pose[3:]
+        ]
+        for target_input, value in zip(
+            self.cartesian_target_inputs, values
+        ):
+            target_input.setValue(value)
+        self.cartesian_target_initialized = True
+        self.status_label.setText(
+            'Pose cartesiana actual copiada. Ajuste X/Y/Z o '
+            'Roll/Pitch/Yaw antes de enviarla.'
+        )
+        self.status_label.setStyleSheet('color: #334155;')
+
+    def adjust_cartesian_target(self, index, increment, checked=False):
+        """Apply one finite Cartesian UI increment without moving Gazebo."""
+        del checked
+        if not self.cartesian_target_initialized:
+            self.copy_current_cartesian_pose()
+            if not self.cartesian_target_initialized:
+                return
+        target_input = self.cartesian_target_inputs[index]
+        target_input.setValue(target_input.value() + increment)
 
     def toggle_jog_mode(self, checked):
         for intention in self.wheel_intentions:
@@ -2027,6 +2265,31 @@ class JointControlWindow(QMainWindow):
             )
             return
 
+        self.refresh_velocity_preview()
+        duration = self.duration_input.value()
+        if (
+            self.minimum_safe_duration is None
+            or duration + 1.0e-9 < self.minimum_safe_duration
+        ):
+            minimum = self.minimum_safe_duration
+            detail = (
+                'No se enviará ni moverá el brazo. Pulse AJUSTAR DURACIÓN '
+                'y vuelva a enviar.'
+            )
+            if minimum is not None:
+                detail = (
+                    f'La duración debe ser al menos {minimum:.2f} s. '
+                    + detail
+                )
+            self.status_label.setText('COMANDO BLOQUEADO: ' + detail)
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            QMessageBox.warning(
+                self,
+                'Duración insuficiente',
+                detail,
+            )
+            return
+
         positions = [
             math.radians(target_input.value())
             for target_input in self.target_inputs
@@ -2070,17 +2333,106 @@ class JointControlWindow(QMainWindow):
         )
         self.status_label.setStyleSheet('color: #92400e;')
 
-    def closeEvent(self, event):
+    def send_cartesian_candidate(self):
+        """Send one simulation-only pose request to the IK adapter."""
+        if self.is_hardware_mode or self.cartesian_send_button is None:
+            return
         if self.jog_mode_button.isChecked():
+            return
+        if (
+            self.pending_command_id is not None
+            or self.ros_node.execution_is_active()
+        ):
+            return
+        publisher = getattr(
+            self.ros_node, 'cartesian_candidate_publisher', None
+        )
+        if publisher is None or publisher.get_subscription_count() == 0:
+            self.status_label.setText(
+                'Inicie el adaptador cartesiano de simulación.'
+            )
+            return
+        if not self.ros_node.state_is_ready():
+            QMessageBox.warning(
+                self,
+                'Estado no disponible',
+                'No se enviará el objetivo sin /joint_states reciente.',
+            )
+            return
+        if not self.system_is_ready():
+            QMessageBox.warning(
+                self,
+                'Sistema todavía no disponible',
+                self.system_readiness_text(),
+            )
+            return
+        if not self.cartesian_target_initialized:
+            QMessageBox.warning(
+                self,
+                'Objetivo cartesiano no inicializado',
+                'Pulse Copiar pose cartesiana actual antes de ajustar.',
+            )
+            return
+
+        values = tuple(
+            item.value() for item in self.cartesian_target_inputs
+        )
+        pose = values[:3] + tuple(
+            math.radians(value) for value in values[3:]
+        )
+        command_id, subscriber_count = (
+            self.ros_node.publish_cartesian_candidate(
+                pose, self.duration_input.value()
+            )
+        )
+        self.pending_command_id = command_id
+        self.pending_since = time.monotonic()
+        self.prediction_is_stale = False
+        self.prediction_state_label.setText(
+            'CARTESIANO: RESOLVIENDO IK Y EVALUANDO...'
+        )
+        self.prediction_state_label.setStyleSheet('color: #92400e;')
+        self.prediction_detail_label.setText(
+            f'Esperando conversión y predicción para {command_id}.'
+        )
+        self.add_history_row(
+            command_id,
+            f'XYZ ({values[0]:.2f}, {values[1]:.2f}, '
+            f'{values[2]:.2f})',
+            self.duration_input.value(),
+            'IK PENDIENTE',
+        )
+        if subscriber_count == 0:
+            self.status_label.setText(
+                'OBJETIVO NO CONECTADO: el adaptador cartesiano no tiene '
+                'suscriptor activo.'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            return
+        self.status_label.setText(
+            f'IK PENDIENTE: {command_id} enviado al adaptador cartesiano.'
+        )
+        self.status_label.setStyleSheet('color: #92400e;')
+
+    def closeEvent(self, event):
+        if self.shutdown_started:
+            event.accept()
+            return
+        self.shutdown_started = True
+        ros_available = rclpy.ok()
+        if ros_available and self.jog_mode_button.isChecked():
             self.publish_jog_intent(force_hold=True)
         self.jog_timer.stop()
         self.ros_timer.stop()
         self.ui_timer.stop()
-        if self.is_hardware_mode:
+        self.preview_timer.stop()
+        if ros_available and self.is_hardware_mode:
             self.ros_node.disarm_before_shutdown()
-        self.ros_node.destroy_node()
+        destroy_node = getattr(self.ros_node, 'destroy_node', None)
+        if destroy_node is not None:
+            destroy_node()
 
-        if rclpy.ok():
+        if ros_available and rclpy.ok():
             rclpy.shutdown()
 
         event.accept()

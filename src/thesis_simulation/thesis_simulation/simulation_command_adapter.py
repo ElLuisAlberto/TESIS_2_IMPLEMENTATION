@@ -9,6 +9,7 @@ from control_msgs.msg import JointTrajectoryControllerState
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from thesis_interfaces.msg import (
     ExecutionControl,
@@ -47,6 +48,7 @@ class SimulationCommandAdapter(Node):
         self.declare_parameter('control_replan_cooldown_sec', 0.75)
         self.declare_parameter('jog_control_period_sec', 0.10)
         self.declare_parameter('jog_command_timeout_sec', 0.18)
+        self.declare_parameter('max_jog_message_age_sec', 0.15)
         self.declare_parameter('jog_reference_max_lead_sec', 0.25)
         self.declare_parameter(
             'controller_reference_max_age_sec', 0.10
@@ -103,12 +105,32 @@ class SimulationCommandAdapter(Node):
             PipelineTiming, '/thesis/pipeline_timing', 100
         )
         self.timing_sequence = 0
+        jog_command_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
         self.jog_subscription = self.create_subscription(
             JointCommand,
             '/thesis/supervised_jog_command',
             self.jog_command_callback,
-            10,
+            jog_command_qos,
         )
+
+        maximum_jog_age = float(
+            self.get_parameter('max_jog_message_age_sec').value
+        )
+        jog_timeout = float(
+            self.get_parameter('jog_command_timeout_sec').value
+        )
+        if (
+            not math.isfinite(maximum_jog_age)
+            or not 0.0 < maximum_jog_age < jog_timeout
+        ):
+            raise ValueError(
+                'max_jog_message_age_sec must be positive and smaller '
+                'than jog_command_timeout_sec'
+            )
 
         self.current_positions = {}
         self.last_state_monotonic = None
@@ -301,14 +323,25 @@ class SimulationCommandAdapter(Node):
 
     def jog_command_callback(self, msg):
         """Convert a safe one-second jog horizon into a short control step."""
-        self.last_jog_intent_stamp = msg.stamp
-        self.last_jog_command_id = msg.command_id
         self.publish_timing(
             msg.command_id, msg.stamp, 'ADAPTER_RECEIVE'
         )
         if not bool(self.get_parameter('simulation_output_enabled').value):
             return
         if self.goal_active:
+            return
+        source_time = Time.from_msg(msg.stamp)
+        source_age = (
+            self.get_clock().now() - source_time
+        ).nanoseconds * 1.0e-9
+        maximum_age = float(
+            self.get_parameter('max_jog_message_age_sec').value
+        )
+        if source_age < -0.05 or source_age > maximum_age:
+            if self.jog_active:
+                self.stop_active_jog(
+                    f'comando JOG obsoleto ({source_age:.3f} s)'
+                )
             return
         if tuple(msg.joint_names) != JOINT_NAMES:
             return
@@ -383,6 +416,8 @@ class SimulationCommandAdapter(Node):
         )
         self.jog_reference_target = control_target
         self.jog_reference_velocity = control_velocity
+        self.last_jog_intent_stamp = msg.stamp
+        self.last_jog_command_id = msg.command_id
         self.jog_active = True
         self.last_jog_receive_monotonic = time.monotonic()
         self.jog_hold_sent = False
