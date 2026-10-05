@@ -57,7 +57,14 @@ def generate_launch_description():
             "enable_sync": "true",
             "pointcloud.enable": "true",
             "pointcloud.stream_filter": "2",
+            "pointcloud.pointcloud_qos": "SENSOR_DATA",
             "align_depth.enable": "true",
+            "spatial_filter.enable": LaunchConfiguration(
+                "enable_spatial_filter"
+            ),
+            "temporal_filter.enable": LaunchConfiguration(
+                "enable_temporal_filter"
+            ),
             "depth_module.depth_profile": "640,480,15",
             "rgb_camera.color_profile": "640,480,15",
         }.items(),
@@ -122,6 +129,16 @@ def generate_launch_description():
                 "Enable accelerometer and gyroscope only when inertial "
                 "data is required and host IIO permissions are configured."
             ),
+        ),
+        DeclareLaunchArgument(
+            "enable_spatial_filter",
+            default_value="true",
+            description="Stabilize local depth surfaces before pointcloud.",
+        ),
+        DeclareLaunchArgument(
+            "enable_temporal_filter",
+            default_value="true",
+            description="Reduce frame-to-frame depth flicker for fixed camera.",
         ),
         DeclareLaunchArgument("use_sim_time", default_value="false"),
         DeclareLaunchArgument(

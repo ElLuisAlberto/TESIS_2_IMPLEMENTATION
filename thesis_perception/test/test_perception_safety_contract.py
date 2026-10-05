@@ -104,3 +104,19 @@ def test_standalone_exposes_workspace_filter_arguments():
     )
     for argument in arguments:
         assert launch_text.count(f'"{argument}"') >= 2
+
+
+def test_standalone_uses_sensor_qos_and_depth_stabilization():
+    """Keep large clouds low-latency and stabilize fixed-camera depth."""
+    launch_text = (
+        PACKAGE_ROOT / "launch" / "d435i_standalone.launch.py"
+    ).read_text(encoding="utf-8")
+    assert '"pointcloud.pointcloud_qos": "SENSOR_DATA"' in launch_text
+    assert (
+        '"spatial_filter.enable": LaunchConfiguration(' in launch_text
+    )
+    assert (
+        '"temporal_filter.enable": LaunchConfiguration(' in launch_text
+    )
+    for argument in ("enable_spatial_filter", "enable_temporal_filter"):
+        assert launch_text.count(f'"{argument}"') >= 2
