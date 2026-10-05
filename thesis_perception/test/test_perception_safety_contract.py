@@ -1,3 +1,5 @@
+# Copyright 2026 Luis Alberto Munoz Marin
+
 """Protect the isolation boundary of standalone RGB-D perception."""
 
 from pathlib import Path
