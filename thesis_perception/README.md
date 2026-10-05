@@ -69,6 +69,9 @@ The crop is disabled until the actual workspace bounds have been measured.
 Accelerometer and gyroscope acquisition is also disabled by default because a
 fixed RGB-D camera does not need inertial data for obstacle geometry. Enable it
 explicitly with `enable_imu:=true` only after validating host IIO permissions.
+The standalone launch also exposes `enable_crop`, `min_x`, `max_x`, `min_y`,
+`max_y`, `min_z`, `max_z`, `enable_voxel` and `voxel_leaf_size` so the final
+workspace can be tuned from the terminal without modifying source files.
 
 ## Extrinsic calibration
 
