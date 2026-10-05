@@ -11,6 +11,10 @@ pointcloud_preprocessor:
     enable_crop: false
     enable_voxel: true
     voxel_leaf_size: 0.02
+    # Sensor-level sanity interval applied before voxelization. It is
+    # independent from the workspace crop calibrated later.
+    min_valid_range_m: 0.10
+    max_valid_range_m: 10.0
     min_x: -1.5
     max_x: 1.5
     min_y: -1.5
