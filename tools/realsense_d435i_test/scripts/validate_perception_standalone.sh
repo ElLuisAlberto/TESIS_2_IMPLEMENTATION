@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -o pipefail
+set +u
 
 WORKSPACE="${THESIS_WORKSPACE:-$HOME/Escritorio/TESIS_2_IMPLEMENTATION}"
 REPORT_DIR="$WORKSPACE/tools/realsense_d435i_test/reports"
@@ -8,6 +9,7 @@ REPORT="$REPORT_DIR/perception_standalone_${STAMP}.log"
 
 source /opt/ros/humble/setup.bash
 source "$WORKSPACE/install/local_setup.bash"
+set -u
 mkdir -p "$REPORT_DIR"
 
 run()
