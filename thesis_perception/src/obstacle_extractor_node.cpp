@@ -1,3 +1,12 @@
+// Copyright 2026 Luis Alberto Munoz Marin
+
+#include <pcl/filters/filter.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/search/kdtree.h>
+#include <pcl/segmentation/extract_clusters.h>
+#include <pcl_conversions/pcl_conversions.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -15,12 +24,6 @@
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_msgs/msg/key_value.hpp>
-#include <pcl/filters/filter.h>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl/search/kdtree.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/header.hpp>
@@ -288,7 +291,8 @@ private:
     marker.color.g = 0.78F;
     marker.color.b = 0.95F;
     marker.color.a = 0.75F;
-    marker.lifetime = rclcpp::Duration::from_seconds(0.35).to_msg();
+    marker.lifetime.sec = 0;
+    marker.lifetime.nanosec = 350000000;
     marker_publisher_->publish(marker);
   }
 
