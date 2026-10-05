@@ -60,6 +60,9 @@ bash tools/realsense_d435i_test/scripts/validate_perception_standalone.sh
 
 This preserves the camera frame and does not publish a fabricated extrinsic.
 The crop is disabled until the actual workspace bounds have been measured.
+Accelerometer and gyroscope acquisition is also disabled by default because a
+fixed RGB-D camera does not need inertial data for obstacle geometry. Enable it
+explicitly with `enable_imu:=true` only after validating host IIO permissions.
 
 ## Extrinsic calibration
 
