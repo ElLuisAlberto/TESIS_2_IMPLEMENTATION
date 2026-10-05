@@ -379,34 +379,91 @@ Si el SDK no informa número de serie y solo existe un JACO conectado, el adapta
 
 ## Percepción D435i
 
-La adquisición RGB-D e inercial permanece desacoplada del sistema preventivo.
-El paquete `thesis_perception` preprocesa la nube, diagnostica frecuencia,
-frame y timestamps, y extrae una esfera conservadora para un obstáculo
-principal. La salida predeterminada es deliberadamente segura:
+La Intel RealSense D435i funciona como un módulo desacoplado: puede probarse sin
+Gazebo ni el JACO2 y no modifica el supervisor preventivo. El flujo actualmente
+implementado es:
 
 ```text
-/thesis/perception/obstacle_candidate
+D435i (color + profundidad)
+  -> /camera/d435i/depth/color/points
+  -> pointcloud_preprocessor
+  -> /thesis/perception/points_filtered
+  -> obstacle_extractor
+  -> /thesis/perception/obstacle_candidate
 ```
 
-No se conecta automáticamente a `/thesis/obstacle_input`. Para caracterizar la
-cámara sin Gazebo ni JACO2 puede utilizarse:
+`perception_health_node` supervisa frecuencia, frame y antigüedad de la nube y
+publica `/thesis/perception/diagnostics`. El candidato perceptual permanece
+aislado: **no se conecta automáticamente a `/thesis/obstacle_input`**.
+
+### Ejecución autónoma validada
 
 ```bash
+cd "$HOME/Escritorio/TESIS_2_IMPLEMENTATION"
+source /opt/ros/humble/setup.bash
+source install/local_setup.bash
+
 ros2 launch thesis_perception d435i_standalone.launch.py \
-  start_rviz:=true
+  start_camera:=true \
+  start_rviz:=true \
+  publish_static_extrinsic:=false \
+  enable_crop:=false \
+  start_extractor:=true
 ```
 
-La referencia de adquisición y los reportes se encuentran en:
+No se debe pasar `target_frame:=` vacío desde la terminal; el valor vacío ya
+es el predeterminado hasta medir la transformación extrínseca.
 
-```text
-tools/realsense_d435i_test/
+### Comprobaciones rápidas
+
+```bash
+# Dispositivo, enlace USB y firmware
+lsusb | rg -i 'realsense|8086:0b3a|intel'
+lsusb -t
+rs-enumerate-devices -s
+
+# Frecuencia del sensor
+timeout 12 ros2 topic hz /camera/d435i/depth/metadata
+
+# Estado del procesamiento
+timeout 20 ros2 topic echo /thesis/perception/diagnostics |
+  grep --line-buffered -E -A1 'message:|key: cloud_hz'
+
+# QoS de la nube
+ros2 param get /camera/d435i pointcloud.pointcloud_qos
+ros2 topic info /camera/d435i/depth/color/points -v |
+  grep -E 'Node name:|Reliability:'
 ```
 
-La cámara todavía no publica una representación validada hacia
-`/thesis/obstacle_input`. Permanecen como puertas de integración la extrínseca
-medida, el recorte caracterizado del espacio de trabajo, la evaluación de error
-espacial, la exclusión del propio manipulador y la respuesta ante pérdida del
-sensor. La guía específica se encuentra en `thesis_perception/README.md`.
+En la D435i probada se confirmó USB 3.2 a 5 Gbit/s, adquisición cercana a
+15 Hz, nube procesada alrededor de 13–15 Hz y tiempo de extracción menor que el
+periodo disponible a 15 FPS. Las pruebas de `thesis_perception` finalizaron
+sin fallos. La vibración visual de puntos sobre una pared corresponde
+principalmente al ruido de profundidad estéreo, no a lentitud del pipeline.
+
+### Prueba temporal del proyector infrarrojo
+
+La potencia usada como referencia es `150.0`. Para comparar brevemente la
+densidad y estabilidad de profundidad dentro del área de trabajo:
+
+```bash
+ros2 param get /camera/d435i depth_module.laser_power
+
+ros2 param set /camera/d435i depth_module.laser_power 240.0
+# Observar unos segundos la nube y los diagnósticos.
+
+ros2 param set /camera/d435i depth_module.laser_power 150.0
+```
+
+`240.0` es únicamente un ensayo A/B, no el ajuste permanente. Debe conservarse
+ventilación alrededor de la cámara y detener la prueba ante desconexiones,
+errores USB, olor anormal o calentamiento doloroso al tacto.
+
+Antes de utilizar la salida para seguridad faltan la extrínseca medida, el
+recorte físico del espacio menor de 2 m, la exclusión del propio manipulador,
+el modelado del fondo fijo y la validación de falsos positivos. La guía detallada
+se encuentra en `thesis_perception/README.md` y las utilidades de adquisición
+en `tools/realsense_d435i_test/`.
 
 ## Evidencia y documentación
 
