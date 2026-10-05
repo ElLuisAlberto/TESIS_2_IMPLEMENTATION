@@ -80,3 +80,7 @@ def test_standalone_preserves_source_frame_and_clock():
     preprocessor = config["pointcloud_preprocessor"]["ros__parameters"]
     assert preprocessor["target_frame"] == ""
     assert preprocessor["restamp_output"] is False
+    assert preprocessor["min_valid_range_m"] >= 0.0
+    assert preprocessor["max_valid_range_m"] > (
+        preprocessor["min_valid_range_m"]
+    )
