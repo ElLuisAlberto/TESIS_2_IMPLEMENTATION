@@ -55,6 +55,20 @@ def test_fixed_camera_does_not_require_imu_by_default():
     health = config["perception_health"]["ros__parameters"]
     assert health["imu_required"] is False
 
+    standalone_launch = (
+        PACKAGE_ROOT / "launch" / "d435i_standalone.launch.py"
+    ).read_text(encoding="utf-8")
+    assert '"enable_gyro": LaunchConfiguration("enable_imu")' in (
+        standalone_launch
+    )
+    assert '"enable_accel": LaunchConfiguration("enable_imu")' in (
+        standalone_launch
+    )
+    enable_imu_declaration = standalone_launch.split(
+        '"enable_imu",', maxsplit=1
+    )[1]
+    assert 'default_value="false"' in enable_imu_declaration
+
 
 def test_standalone_preserves_source_frame_and_clock():
     """Avoid fabricated geometry or simulated timestamps in standalone mode."""
