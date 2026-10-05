@@ -70,6 +70,12 @@ def generate_launch_description():
             "target_frame": LaunchConfiguration("target_frame"),
             "restamp_output": LaunchConfiguration("restamp_output"),
             "enable_crop": LaunchConfiguration("enable_crop"),
+            "min_valid_range_m": LaunchConfiguration(
+                "min_valid_range_m"
+            ),
+            "max_valid_range_m": LaunchConfiguration(
+                "max_valid_range_m"
+            ),
             "start_extractor": LaunchConfiguration("start_extractor"),
             "obstacle_topic": LaunchConfiguration("obstacle_topic"),
             "imu_required": LaunchConfiguration("imu_required"),
@@ -117,6 +123,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("restamp_output", default_value="false"),
         DeclareLaunchArgument("enable_crop", default_value="false"),
+        DeclareLaunchArgument("min_valid_range_m", default_value="0.10"),
+        DeclareLaunchArgument("max_valid_range_m", default_value="10.0"),
         DeclareLaunchArgument("start_extractor", default_value="true"),
         DeclareLaunchArgument("imu_required", default_value="false"),
         DeclareLaunchArgument(
