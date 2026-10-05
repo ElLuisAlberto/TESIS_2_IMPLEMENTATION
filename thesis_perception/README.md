@@ -28,7 +28,8 @@ D435i PointCloud2
 ```
 
 `pointcloud_preprocessor` rejects non-finite points, optionally transforms the
-cloud, applies a configurable crop and reduces it with a voxel grid.
+cloud, rejects physically implausible ranges before voxelization, applies a
+configurable workspace crop and reduces the result with a voxel grid.
 
 `obstacle_extractor` performs Euclidean clustering, selects the nearest valid
 cluster, encloses it in a conservative sphere and estimates a bounded velocity.
