@@ -1,3 +1,5 @@
+# Copyright 2026 Luis Alberto Munoz Marin
+
 """Launch D435i acquisition and isolated perception without a robot."""
 
 from launch import LaunchDescription
