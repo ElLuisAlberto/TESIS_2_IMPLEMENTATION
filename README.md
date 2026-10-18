@@ -8,32 +8,18 @@ El Kinova JACO2 `j2n6s300` es el caso de estudio. La lógica preventiva permanec
 
 ## Estado actual
 
-**Base validada: 03/10/2026 — commit `2ddbbaa`.**
+**Estado al 18/10/2026: preparado para conexión; lectura física aún no validada.**
 
 - Simulación y hardware físico tienen lanzamientos y adaptadores independientes.
 - El brazo físico usa un adaptador nativo ROS 2–Kinova; no requiere ROS 1 ni `ros1_bridge`.
-- El puente físico cubre lectura y movimiento supervisado de los seis ejes.
-- La salida física está deshabilitada por defecto y exige doble habilitación.
-- Se validaron conexión USB, estado articular, TF, diagnóstico, armado, desarmado, ejecución, retorno, HOLD y watchdogs.
-- La base automatizada registra **175 pruebas, 0 errores, 0 fallos y 4 omitidas**.
-- La prueba física de J6 terminó sin fallos, con control a 100 Hz y feedback a 20 Hz.
-- La D435i dispone de un pipeline autónomo de preprocesamiento, diagnóstico y
-  extracción de un obstáculo candidato. Su salida permanece aislada del
-  supervisor hasta completar calibración y validación.
+- La salida física conserva `hardware_output_enabled=false` y `armed=false`.
+- El Jaco2 no está conectado actualmente; no se declara validación USB, JointState, TF, readiness, proximidad ni movimiento físico.
+- A-01, A-02a, A-03 y C-01 tienen cobertura offline; A-02b permanece bloqueada por falta de contrato TF-modelo.
+- La ruta cartesiana física permanece bloqueada hasta validar A-02b y resolver `TF_UNAVAILABLE`.
+- La cámara RGB-D no está conectada y no existe todavía una integración `thesis_perception` validada en este workspace.
+- El preflight de solo lectura está en [`tools/physical/README.md`](tools/physical/README.md).
 
-Resultados físicos de referencia:
-
-| Propiedad | Resultado |
-| --- | ---: |
-| Movimiento solicitado en J6 | `+2.000°` |
-| Movimiento observado en J6 | `+1.800°` |
-| Error al final de la ida | `0.200°` |
-| Error máximo después del retorno | `0.150°` |
-| Variación máxima de los otros ejes | `0.000°` |
-| Estado de ida y retorno | `SUCCEEDED` |
-| Estado final | Desarmado, `HOLD`, `fault=false` |
-
-La validación física fue ejecutada mediante un estímulo automatizado reproducible. No constituye todavía una caracterización completa del robot en todo su espacio articular.
+La evidencia consolidada está en [`evidence/codex_reports/2026-10-18_preparacion_avance3_fisico.md`](evidence/codex_reports/2026-10-18_preparacion_avance3_fisico.md).
 
 ## Objetivo y alcance
 
@@ -96,8 +82,8 @@ No deben ejecutarse simultáneamente dos adaptadores JACO, ROS 1 ni herramientas
 | `src/thesis_ui` | Interfaz articular para simulación y hardware |
 | `src/thesis_telemetry` | Registro de métricas y eventos |
 | `src/thesis_validation` | Evaluación reproducible de escenarios |
-| `thesis_perception` | Procesamiento RGB-D autónomo y obstáculo candidato aislado |
 | `tools/validation` | Ejecutores mock, físicos y de escenarios |
+| `tools/physical` | Preflight físico de solo lectura y protocolo articular |
 | `tools/realsense_d435i_test` | Adquisición y validación independiente de la D435i |
 | `evidence/avance2` | Evidencia seleccionada de escenarios E01–E08 |
 | `docs/implementation_notes` | Decisiones e instrucciones técnicas detalladas |
@@ -113,7 +99,7 @@ No deben ejecutarse simultáneamente dos adaptadores JACO, ROS 1 ni herramientas
 - PyQt5
 - `ros2_control` y `joint_trajectory_controller`
 - Kinova JACO2 de seis ejes (`j2n6s300`)
-- Intel RealSense D435i y Librealsense 2.58.4 para la preintegración perceptual
+- Intel RealSense D435i como equipo opcional; su integración con el supervisor no está validada
 
 No se debe superponer este workspace Humble con un entorno ROS 2 Jazzy.
 
@@ -136,7 +122,7 @@ git clone https://github.com/ElLuisAlberto/TESIS_2_IMPLEMENTATION.git
 cd TESIS_2_IMPLEMENTATION
 
 source /opt/ros/humble/setup.bash
-rosdep install --from-paths src thesis_perception --ignore-src -r -y
+rosdep install --from-paths src --ignore-src -r -y
 ```
 
 ### Compilar simulación e interfaz
@@ -148,8 +134,7 @@ colcon build --symlink-install --packages-up-to \
   thesis_simulation \
   thesis_ui \
   thesis_telemetry \
-  thesis_validation \
-  thesis_perception
+  thesis_validation
 ```
 
 ### Compilar el sistema físico
@@ -220,29 +205,30 @@ ros2 launch thesis_hardware jaco_physical_system.launch.py \
   mock_hardware:=false \
   hardware_output_enabled:=false \
   use_demo_obstacle:=false \
-  start_gui:=true \
-  start_rviz:=true
+  start_gui:=false \
+  start_rviz:=false \
+  allow_gui_arm_control:=false \
+  telemetry_output_directory:="$PWD/evidence/physical_sessions"
 ```
 
-En este modo se publican `/joint_states`, TF y diagnóstico. El readiness permanece bloqueado para comandos porque la salida no está armada.
-
-### Hardware físico habilitado
-
-Solo después de completar la validación mock, revisar el espacio del robot y mantener accesible la parada física:
+Este launch es únicamente el procedimiento posterior a una conexión física
+autorizada. Antes de declarar lectura validada debe ejecutarse el preflight:
 
 ```bash
-ros2 launch thesis_hardware jaco_physical_system.launch.py \
-  mock_hardware:=false \
-  hardware_output_enabled:=true \
-  use_demo_obstacle:=true \
-  demo_obstacle_x:=2.0 \
-  start_gui:=true \
-  start_rviz:=true
+python3 tools/physical/physical_preflight.py \
+  --duration-sec 10 \
+  --output evidence/codex_reports/2026-10-18_preflight_fisico_solo_lectura.json
 ```
 
-`hardware_output_enabled:=true` únicamente permite solicitar el armado. El movimiento sigue bloqueado hasta que el operador arma el adaptador en tiempo de ejecución. La GUI muestra ambos estados y ordena el desarmado al cerrarse.
+Si el Jaco no está conectado, solo debe ejecutarse `--static-only`.
 
-El obstáculo sintético lejano se utiliza solo en pruebas controladas. Para operación con percepción real debe desactivarse y reemplazarse por una fuente válida en `/thesis/obstacle_input`.
+### Movimiento físico
+
+No se proporciona un comando de activación automática en este README. Una
+primera prueba física, cuando exista autorización explícita y el preflight sea
+`PASS`, debe ser articular, de un solo joint, una sola dirección, velocidad
+mínima, desplazamiento pequeño, `ALLOW` previo, watchdog y STOP físico
+disponible. El protocolo detallado está en `tools/physical/README.md`.
 
 ## Interfaz gráfica
 
@@ -320,16 +306,16 @@ colcon test --packages-select \
   thesis_hardware \
   thesis_simulation \
   thesis_ui \
-  thesis_perception \
+  thesis_telemetry \
   --event-handlers console_direct+
 
 colcon test-result --verbose
 ```
 
-Base validada:
+Última validación offline del alcance físico/cartesiano:
 
 ```text
-175 tests, 0 errors, 0 failures, 4 skipped
+74 pruebas Python aprobadas y 1/1 suite C++ del bridge aprobada
 ```
 
 ### Puente físico sin hardware
@@ -340,21 +326,19 @@ bash tools/validation/run_hardware_bridge_mock.sh
 
 El mock comprueba armado, supervisión, ejecución, resultado terminal, desarmado y frecuencia de estado sin abrir el dispositivo USB.
 
-### Micromovimiento físico reproducible
+### Primera prueba física
 
-```bash
-bash tools/validation/run_kinova_physical_micro_motion.sh
-```
-
-El ejecutor solicita la confirmación literal `MOVER J6`, arma el adaptador, ordena J6 `+2°`, retorna a la postura inicial y desarma incluso ante error. Toda la trayectoria atraviesa el supervisor preventivo.
+El script histórico `tools/validation/run_kinova_physical_micro_motion.sh`
+realiza ida y retorno de 2° y no corresponde al gate inicial. No usarlo para la
+primera prueba. Seguir únicamente el protocolo de `tools/physical/README.md`.
 
 ## Diagnóstico rápido
 
 ```bash
-ros2 topic echo /thesis/system_readiness
-ros2 topic echo /thesis/hardware/diagnostics
-ros2 topic echo /thesis/hardware/armed
-ros2 topic hz /joint_states
+ros2 topic echo --no-daemon --spin-time 2 /thesis/system_readiness
+ros2 topic echo --no-daemon --spin-time 2 /thesis/hardware/diagnostics
+ros2 topic echo --no-daemon --spin-time 2 /thesis/hardware/armed
+ros2 topic hz --no-daemon --spin-time 2 /joint_states
 ```
 
 Comprobaciones esperadas en hardware:
@@ -377,104 +361,36 @@ Si el SDK no informa número de serie y solo existe un JACO conectado, el adapta
 - Las validaciones deben ejecutarse con el área libre y la parada física accesible.
 - Esta implementación es un prototipo de investigación y no reemplaza funciones de seguridad certificadas.
 
-## Percepción D435i
+## Percepción RGB-D
 
-La Intel RealSense D435i funciona como un módulo desacoplado: puede probarse sin
-Gazebo ni el JACO2 y no modifica el supervisor preventivo. El flujo actualmente
-implementado es:
+La D435i no está conectada y no existe un paquete de percepción integrado en
+este workspace. `tools/realsense_d435i_test/` contiene material independiente
+de adquisición, pero no debe interpretarse como `RGBD_VALIDADA`.
+
+El contrato futuro debe conservar:
 
 ```text
-D435i (color + profundidad)
-  -> /camera/d435i/depth/color/points
-  -> pointcloud_preprocessor
-  -> /thesis/perception/points_filtered
-  -> obstacle_extractor
-  -> /thesis/perception/obstacle_candidate
+cámara -> percepción -> obstáculo válido -> obstacle_input_bridge
+-> proximity_monitor -> safety_supervisor
 ```
 
-`perception_health_node` supervisa frecuencia, frame y antigüedad de la nube y
-publica `/thesis/perception/diagnostics`. El candidato perceptual permanece
-aislado: **no se conecta automáticamente a `/thesis/obstacle_input`**.
-
-### Ejecución autónoma validada
-
-```bash
-cd "$HOME/Escritorio/TESIS_2_IMPLEMENTATION"
-source /opt/ros/humble/setup.bash
-source install/local_setup.bash
-
-ros2 launch thesis_perception d435i_standalone.launch.py \
-  start_camera:=true \
-  start_rviz:=true \
-  publish_static_extrinsic:=false \
-  enable_crop:=false \
-  start_extractor:=true
-```
-
-No se debe pasar `target_frame:=` vacío desde la terminal; el valor vacío ya
-es el predeterminado hasta medir la transformación extrínseca.
-
-### Comprobaciones rápidas
-
-```bash
-# Dispositivo, enlace USB y firmware
-lsusb | rg -i 'realsense|8086:0b3a|intel'
-lsusb -t
-rs-enumerate-devices -s
-
-# Frecuencia del sensor
-timeout 12 ros2 topic hz /camera/d435i/depth/metadata
-
-# Estado del procesamiento
-timeout 20 ros2 topic echo /thesis/perception/diagnostics |
-  grep --line-buffered -E -A1 'message:|key: cloud_hz'
-
-# QoS de la nube
-ros2 param get /camera/d435i pointcloud.pointcloud_qos
-ros2 topic info /camera/d435i/depth/color/points -v |
-  grep -E 'Node name:|Reliability:'
-```
-
-En la D435i probada se confirmó USB 3.2 a 5 Gbit/s, adquisición cercana a
-15 Hz, nube procesada alrededor de 13–15 Hz y tiempo de extracción menor que el
-periodo disponible a 15 FPS. Las pruebas de `thesis_perception` finalizaron
-sin fallos. La vibración visual de puntos sobre una pared corresponde
-principalmente al ruido de profundidad estéreo, no a lentitud del pipeline.
-
-### Prueba temporal del proyector infrarrojo
-
-La potencia usada como referencia es `150.0`. Para comparar brevemente la
-densidad y estabilidad de profundidad dentro del área de trabajo:
-
-```bash
-ros2 param get /camera/d435i depth_module.laser_power
-
-ros2 param set /camera/d435i depth_module.laser_power 240.0
-# Observar unos segundos la nube y los diagnósticos.
-
-ros2 param set /camera/d435i depth_module.laser_power 150.0
-```
-
-`240.0` es únicamente un ensayo A/B, no el ajuste permanente. Debe conservarse
-ventilación alrededor de la cámara y detener la prueba ante desconexiones,
-errores USB, olor anormal o calentamiento doloroso al tacto.
-
-Antes de utilizar la salida para seguridad faltan la extrínseca medida, el
-recorte físico del espacio menor de 2 m, la exclusión del propio manipulador,
-el modelado del fondo fijo y la validación de falsos positivos. La guía detallada
-se encuentra en `thesis_perception/README.md` y las utilidades de adquisición
-en `tools/realsense_d435i_test/`.
+Antes de conectar la percepción al supervisor faltan driver/stream real,
+calibración cámara→`world`, timestamps, incertidumbre, representación de
+obstáculos y pruebas offline/real con `ALLOW` y `STOP`.
 
 ## Evidencia y documentación
 
-- `evidence/avance2/`: matriz y evidencia seleccionada de simulación.
+- `docs/codex_reports/`: diagnósticos y decisiones técnicas.
+- `evidence/codex_reports/`: resultados y evidencias de pruebas.
+- `evidence/avance2/`: matriz y evidencia seleccionada de simulación, cuando exista.
 - `docs/implementation_notes/kinova_hardware_bridge.md`: diseño y operación del puente físico.
 - `tools/validation/`: ejecutores reproducibles y validadores.
 - `src/thesis_description/UPSTREAM.md`: procedencia del modelo Kinova.
 
 ## Limitaciones
 
-- La validación física actual cubre un micromovimiento de J6 y su retorno, no todo el espacio articular.
+- La lectura física y el movimiento físico no están validados en la sesión actual porque el Jaco no está conectado.
+- A-02b permanece bloqueada por falta de un contrato explícito TF-modelo.
 - No se han caracterizado todavía seguimiento, frenado y latencia bajo distintas cargas.
 - La matriz preventiva completa aún no se ha repetido sobre hardware físico con obstáculos reales.
 - La D435i no participa todavía en las decisiones preventivas.
@@ -484,7 +400,7 @@ en `tools/realsense_d435i_test/`.
 
 ## Trabajo futuro
 
-- Integrar la D435i mediante una representación desacoplada de obstáculos.
+- Implementar y validar el contrato RGB-D mediante una representación desacoplada de obstáculos.
 - Calibrar la transformación entre cámara y base del robot.
 - Repetir progresivamente la matriz de escenarios sobre hardware físico.
 - Caracterizar seguimiento, latencia y frenado con distintas configuraciones y cargas.
