@@ -49,3 +49,10 @@ def test_transform_rotates_center_and_velocity_and_adds_translation():
 def test_rejects_zero_quaternion():
     with pytest.raises(ValueError):
         rotate_vector((1, 0, 0), (0, 0, 0, 0))
+
+
+def test_rejects_zero_obstacle_timestamp():
+    with pytest.raises(ValueError):
+        validate_obstacle(
+            (0, 0, 0), (0, 0, 0), 0.1, 0.0, 0.0, 10.0
+        )

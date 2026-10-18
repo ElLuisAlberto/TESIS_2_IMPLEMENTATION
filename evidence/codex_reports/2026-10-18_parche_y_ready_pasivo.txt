@@ -1,0 +1,126 @@
+Evidencia: parche mínimo Y y verificación pasiva de READY
+Fecha: 2026-10-18
+
+ALCANCE
+- Solo simulación.
+- Sin hardware físico, cámara RGB-D, sudo, GUI o RViz.
+- No se publicó ninguna intención ni comando de movimiento.
+- La pila se inició con simulation_output_enabled:=false.
+
+CAMBIOS VERIFICADOS
+- thesis_system.launch.py, cartesian_command_adapter:
+  position_tolerance_m: 0.0002 -> 0.0005.
+- test_cartesian_kinematics.py:
+  regresiones de Y +20 mm desde una perturbación determinista menor de
+  1e-4 rad alrededor de la postura inicial (0, pi, pi, 0, 0, 0).
+- plan_pruebas_cartesiano.md:
+  READY con std_msgs/msg/String explícito, plazo global de 20 s y aprobación
+  únicamente con data: READY.
+- SystemReadinessNode no fue modificado.
+
+RESIDUOS DE LA REGRESIÓN Y
+Tolerancia 0.0002 m:
+  success=False
+  residual_m=0.000366664811
+  orientation_rad=0.000281629037
+  iterations=120
+
+Tolerancia 0.0005 m:
+  success=True
+  residual_m=0.000496866449
+  orientation_rad=0.000323989986
+  iterations=61
+
+El caso existente de objetivo lejano/inalcanzable permaneció en el mismo
+archivo y aprobó junto con las nuevas regresiones.
+
+PRUEBA DIRIGIDA
+Comando:
+  PYTHONPATH=src/thesis_core python3 -m pytest -q \
+    src/thesis_core/test/test_cartesian_kinematics.py
+
+Resultado:
+  7 passed in 0.46s
+
+COMPILACIÓN
+Comando:
+  source /opt/ros/humble/setup.bash
+  colcon build --packages-select thesis_core thesis_simulation
+
+Resultado:
+  Finished <<< thesis_core [30.6s]
+  Finished <<< thesis_simulation [1min 0s]
+  Summary: 2 packages finished [1min 31s]
+
+PRUEBAS UNITARIAS AFECTADAS
+Comando:
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  colcon test --packages-select thesis_core thesis_simulation \
+    --event-handlers console_direct+ --pytest-args -q
+
+Resultado thesis_core:
+  135 passed, 1 skipped, 2 warnings in 1.66s
+
+Resultado thesis_simulation:
+  40 passed, 1 skipped, 3 warnings in 0.73s
+
+Resumen:
+  Summary: 2 packages finished [34.0s]
+
+Advertencias no bloqueantes ya conocidas:
+- SelectableGroups está deprecado en las pruebas flake8.
+- TestCommandNode no se recopila porque define __init__.
+
+PILA HEADLESS PASIVA
+Comando de launch:
+  ROS_LOG_DIR=/tmp/tesis_yz_passive_ros_logs \
+  IGN_LOG_PATH=/tmp/tesis_yz_passive_ros_logs \
+  ros2 launch thesis_simulation thesis_system.launch.py \
+    simulation_output_enabled:=false \
+    start_gui:=false start_rviz:=false headless:=true
+
+Confirmaciones del launch:
+- Ignition se inició como servidor headless con `ign gazebo -r -s`.
+- No se inició GUI ni RViz.
+- simulation_command_adapter informó:
+  "Adaptador Gazebo preparado; salida simulada desactivada".
+- system_readiness transitó desde WAITING durante el arranque hasta:
+  "SYSTEM READY: all required links are live".
+
+VERIFICACIÓN READY CON TIPO EXPLÍCITO
+Contrato:
+- cliente independiente;
+- --no-daemon --spin-time 2;
+- tipo std_msgs/msg/String explícito;
+- plazo global máximo de 20 s;
+- solo data: READY aprueba.
+
+Resultado:
+  ATTEMPT=1 RC=0 ELAPSED=4s
+  data: READY
+  READY_VERIFIED=true TOTAL_ELAPSED=4s
+
+Confirmación booleana independiente:
+  ros2 topic echo --once --no-daemon --spin-time 2 \
+    /thesis/system_ready std_msgs/msg/Bool
+  data: true
+
+Estado articular pasivo:
+- Se recibió una muestra de /joint_states con las seis articulaciones del
+  brazo y las articulaciones de los dedos.
+- Las articulaciones del brazo permanecieron aproximadamente en
+  (0, pi, pi, 0, 0, 0), sin orden de movimiento.
+
+CIERRE
+- Se envió SIGINT únicamente al launch.
+- Todos los procesos del launch terminaron limpiamente.
+- La comprobación final no encontró ros2 launch, Ignition/Gazebo,
+  robot_state_publisher, supervisor ni adaptadores restantes.
+
+INCIDENCIAS DEL ENTORNO
+- Un primer intento no inició porque /home/luis/.ros era de solo lectura.
+- Un segundo intento dentro del sandbox fue detenido al comprobar que DDS no
+  podía abrir sockets locales (Operation not permitted).
+- La ejecución válida se hizo fuera del sandbox con salida simulada
+  deshabilitada. Ninguno de esos intentos publicó comandos de movimiento.

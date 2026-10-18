@@ -37,6 +37,8 @@ def validate_obstacle(
         raise ValueError('uncertainty must be non-negative')
     if max_age_sec <= 0.0 or future_tolerance_sec < 0.0:
         raise ValueError('age limits are invalid')
+    if stamp_sec <= 0.0:
+        raise ValueError('obstacle timestamp must be non-zero')
     age = now_sec - stamp_sec
     if age < -future_tolerance_sec:
         raise ValueError('obstacle timestamp is too far in the future')

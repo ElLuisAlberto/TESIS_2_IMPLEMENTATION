@@ -1,0 +1,73 @@
+Prueba integrada de movimiento cartesiano en Gazebo
+Fecha: 2026-10-18
+Alcance: solo Gazebo headless; sin hardware físico, cámara RGB-D, GUI, RViz ni sudo.
+
+Inicio
+$ ros2 launch thesis_simulation thesis_system.launch.py simulation_output_enabled:=true start_gui:=false start_rviz:=false headless:=true
+Proceso observado: ign gazebo -r -s -v 3 .../jaco_empty.sdf
+No se observó `ign gui` ni `gz gui`.
+
+Precondiciones antes de X
+/joint_states: Publisher count: 1; nodo publicador joint_state_broadcaster.
+/thesis/system_readiness: READY.
+/thesis/proximity_status: state ALLOW; minimum_clearance 0.37500213411929284 m;
+limiting_segment upper_arm_to_forearm; obstáculo (0.6, 0.0, 0.65), radio 0.14 m.
+TF world -> j2n6s300_end_effector: Translation [0.000, 0.064, 1.181],
+RPY [-0.000, 0.000, -1.571].
+Procesos confirmados: simulación Ignition, robot_state_publisher, safety_supervisor,
+simulation_command_adapter y los tres adaptadores cartesianos. Sin hardware físico.
+
+Eje X: única intención publicada
+Posición inicial: (0.000, 0.064, 1.181) m
+Objetivo: (0.020, 0.064, 1.181) m
+Delta solicitado: (+0.020, 0.000, 0.000) m
+Orientación: RPY (0.0, 0.0, -1.57079632679); duración: 5 s.
+
+$ ros2 topic pub --once /thesis/cartesian_candidate thesis_interfaces/msg/CartesianCommand "{stamp: {sec: 0, nanosec: 0}, command_id: 'codex-x-20261018-001', frame_id: 'world', x: 0.020, y: 0.064, z: 1.181, roll: 0.0, pitch: 0.0, yaw: -1.57079632679, duration: {sec: 5, nanosec: 0}}"
+publishing #1: CartesianCommand(... command_id='codex-x-20261018-001' ...)
+
+Tópicos capturados
+/thesis/cartesian_candidate: command_id codex-x-20261018-001, frame_id world,
+x 0.02, y 0.064, z 1.181, duración 5 s.
+
+/thesis/candidate_command (IK):
+joint_names: [j2n6s300_joint_1, j2n6s300_joint_2, j2n6s300_joint_3,
+              j2n6s300_joint_4, j2n6s300_joint_5, j2n6s300_joint_6]
+positions: [0.0120880752, 3.1105875403, 3.1352587706,
+            -0.0097047544, 0.0284635768, -0.0166130060]
+duration: 5 s
+
+/thesis/command_decision:
+accepted: true
+state: ALLOW
+reason_code: CLEAR
+reason: ALLOW codex-x-20261018-001; duration=5.000s; scale=1.000000
+
+/thesis/supervised_command: mismo command_id, posiciones y duración de la salida IK.
+
+/thesis/execution_trajectory:
+PENDING: Esperando aceptación del action server de Gazebo.
+ACCEPTED: Referencia aceptada por el action server de Gazebo.
+SUCCEEDED: Goal successfully reached!
+start_positions: [0.0000000028, 3.1415926557, 3.1415926829,
+                  -0.0000005595, -0.0000006069, -0.0000005150]
+target_positions: [0.0120880752, 3.1105875403, 3.1352587706,
+                   -0.0097047544, 0.0284635768, -0.0166130060]
+
+TF tras X: Translation [0.020, 0.064, 1.181]; RPY [-0.000, 0.000, -1.571].
+Resultado X: signo positivo correcto; magnitud 0.020 m al nivel de precisión de TF;
+Y, Z y orientación permanecieron estables.
+
+Interrupción antes de Y y Z
+Las comprobaciones obligatorias previas con `ros2 topic echo --once` y después
+`ros2 topic info` fallaron durante descubrimiento ROS con:
+xmlrpc.client.Fault: <Fault 1: "<class 'RuntimeError'>:!rclpy.ok()">
+TF siguió estable, pero no se pudo volver a confirmar /joint_states y system_readiness.
+No se publicó intención Y ni Z, conforme a la regla de detenerse ante incoherencia.
+
+Cierre
+Se envió SIGINT al launch.
+$ ps -eo pid=,comm=,args= | grep -E '[r]os2 launch|[i]gn gazebo|[g]z sim|[i]gn gui|[g]z gui|[r]obot_state_publisher|[s]afety_supervisor|[c]artesian_.*adapter|[s]imulation_command_adapter' || true
+(sin salida)
+No quedaron procesos. Solo se publicó la intención X; no hubo Y/Z, comandos simultáneos,
+hardware físico, cámara RGB-D ni sudo.

@@ -1,0 +1,92 @@
+Evidencia: diagnóstico de controller_manager en READY headless
+Fecha: 2026-10-18
+
+ALCANCE
+- Lectura de launch, procesos informados por launch y secuencia de arranque de
+  los controladores.
+- Una sola reproducción adicional del mismo launch headless pasivo.
+- simulation_output_enabled:=false, start_gui:=false, start_rviz:=false,
+  headless:=true.
+- Sin cambios de código, publicaciones ni movimientos.
+
+MODELO DE PROCESOS CONFIRMADO
+- controller_manager no se lanza como proceso independiente.
+- El plugin gz_ros2_control lo crea dentro del proceso ign después de insertar
+  el robot.
+- jaco_gazebo.launch.py inicia los spawners mediante TimerAction:
+  joint_state_broadcaster a los 5 s y arm_controller a los 6 s.
+- Los spawners esperan /controller_manager/list_controllers si el servicio aún
+  no responde.
+
+COMPARACIÓN DE SECUENCIAS
+
+Última ejecución fallida (logs /tmp/tesis_z_spin_passive_ros_logs):
+  1792345819.939  system_readiness iniciado
+  1792345821.872  gz_ros2_control: Loading controller_manager
+  1792345822.342  controller_manager: failed to send response to
+                  /controller_manager/list_controllers (timeout):
+                  client will not receive response
+  1792345824.441  joint_state_broadcaster activado
+  1792345826.048  arm_controller activado
+  1792345826.915  system_readiness seguía únicamente en
+                  WAITING: esperando controller_manager
+
+Última ejecución anterior que sí llegó a READY
+(logs /tmp/tesis_yz_passive_ros_logs):
+  1792344624.682  Loading controller arm_controller
+  1792344624.779  arm_controller activado
+  1792344626.078  SYSTEM READY
+  No consta timeout al responder list_controllers.
+
+Única reproducción diagnóstica
+(logs /tmp/tesis_controller_manager_diag_logs):
+  1792346111.467  system_readiness iniciado
+  1792346113.758  gz_ros2_control: Loading controller_manager
+  1792346115.440  WAITING: arm_controller no está active
+                  Esta transición demuestra que list_controllers respondió.
+  1792346117.328  arm_controller activado
+  1792346117.401  joint_state_broadcaster activado
+  1792346117.440  WAITING: arm_controller no está active
+  1792346118.440  SYSTEM READY
+  No apareció timeout de list_controllers.
+
+COMPORTAMIENTO DEL CLIENTE
+- system_readiness guarda la llamada asíncrona en controller_future.
+- Si el future existe pero no está done(), _update_controller_state() retorna.
+- No hay deadline, cancelación ni recreación de una llamada que nunca termina.
+- controller_error conserva su valor inicial "esperando controller_manager".
+- En la ejecución fallida la respuesta perdida dejó el future pendiente y
+  bloqueó todos los reintentos, aunque el manager y la acción ya estaban
+  activos.
+
+CAUSA CONFIRMADA
+Carrera transitoria durante la creación de controller_manager: el servicio fue
+descubierto y system_readiness emitió list_controllers cuando el manager aún no
+podía entregar de forma fiable la respuesta. El servidor registró que el
+cliente no la recibiría. El defecto persistente está en el cliente de readiness:
+un future huérfano no tiene timeout ni reintento.
+
+PARCHE MÍNIMO PROPUESTO
+- Registrar time.monotonic() al crear controller_future.
+- Si sigue pendiente tras un plazo acotado, cancelarlo, limpiar el future,
+  mantener controller_active=false y permitir un nuevo call_async en una
+  evaluación posterior.
+- Añadir una prueba unitaria con un primer future que nunca completa y un
+  segundo que devuelve arm_controller=active.
+- No cambiar los TimerAction del launch: los spawners ya esperan el servicio y
+  un retraso fijo solo desplazaría la misma carrera bajo otra carga.
+
+CRITERIO DE AUTORIZACIÓN
+- La regresión demuestra timeout y reintento sin bucle de solicitudes
+  simultáneas.
+- Los errores completos de list_controllers siguen publicándose como WAITING.
+- Una pila headless nueva alcanza READY dentro de 20 s y el log no muestra un
+  future permanentemente bloqueado aunque la primera respuesta se pierda.
+
+CIERRE
+- Se envió SIGINT únicamente al launch de la reproducción.
+- system_readiness y controller_manager cerraron.
+- Durante el cierre aparecieron excepciones rclpy en otros adaptadores; son
+  posteriores y ajenas a la causa READY, y no se analizaron por quedar fuera
+  del alcance solicitado.
+

@@ -24,6 +24,7 @@ from thesis_core.joint_model import (
     normalize_target,
     saturate_target_by_velocity,
 )
+from thesis_core.ros_runtime import spin_node
 from thesis_simulation.control_arbitration import (
     effective_speed_scale,
     is_more_restrictive,
@@ -992,15 +993,7 @@ class SimulationCommandAdapter(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = SimulationCommandAdapter()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(SimulationCommandAdapter())
 
 
 if __name__ == '__main__':

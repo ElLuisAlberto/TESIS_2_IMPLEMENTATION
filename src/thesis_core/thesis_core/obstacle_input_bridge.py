@@ -42,10 +42,13 @@ class ObstacleInputBridge(Node):
         self.transform_timeout_sec = float(
             self.get_parameter('transform_timeout_sec').value
         )
-        if (not self.target_frame or self.max_age_sec <= 0.0 or
+        if (self.target_frame != 'world' or self.max_age_sec <= 0.0 or
                 self.future_tolerance_sec < 0.0 or
                 self.transform_timeout_sec <= 0.0):
-            raise ValueError('invalid obstacle bridge parameters')
+            raise ValueError(
+                'target_frame must be world and obstacle bridge parameters '
+                'must be valid'
+            )
 
         self.buffer = Buffer()
         self.listener = TransformListener(self.buffer, self)

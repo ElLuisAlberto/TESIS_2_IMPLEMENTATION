@@ -6,6 +6,21 @@ from dataclasses import dataclass, field
 import math
 
 
+TERMINAL_EXECUTION_STATUSES = {
+    'SUCCEEDED', 'FAILED', 'CANCELED', 'REJECTED', 'DRY_RUN'
+}
+
+
+def should_record_execution_event(status, command_id, terminal_commands):
+    """Deduplicate terminal lifecycle events while retaining non-terminals."""
+    if status not in TERMINAL_EXECUTION_STATUSES:
+        return True
+    if command_id in terminal_commands:
+        return False
+    terminal_commands.add(command_id)
+    return True
+
+
 def percentile95(values: list[float]) -> float:
     """Return the linearly interpolated 95th percentile."""
     if not values:

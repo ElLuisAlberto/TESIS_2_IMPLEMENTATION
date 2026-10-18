@@ -1,0 +1,85 @@
+Evidencia: timeout y reintento de controller_future
+Fecha: 2026-10-18
+
+CAMBIOS
+- Solo SystemReadinessNode y su nueva regresión.
+- Nuevo parámetro controller_request_timeout_sec, valor predeterminado 2.0 s
+  y validación positiva/finita.
+- Cada controller_future registra su instante monotónico de inicio.
+- Un future pendiente que agota el plazo se cancela y limpia; la evaluación
+  puede emitir una nueva consulta sin mantener solicitudes simultáneas.
+- Una respuesta válida conserva la lógica existente para detectar
+  arm_controller=active.
+- No se modificaron launch, IK, tolerancias ni rutas de movimiento.
+
+REGRESIÓN
+Archivo:
+  src/thesis_simulation/test/test_system_readiness.py
+
+Escenario:
+1. La primera consulta devuelve un future que nunca completa.
+2. A los 2.0 s el future se cancela.
+3. La segunda consulta devuelve arm_controller con state=active.
+4. La siguiente evaluación publica Bool true y String READY.
+
+Prueba dirigida:
+  1 passed in 0.20s
+
+COMPILACIÓN
+Comando:
+  source /opt/ros/humble/setup.bash
+  colcon build --packages-select thesis_simulation \
+    --event-handlers console_direct+
+
+Resultado:
+  Finished <<< thesis_simulation [31.1s]
+  Summary: 1 package finished [31.4s]
+
+SUITE DEL PAQUETE
+El primer pase encontró exclusivamente W391 por una línea vacía final en la
+prueba nueva: 1 failed, 40 passed, 1 skipped. Se eliminó esa línea sin cambiar
+lógica y se repitió la suite.
+
+Resultado final:
+  41 passed, 1 skipped, 3 warnings in 1.01s
+  Summary: 1 package finished [2.07s]
+
+Advertencias conocidas:
+- TestCommandNode no se recopila porque define __init__.
+- SelectableGroups usa una interfaz deprecada.
+
+PILA HEADLESS PASIVA
+Argumentos:
+  simulation_output_enabled:=false
+  start_gui:=false
+  start_rviz:=false
+  headless:=true
+
+La salida confirmó que simulation_command_adapter tenía la salida simulada
+deshabilitada. No se publicó ninguna intención o comando de movimiento.
+
+READY
+Consulta independiente con tipo std_msgs/msg/String explícito,
+--no-daemon --spin-time 2 y plazo global de 20 s:
+
+  ATTEMPT=1 RC=0 ELAPSED=3s
+  data: READY
+  READY_VERIFIED=true TOTAL_ELAPSED=3s
+
+CIERRE
+- Se envió SIGINT únicamente al launch después de READY.
+- system_readiness terminó como proceso limpio.
+- Se observó durante el desmontaje un AttributeError ignorado en
+  Future.__del__ asociado a system_readiness y RuntimeError de rclpy en otros
+  nodos. Son posteriores a READY y quedan fuera del parche autorizado de
+  timeout/reintento; no se hicieron cambios adicionales.
+
+RESULTADO
+- Timeout/reintento determinista: APROBADO.
+- Compilación y suite final: APROBADAS.
+- READY headless dentro de 20 s: APROBADO (3 s).
+- Movimiento/comandos: NINGUNO.
+
+Logs:
+  /tmp/tesis_controller_retry_passive_logs/2026-10-18-13-00-01-333960-miNave-73992
+

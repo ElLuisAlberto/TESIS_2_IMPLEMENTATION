@@ -1,0 +1,114 @@
+Pruebas cartesianas pasivas 5, 6 y 7
+Fecha: 2026-10-18
+Alcance autorizado: observación de la pila de simulación sin publicar comandos.
+
+Restricciones aplicadas
+- simulation_output_enabled:=false
+- start_gui:=false
+- start_rviz:=false
+- use_demo_obstacle:=false
+- Sin publicaciones ROS, pruebas de movimiento, hardware físico, cámara RGB-D ni sudo.
+
+Preparación
+$ source /opt/ros/humble/setup.bash
+$ source install/setup.bash
+
+Intento dentro del sandbox
+$ ros2 launch thesis_simulation thesis_system.launch.py simulation_output_enabled:=false start_gui:=false start_rviz:=false use_demo_obstacle:=false
+Resultado: ROS 2 no pudo crear el directorio de logs en /home/luis/.ros/log.
+
+$ ROS_LOG_DIR=/home/luis/Escritorio/TESIS_2_IMPLEMENTATION/log/ros_passive_2026-10-18 ros2 launch thesis_simulation thesis_system.launch.py simulation_output_enabled:=false start_gui:=false start_rviz:=false use_demo_obstacle:=false
+Resultado: DDS bloqueado por el sandbox al crear UDP: "Operation not permitted".
+
+Ejecución observacional fuera del sandbox (necesaria para DDS; sin sudo)
+$ ROS_LOG_DIR=/home/luis/Escritorio/TESIS_2_IMPLEMENTATION/log/ros_passive_2026-10-18 ros2 launch thesis_simulation thesis_system.launch.py simulation_output_enabled:=false start_gui:=false start_rviz:=false use_demo_obstacle:=false
+Procesos/nodos iniciados por el launch: robot_state_publisher, ign, bridges de reloj y pose,
+proximity_monitor, obstacle_input_bridge, safety_supervisor, simulation_command_adapter,
+horizon_preview, cartesian_command_adapter, cartesian_jog_adapter,
+cartesian_trajectory_adapter y system_readiness.
+
+Incidencia de interfaz
+El parámetro start_gui:=false no inició la interfaz thesis_ui y start_rviz:=false no inició RViz.
+Sin embargo, el launch interno de Ignition creó un proceso de GUI de Gazebo ("Ignition Gazebo GUI v6.18.0").
+No se interactuó con esa GUI y se cerró al finalizar. Este launch no proporcionó en esta ejecución
+un parámetro headless usado para impedirlo.
+
+Consulta de nodos y tópicos
+$ ros2 topic info -v /thesis/cartesian_candidate
+Type: thesis_interfaces/msg/CartesianCommand
+Publisher count: 0
+Subscription count: 1
+Node name: cartesian_command_adapter
+
+$ ros2 topic info -v /thesis/cartesian_jog_intent
+Type: geometry_msgs/msg/TwistStamped
+Publisher count: 0
+Subscription count: 1
+Node name: cartesian_jog_adapter
+
+$ ros2 topic info -v /thesis/cartesian_trajectory_candidate
+Type: thesis_interfaces/msg/CartesianTrajectoryCommand
+Publisher count: 0
+Subscription count: 1
+Node name: cartesian_trajectory_adapter
+
+$ ros2 topic info -v /thesis/candidate_command
+Publisher: cartesian_command_adapter
+Subscription: safety_supervisor_node
+
+$ ros2 topic info -v /thesis/jog_intent
+Publishers: cartesian_jog_adapter, cartesian_trajectory_adapter
+Subscription: safety_supervisor_node
+
+$ ros2 topic info -v /thesis/supervised_command
+Publisher: safety_supervisor_node
+Subscriptions: simulation_command_adapter, horizon_preview
+
+$ ros2 topic info -v /thesis/supervised_jog_command
+Publisher: safety_supervisor_node
+Subscriptions: simulation_command_adapter, horizon_preview
+
+$ ros2 topic info -v /thesis/execution_control
+Publisher: safety_supervisor_node
+Subscriptions: simulation_command_adapter, horizon_preview, cartesian_trajectory_adapter
+
+$ timeout 8s ros2 topic echo --once /joint_states
+name:
+- j2n6s300_joint_2
+- j2n6s300_joint_3
+- j2n6s300_joint_4
+- j2n6s300_joint_5
+- j2n6s300_joint_1
+- j2n6s300_joint_6
+... (también articulaciones de dedos)
+position: [3.1416, 3.1416, 3.1416, 3.1416, 0.0, 3.1416, ...]
+
+$ timeout 8s ros2 topic echo --once /thesis/system_readiness
+data: 'WAITING: sin dato reciente: cálculo de proximidad; sin dato reciente: fuente de obstáculo'
+
+$ timeout 8s ros2 run tf2_ros tf2_echo world j2n6s300_end_effector
+Al inicio: "Invalid frame ID \"world\" passed to canTransform argument target_frame - frame does not exist"
+Muestras posteriores repetidas:
+Translation: [0.000, 0.064, 1.181]
+Rotation: in Quaternion [-0.000, 0.000, -0.707, 0.707]
+Rotation: in RPY [0.000, -0.000, -1.571]
+
+Observación adicional
+$ ros2 topic info -v /joint_states
+La consulta posterior informó Publisher count: 0 y cinco suscriptores; esto contradice la muestra
+recibida por `ros2 topic echo --once` y se atribuye a descubrimiento transitorio del grafo. La muestra
+recibida confirma la presencia efectiva de /joint_states durante la prueba.
+
+Salida de simulación
+Log del launch: "Adaptador Gazebo preparado; salida simulada desactivada".
+Los tres tópicos de entrada cartesiana tuvieron Publisher count: 0. No se publicó ningún comando.
+
+Cierre
+Se envió SIGINT al proceso ros2 launch. Terminó con código 0 y finalizaron los adaptadores cartesianos,
+supervisor, robot_state_publisher, bridges e Ignition.
+
+$ ps -eo pid=,comm=,args= | grep -E '[r]os2 launch|[i]gn gazebo|[g]z sim|[r]obot_state_publisher|[s]afety_supervisor|[c]artesian_.*adapter|[s]imulation_command_adapter' || true
+(sin salida)
+
+Confirmación: no quedaron procesos de la prueba; no se inició hardware físico ni se enviaron comandos
+al Kinova Jaco2.

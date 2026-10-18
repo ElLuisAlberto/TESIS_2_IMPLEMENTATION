@@ -1,0 +1,86 @@
+Evidencia de repetición cartesiana Y en Gazebo headless
+Fecha: 2026-10-18
+
+ALCANCE
+- Pila nueva e independiente.
+- simulation_output_enabled:=true.
+- start_gui:=false, start_rviz:=false, headless:=true.
+- Sin hardware físico, cámara RGB-D o sudo.
+- Se publicó exactamente una intención cartesiana.
+
+PRECONDICIÓN READY
+Consulta con tipo explícito std_msgs/msg/String y plazo global de 20 s:
+  ATTEMPT=1 RC=0 ELAPSED=5s
+  data: READY
+  READY_VERIFIED=true TOTAL_ELAPSED=5s
+
+OTRAS PRECONDICIONES
+- /joint_states: muestra completa del brazo y dedos; rc=0.
+- /thesis/proximity_status:
+    state: ALLOW
+    minimum_clearance: 0.37500213411929284 m
+    limiting_segment: upper_arm_to_forearm
+- /thesis/supervised_command:
+    Publisher: safety_supervisor_node
+    Subscribers: simulation_command_adapter y horizon_preview
+- TF inicial world -> j2n6s300_end_effector, estable:
+    Translation [0.000, 0.064, 1.181]
+    RPY [-0.000, 0.000, -1.571] rad
+
+ÚNICA INTENCIÓN
+Tópico: /thesis/cartesian_candidate
+Tipo: thesis_interfaces/msg/CartesianCommand
+command_id: codex-y-repeat-20261018-001
+Objetivo absoluto:
+  x=0.000 m
+  y=0.084 m
+  z=1.181 m
+  roll=0.0 rad
+  pitch=0.0 rad
+  yaw=-1.57079632679 rad
+  duration=5 s
+
+El objetivo nominal conserva X/Z/orientación y suma 0.020 m a la Y mostrada
+por TF. El validador, usando la TF interna sin redondear, midió un paso inicial
+de 0.019738 m y giro solicitado de 0.000 grados.
+
+VALIDACIÓN INTEGRADA
+  CHECK_INTENCION_CARTESIANA=OK
+  CHECK_CONVERSION_IK=OK
+  CHECK_SUPERVISION=OK
+    ALLOW codex-y-repeat-20261018-001; duration=5.000s; scale=1.000000
+  CHECK_EJECUCION=OK
+    estado=SUCCEEDED
+  ERROR_POSICION_M=0.000497
+  ERROR_ORIENTACION_GRADOS=0.016
+  CHECK_POSICION_FINAL=OK
+  CHECK_ORIENTACION_FINAL=OK
+  RESULTADO=OK
+
+TRAZA DEL LAUNCH
+- IK convertida en 52 iteraciones:
+    position_error=0.0005 m
+    orientation_error=0.02 deg
+- Supervisor:
+    PREDICTION ALLOW, min_clearance=0.371 m
+    ALLOW FORWARDED, scale=1.00
+- Adaptador/controlador de Gazebo:
+    GOAL PENDING
+    GAZEBO ACCEPTED
+    GAZEBO SUCCEEDED: Goal successfully reached!
+
+TF FINAL
+  Translation [0.000, 0.084, 1.181]
+  RPY aproximado [-0.006, 0.015, -90.000] grados
+
+La visualización redondeada confirma +0.020 m solo en Y; X y Z permanecen en
+0.000 y 1.181 m. La desviación angular total medida por el validador fue
+0.016 grados.
+
+CIERRE
+- Se envió SIGINT únicamente al launch después de completar la validación.
+- No se publicó ningún otro objetivo.
+- Todos los procesos terminaron; no quedaron procesos de simulación.
+- Durante el apagado apareció un RuntimeWarning aislado del adaptador de
+  trayectoria sobre una coroutine no esperada; no ocurrió durante la ejecución
+  Y ni alteró el resultado terminal SUCCEEDED.

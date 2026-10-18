@@ -9,6 +9,8 @@ from std_msgs.msg import Bool, String
 from thesis_interfaces.msg import ProximityStatus
 
 from thesis_hardware.readiness_contract import (
+    joint_state_is_valid,
+    proximity_is_valid,
     readiness_reasons,
     sample_is_fresh,
 )
@@ -41,6 +43,7 @@ class HardwareReadinessNode(Node):
         self.armed = False
         self.last_joint_state = None
         self.last_proximity = None
+        self.proximity_safe = False
         self.last_text = None
 
         self.create_subscription(
@@ -83,13 +86,37 @@ class HardwareReadinessNode(Node):
         """Store the runtime output latch."""
         self.armed = bool(message.data)
 
-    def joint_state_callback(self, _message):
-        """Record arrival of physical joint feedback."""
-        self.last_joint_state = time.monotonic()
+    def joint_state_callback(self, message):
+        """Record only complete, finite and fresh physical feedback."""
+        now_ros = self.get_clock().now().nanoseconds / 1e9
+        stamp = (
+            float(message.header.stamp.sec)
+            + float(message.header.stamp.nanosec) * 1e-9
+        )
+        valid = joint_state_is_valid(
+            message.name,
+            message.position,
+            stamp,
+            now_ros,
+            self.timeout_sec,
+        )
+        self.last_joint_state = time.monotonic() if valid else None
 
-    def proximity_callback(self, _message):
-        """Record arrival of geometric evaluation."""
-        self.last_proximity = time.monotonic()
+    def proximity_callback(self, message):
+        """Record only fresh world-frame geometric evaluation."""
+        now_ros = self.get_clock().now().nanoseconds / 1e9
+        stamp = float(message.stamp.sec) + float(message.stamp.nanosec) * 1e-9
+        valid = proximity_is_valid(
+            message.state,
+            message.reference_frame,
+            float(message.minimum_clearance),
+            float(message.obstacle_radius),
+            stamp,
+            now_ros,
+            self.timeout_sec,
+        )
+        self.last_proximity = time.monotonic() if valid else None
+        self.proximity_safe = valid and message.state != 'STOP'
 
     def evaluate(self):
         """Publish one fail-closed readiness decision."""
@@ -105,6 +132,7 @@ class HardwareReadinessNode(Node):
                 self.last_proximity, now, self.timeout_sec
             ),
             self.require_proximity,
+            self.proximity_safe,
         )
         ready = not reasons
         text = 'READY' if ready else 'NOT_READY: ' + '; '.join(reasons)

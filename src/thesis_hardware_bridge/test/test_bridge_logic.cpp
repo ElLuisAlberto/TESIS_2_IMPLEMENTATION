@@ -112,6 +112,154 @@ TEST(BridgeLogic, ContinuousCommandsMustBeFresh)
     std::numeric_limits<double>::infinity(), 0.15));
 }
 
+TEST(BridgeLogic, ProximityInterlockRequiresWorldFreshSourceAndKnownState)
+{
+  EXPECT_TRUE(bridge::proximity_sample_is_valid(
+    "ALLOW", "world", 0.25, 0.10, false, 0.10, 0.75));
+  EXPECT_TRUE(bridge::proximity_sample_is_valid(
+    "STOP", "world", -0.01, 0.10, false, 0.10, 0.75));
+  EXPECT_FALSE(bridge::proximity_sample_is_valid(
+    "ALLOW", "camera", 0.25, 0.10, false, 0.10, 0.75));
+  EXPECT_FALSE(bridge::proximity_sample_is_valid(
+    "HOLD", "world", 0.25, 0.10, false, 0.10, 0.75));
+  EXPECT_FALSE(bridge::proximity_sample_is_valid(
+    "ALLOW", "world", 0.25, 0.10, true, 0.10, 0.75));
+  EXPECT_FALSE(bridge::proximity_sample_is_valid(
+    "ALLOW", "world", 0.25, 0.10, false, 0.751, 0.75));
+  EXPECT_FALSE(bridge::proximity_sample_is_valid(
+    "ALLOW", "world", 0.25, 0.10, false, -0.051, 0.75));
+}
+
+TEST(BridgeLogic, PointCommandAdmissionRejectsInvalidStampsAndReusedIds)
+{
+  bridge::RecentCommandIds recent_ids;
+
+  EXPECT_EQ(
+    bridge::admit_point_command(
+      "point-fresh", false, 0.10, 0.15, recent_ids),
+    bridge::CommandAdmission::kAccepted);
+  EXPECT_EQ(
+    bridge::admit_point_command(
+      "point-stale", false, 0.151, 0.15, recent_ids),
+    bridge::CommandAdmission::kStaleStamp);
+  EXPECT_EQ(
+    bridge::admit_point_command(
+      "point-future", false, -0.051, 0.15, recent_ids),
+    bridge::CommandAdmission::kFutureStamp);
+  EXPECT_EQ(
+    bridge::admit_point_command(
+      "", false, 0.01, 0.15, recent_ids),
+    bridge::CommandAdmission::kEmptyId);
+  EXPECT_EQ(
+    bridge::admit_point_command(
+      "point-zero", true, 0.01, 0.15, recent_ids),
+    bridge::CommandAdmission::kZeroStamp);
+  EXPECT_EQ(
+    bridge::admit_point_command(
+      "point-fresh", false, 0.01, 0.15, recent_ids),
+    bridge::CommandAdmission::kReusedId);
+}
+
+TEST(BridgeLogic, ExecutionControlAdmissionRequiresFreshActiveId)
+{
+  EXPECT_EQ(
+    bridge::admit_execution_control(
+      "point-active", "point-active", false, 0.10, 0.15, false),
+    bridge::CommandAdmission::kAccepted);
+  EXPECT_EQ(
+    bridge::admit_execution_control(
+      "point-active", "point-active", false, 0.151, 0.15, false),
+    bridge::CommandAdmission::kStaleStamp);
+  EXPECT_EQ(
+    bridge::admit_execution_control(
+      "point-active", "point-active", false, -0.051, 0.15, false),
+    bridge::CommandAdmission::kFutureStamp);
+  EXPECT_EQ(
+    bridge::admit_execution_control(
+      "point-active", "point-active", true, 0.01, 0.15, false),
+    bridge::CommandAdmission::kZeroStamp);
+  EXPECT_EQ(
+    bridge::admit_execution_control(
+      "", "point-active", false, 0.01, 0.15, false),
+    bridge::CommandAdmission::kEmptyId);
+  EXPECT_EQ(
+    bridge::admit_execution_control(
+      "other", "point-active", false, 0.01, 0.15, false),
+    bridge::CommandAdmission::kNotActive);
+}
+
+TEST(BridgeLogic, StopControlRetainsPriority)
+{
+  EXPECT_EQ(
+    bridge::admit_execution_control(
+      "", "point-active", true, 10.0, 0.15, true),
+    bridge::CommandAdmission::kAccepted);
+  EXPECT_DOUBLE_EQ(bridge::effective_speed_scale("STOP", 1.0), 0.0);
+}
+
+TEST(BridgeLogic, ArmInterlockRequiresEveryPrecondition)
+{
+  bridge::ArmInterlockInputs inputs;
+  inputs.output_permitted = true;
+  inputs.connected = true;
+  inputs.joint_state_fresh = true;
+  inputs.system_ready = true;
+  inputs.system_ready_fresh = true;
+  inputs.proximity_valid = true;
+  inputs.proximity_fresh = true;
+  inputs.supervisor_available = true;
+  inputs.safety_stop_active = false;
+
+  EXPECT_TRUE(bridge::arm_interlock_reasons(inputs).empty());
+  EXPECT_FALSE(bridge::should_disarm_for_interlock_loss(true, inputs));
+
+  inputs.output_permitted = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.output_permitted = true;
+  inputs.connected = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.connected = true;
+  inputs.joint_state_fresh = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.joint_state_fresh = true;
+  inputs.system_ready = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.system_ready = true;
+  inputs.system_ready_fresh = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.system_ready_fresh = true;
+  inputs.proximity_valid = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.proximity_valid = true;
+  inputs.proximity_fresh = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.proximity_fresh = true;
+  inputs.supervisor_available = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.supervisor_available = true;
+  inputs.safety_stop_active = true;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+}
+
+TEST(BridgeLogic, ArmInterlockDisarmsAfterSafetyLoss)
+{
+  bridge::ArmInterlockInputs inputs;
+  inputs.output_permitted = true;
+  inputs.connected = true;
+  inputs.joint_state_fresh = true;
+  inputs.system_ready = true;
+  inputs.system_ready_fresh = true;
+  inputs.proximity_valid = true;
+  inputs.proximity_fresh = true;
+  inputs.supervisor_available = true;
+  inputs.safety_stop_active = false;
+
+  EXPECT_FALSE(bridge::should_disarm_for_interlock_loss(true, inputs));
+  inputs.proximity_fresh = false;
+  EXPECT_TRUE(bridge::should_disarm_for_interlock_loss(true, inputs));
+  EXPECT_FALSE(bridge::should_disarm_for_interlock_loss(false, inputs));
+}
+
 TEST(BridgeLogic, TargetToleranceUsesWrappedDistance)
 {
   bridge::JointVector current = {

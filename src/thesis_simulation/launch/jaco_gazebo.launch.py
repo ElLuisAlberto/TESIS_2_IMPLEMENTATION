@@ -7,6 +7,7 @@ from ament_index_python.packages import (
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import Command, LaunchConfiguration
 
 from launch_ros.actions import Node
@@ -19,6 +20,9 @@ def generate_launch_description():
     obstacle_y = LaunchConfiguration('obstacle_y')
     obstacle_z = LaunchConfiguration('obstacle_z')
     obstacle_source_mode = LaunchConfiguration('obstacle_source_mode')
+    initial_pose = LaunchConfiguration('initial_pose')
+    start_rviz = LaunchConfiguration('start_rviz')
+    headless = LaunchConfiguration('headless')
 
     simulation_share = get_package_share_directory(
         'thesis_simulation'
@@ -112,7 +116,9 @@ def generate_launch_description():
         'robot_description': ParameterValue(
             Command([
                 'xacro ',
-                xacro_file
+                xacro_file,
+                ' initial_pose:=',
+                initial_pose,
             ]),
             value_type=str
         )
@@ -145,6 +151,28 @@ def generate_launch_description():
             '3',
             world_file
         ],
+        condition=UnlessCondition(headless),
+        output='screen',
+        additional_env={
+            'IGN_GAZEBO_SYSTEM_PLUGIN_PATH':
+                gazebo_system_plugin_path,
+
+            'IGN_GAZEBO_RESOURCE_PATH':
+                gazebo_resource_path,
+        }
+    )
+
+    gazebo_headless = ExecuteProcess(
+        cmd=[
+            'ign',
+            'gazebo',
+            '-r',
+            '-s',
+            '-v',
+            '3',
+            world_file
+        ],
+        condition=IfCondition(headless),
         output='screen',
         additional_env={
             'IGN_GAZEBO_SYSTEM_PLUGIN_PATH':
@@ -254,6 +282,7 @@ def generate_launch_description():
     rviz = Node(
         package='rviz2',
         executable='rviz2',
+        condition=IfCondition(start_rviz),
         parameters=[{'use_sim_time': True}],
         output='screen',
         arguments=[
@@ -339,10 +368,27 @@ def generate_launch_description():
                 'Obstacle source: gazebo (default) or topic (validated input)'
             ),
         ),
+        DeclareLaunchArgument(
+            'initial_pose',
+            default_value='default',
+            choices=('default', 'z_ready'),
+            description='Initial Gazebo joint pose preset.',
+        ),
+        DeclareLaunchArgument(
+            'start_rviz',
+            default_value='true',
+            description='Start RViz for interactive simulation runs.',
+        ),
+        DeclareLaunchArgument(
+            'headless',
+            default_value='false',
+            description='Run the Ignition Gazebo server without its GUI.',
+        ),
 
         robot_state_publisher,
 
         gazebo,
+        gazebo_headless,
         clock_bridge,
         pose_bridge,
 

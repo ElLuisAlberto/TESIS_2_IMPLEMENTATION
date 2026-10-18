@@ -22,6 +22,7 @@
   <exec_depend>thesis_description</exec_depend>
   <exec_depend>thesis_hardware_bridge</exec_depend>
   <exec_depend>thesis_interfaces</exec_depend>
+  <exec_depend>thesis_telemetry</exec_depend>
   <exec_depend>thesis_ui</exec_depend>
   <exec_depend>xacro</exec_depend>
 

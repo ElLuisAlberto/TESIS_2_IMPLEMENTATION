@@ -5,8 +5,10 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <deque>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace thesis_hardware_bridge
 {
@@ -15,8 +17,177 @@ constexpr std::size_t kJointCount = 6;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegreesToRadians = kPi / 180.0;
 constexpr double kRadiansToDegrees = 180.0 / kPi;
+constexpr std::size_t kRecentCommandIdCapacity = 256;
 
 using JointVector = std::array<double, kJointCount>;
+
+struct ArmInterlockInputs
+{
+  bool output_permitted{false};
+  bool connected{false};
+  bool joint_state_fresh{false};
+  bool system_ready{false};
+  bool system_ready_fresh{false};
+  bool proximity_valid{false};
+  bool proximity_fresh{false};
+  bool supervisor_available{false};
+  bool safety_stop_active{true};
+};
+
+inline std::vector<std::string> arm_interlock_reasons(
+  const ArmInterlockInputs & inputs)
+{
+  std::vector<std::string> reasons;
+  if (!inputs.output_permitted) {
+    reasons.emplace_back("hardware output is disabled");
+  }
+  if (!inputs.connected) {
+    reasons.emplace_back("JACO backend is not connected");
+  }
+  if (!inputs.joint_state_fresh) {
+    reasons.emplace_back("joint state is unavailable or stale");
+  }
+  if (!inputs.system_ready) {
+    reasons.emplace_back("system_ready is false");
+  }
+  if (!inputs.system_ready_fresh) {
+    reasons.emplace_back("system_ready is unavailable or stale");
+  }
+  if (!inputs.proximity_valid) {
+    reasons.emplace_back("proximity status is invalid");
+  }
+  if (!inputs.proximity_fresh) {
+    reasons.emplace_back("proximity status is unavailable or stale");
+  }
+  if (!inputs.supervisor_available) {
+    reasons.emplace_back("safety supervisor is unavailable");
+  }
+  if (inputs.safety_stop_active) {
+    reasons.emplace_back("STOP or HOLD is active");
+  }
+  return reasons;
+}
+
+inline bool should_disarm_for_interlock_loss(
+  bool armed, const ArmInterlockInputs & inputs)
+{
+  return armed && !arm_interlock_reasons(inputs).empty();
+}
+
+inline bool message_age_is_fresh(
+  double age_sec, double maximum_age_sec,
+  double future_tolerance_sec = 0.05);
+
+inline bool proximity_sample_is_valid(
+  const std::string & state,
+  const std::string & reference_frame,
+  double minimum_clearance,
+  double obstacle_radius,
+  bool zero_stamp,
+  double source_age_sec,
+  double maximum_age_sec)
+{
+  const bool known_state =
+    state == "ALLOW" || state == "WARNING" ||
+    state == "REDUCTION" || state == "STOP";
+  return known_state && reference_frame == "world" && !zero_stamp &&
+         std::isfinite(minimum_clearance) &&
+         std::isfinite(obstacle_radius) && obstacle_radius >= 0.0 &&
+         message_age_is_fresh(source_age_sec, maximum_age_sec);
+}
+
+class RecentCommandIds
+{
+public:
+  bool contains(const std::string & command_id) const
+  {
+    return std::find(ids_.begin(), ids_.end(), command_id) != ids_.end();
+  }
+
+  void remember(const std::string & command_id)
+  {
+    if (contains(command_id)) {
+      return;
+    }
+    if (ids_.size() >= kRecentCommandIdCapacity) {
+      ids_.pop_front();
+    }
+    ids_.push_back(command_id);
+  }
+
+private:
+  std::deque<std::string> ids_;
+};
+
+enum class CommandAdmission
+{
+  kAccepted,
+  kEmptyId,
+  kReusedId,
+  kZeroStamp,
+  kStaleStamp,
+  kFutureStamp,
+  kNotActive,
+};
+
+inline bool nonempty_command_id(const std::string & command_id)
+{
+  return command_id.find_first_not_of(" \t\r\n") != std::string::npos;
+}
+
+inline CommandAdmission admit_point_command(
+  const std::string & command_id,
+  bool zero_stamp,
+  double age_sec,
+  double maximum_age_sec,
+  RecentCommandIds & recent_ids)
+{
+  if (!nonempty_command_id(command_id)) {
+    return CommandAdmission::kEmptyId;
+  }
+  if (recent_ids.contains(command_id)) {
+    return CommandAdmission::kReusedId;
+  }
+  // Reserve the ID before stamp validation: a rejected terminal attempt
+  // cannot be replayed later while it remains in this bounded window.
+  recent_ids.remember(command_id);
+  if (zero_stamp) {
+    return CommandAdmission::kZeroStamp;
+  }
+  if (!message_age_is_fresh(age_sec, maximum_age_sec)) {
+    return age_sec < 0.0 ? CommandAdmission::kFutureStamp :
+           CommandAdmission::kStaleStamp;
+  }
+  return CommandAdmission::kAccepted;
+}
+
+inline CommandAdmission admit_execution_control(
+  const std::string & command_id,
+  const std::string & active_command_id,
+  bool zero_stamp,
+  double age_sec,
+  double maximum_age_sec,
+  bool is_stop)
+{
+  // STOP is intentionally independent of identifier and stamp validity.
+  if (is_stop) {
+    return CommandAdmission::kAccepted;
+  }
+  if (!nonempty_command_id(command_id)) {
+    return CommandAdmission::kEmptyId;
+  }
+  if (zero_stamp) {
+    return CommandAdmission::kZeroStamp;
+  }
+  if (!message_age_is_fresh(age_sec, maximum_age_sec)) {
+    return age_sec < 0.0 ? CommandAdmission::kFutureStamp :
+           CommandAdmission::kStaleStamp;
+  }
+  if (active_command_id.empty() || command_id != active_command_id) {
+    return CommandAdmission::kNotActive;
+  }
+  return CommandAdmission::kAccepted;
+}
 
 template<typename Operation, typename BetweenAttempts>
 bool retry_operation(
@@ -88,7 +259,7 @@ inline bool finite_vector(const JointVector & values)
 
 inline bool message_age_is_fresh(
   double age_sec, double maximum_age_sec,
-  double future_tolerance_sec = 0.05)
+  double future_tolerance_sec)
 {
   return std::isfinite(age_sec) && std::isfinite(maximum_age_sec) &&
          std::isfinite(future_tolerance_sec) && maximum_age_sec > 0.0 &&

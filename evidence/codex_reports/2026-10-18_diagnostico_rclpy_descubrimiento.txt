@@ -1,0 +1,115 @@
+Diagnóstico pasivo de descubrimiento ROS 2
+Fecha: 2026-10-18
+Restricciones: sin publicaciones, movimientos, hardware, cámara RGB-D, sudo ni cambios de configuración global.
+
+Pila iniciada
+$ ros2 launch thesis_simulation thesis_system.launch.py simulation_output_enabled:=false start_gui:=false start_rviz:=false headless:=true
+Procesos: Ignition servidor `ign gazebo -r -s`, robot_state_publisher, supervisor,
+adaptadores cartesianos, system_readiness y nodos de simulación. Sin GUI.
+
+Reproducción con el daemon ROS 2 por defecto
+Hora: 2026-10-18T12:02:20-05:00
+$ ros2 daemon status
+The daemon is running
+daemon_rc=0
+
+$ ros2 node list
+xmlrpc.client.Fault: <Fault 1: "<class 'RuntimeError'>:!rclpy.ok()">
+node_list_rc=1
+
+$ ros2 topic info -v /joint_states
+xmlrpc.client.Fault: <Fault 1: "<class 'RuntimeError'>:!rclpy.ok()">
+joint_info_rc=1
+
+$ ros2 topic info -v /thesis/system_readiness
+xmlrpc.client.Fault: <Fault 1: "<class 'RuntimeError'>:!rclpy.ok()">
+readiness_info_rc=1
+
+Traza común completa de la falla:
+Traceback (most recent call last):
+  File "/opt/ros/humble/bin/ros2", line 33, in <module>
+    sys.exit(load_entry_point('ros2cli==0.18.20', 'console_scripts', 'ros2')())
+  File "/opt/ros/humble/lib/python3.10/site-packages/ros2cli/cli.py", line 91, in main
+    rc = extension.main(parser=parser, args=args)
+  File "/opt/ros/humble/lib/python3.10/site-packages/ros2node/verb/list.py", line 38, in main
+    node_names = get_node_names(node=node, include_hidden_nodes=args.all)
+  File "/opt/ros/humble/lib/python3.10/site-packages/ros2node/api/__init__.py", line 60, in get_node_names
+    node_names_and_namespaces = node.get_node_names_and_namespaces()
+  File "/usr/lib/python3.10/xmlrpc/client.py", line 1122, in __call__
+    return self.__send(self.__name, args)
+  File "/usr/lib/python3.10/xmlrpc/client.py", line 1464, in __request
+    response = self.__transport.request(
+  File "/usr/lib/python3.10/xmlrpc/client.py", line 668, in close
+    raise Fault(**self._stack[0])
+xmlrpc.client.Fault: <Fault 1: "<class 'RuntimeError'>:!rclpy.ok()">
+
+`ros2 doctor --report` completó con código 0 e informó ROS 2 Humble y RMW Fast DDS,
+pero emitió avisos: "Fail to call PackageReport", "QoSCompatibilityReport" y
+"TopicReport". El daemon siguió respondiendo "The daemon is running" después del fallo.
+
+Inspección del cliente instalado
+/opt/ros/humble/lib/python3.10/site-packages/ros2cli/node/strategy.py:
+  use_daemon = not getattr(args, 'no_daemon', False)
+  if use_daemon and is_daemon_running(args):
+      self._daemon_node = DaemonNode(args)
+  parser.add_argument('--no-daemon', action='store_true',
+      help='Do not spawn nor use an already running daemon')
+
+Prueba de variable de entorno
+$ ROS2CLI_DISABLE_DAEMON=1 ros2 node list
+xmlrpc.client.Fault: <Fault 1: "<class 'RuntimeError'>:!rclpy.ok()">
+rc=1
+Esta instalación de Humble no usó esa variable para seleccionar la estrategia directa.
+
+Reproducción sin daemon, mediante argumento local del CLI
+Hora: 2026-10-18T12:03:13-05:00
+$ ros2 node list --no-daemon --spin-time 2
+/capsule_visualizer
+/cartesian_command_adapter
+/cartesian_jog_adapter
+/cartesian_trajectory_adapter
+/gazebo_clock_bridge
+/gazebo_pose_bridge
+/horizon_preview
+/obstacle_demo_source
+/obstacle_input_bridge
+/proximity_monitor
+/robot_state_publisher
+/safety_supervisor_node
+/simulation_command_adapter
+/system_readiness
+node_list_direct_rc=0
+
+$ ros2 topic info --no-daemon --spin-time 2 -v /joint_states
+Type: sensor_msgs/msg/JointState
+Publisher count: 1
+Node name: joint_state_broadcaster
+Subscription count: 8
+joint_info_direct_rc=0
+
+Repeticiones directas:
+attempt=1: node_rc=0, nodes=16, joint_rc=0
+attempt=2: node_rc=0, nodes=18, joint_rc=0
+attempt=3: node_rc=0, nodes=18, joint_rc=0
+
+$ ros2 topic echo --once --no-daemon --spin-time 2 /thesis/system_readiness
+data: READY
+readiness_echo_spin_rc=0
+
+$ ros2 topic echo --once --no-daemon --spin-time 2 /joint_states
+header.frame_id: base_link
+name: [j2n6s300_joint_2, j2n6s300_joint_3, j2n6s300_joint_4,
+       j2n6s300_joint_5, j2n6s300_joint_1, j2n6s300_joint_6, ...]
+position: [3.1415926557, 3.1415926829, -0.0000005595,
+           -0.0000006069, 0.0000000028, -0.0000005150, ...]
+joint_echo_spin_rc=0
+
+$ ros2 topic echo --once --no-daemon --spin-time 2 /thesis/proximity_status
+state: ALLOW
+minimum_clearance: 0.37500213411929284
+proximity_echo_direct_rc=0
+
+Cierre
+Se envió SIGINT al launch de la simulación pasiva.
+$ ps -eo pid=,comm=,args= | grep -E '[r]os2 launch|[i]gn gazebo|[g]z sim|[i]gn gui|[g]z gui|[r]obot_state_publisher|[s]afety_supervisor|[c]artesian_.*adapter|[s]imulation_command_adapter' || true
+(sin salida)

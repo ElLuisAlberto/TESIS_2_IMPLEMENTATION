@@ -12,6 +12,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
+from thesis_core.ros_runtime import spin_node
 from thesis_interfaces.msg import Obstacle, ProximityStatus
 from tf2_msgs.msg import TFMessage
 
@@ -28,6 +29,7 @@ class SystemReadinessNode(Node):
         self.declare_parameter('require_gui', True)
         self.declare_parameter('readiness_timeout_sec', 0.75)
         self.declare_parameter('readiness_rate_hz', 1.0)
+        self.declare_parameter('controller_request_timeout_sec', 2.0)
         self.declare_parameter(
             'controller_manager_service',
             '/controller_manager/list_controllers',
@@ -50,13 +52,19 @@ class SystemReadinessNode(Node):
         rate_hz = float(
             self.get_parameter('readiness_rate_hz').value
         )
+        self.controller_request_timeout_sec = float(
+            self.get_parameter('controller_request_timeout_sec').value
+        )
         if self.obstacle_source_mode not in ('topic', 'gazebo'):
             raise ValueError(
                 'obstacle_source_mode must be topic or gazebo'
             )
         if (not math.isfinite(self.timeout_sec)
                 or not math.isfinite(rate_hz)
-                or self.timeout_sec <= 0.0 or rate_hz <= 0.0):
+                or not math.isfinite(self.controller_request_timeout_sec)
+                or self.timeout_sec <= 0.0
+                or rate_hz <= 0.0
+                or self.controller_request_timeout_sec <= 0.0):
             raise ValueError('readiness timeouts and rate must be positive')
 
         self.last_received = {
@@ -69,6 +77,7 @@ class SystemReadinessNode(Node):
         self.controller_active = False
         self.controller_error = 'esperando controller_manager'
         self.controller_future = None
+        self.controller_future_started_at = None
 
         clock_qos = QoSProfile(
             depth=1,
@@ -148,30 +157,43 @@ class SystemReadinessNode(Node):
         self._mark_received('/thesis/obstacle_source')
 
     def _update_controller_state(self):
+        now = time.monotonic()
         if self.controller_future is not None:
             if not self.controller_future.done():
-                return
-            try:
-                response = self.controller_future.result()
-                self.controller_active = any(
-                    item.name == 'arm_controller'
-                    and item.state.lower() == 'active'
-                    for item in response.controller
-                )
-                self.controller_error = (
-                    '' if self.controller_active
-                    else 'arm_controller no está active'
-                )
-            except Exception as exc:  # ROS service errors are runtime data.
+                elapsed = now - self.controller_future_started_at
+                if elapsed < self.controller_request_timeout_sec:
+                    return
+                self.controller_future.cancel()
+                self.controller_future = None
+                self.controller_future_started_at = None
                 self.controller_active = False
-                self.controller_error = f'falló list_controllers: {exc}'
-            self.controller_future = None
+                self.controller_error = (
+                    'timeout list_controllers; reintentando'
+                )
+            else:
+                try:
+                    response = self.controller_future.result()
+                    self.controller_active = any(
+                        item.name == 'arm_controller'
+                        and item.state.lower() == 'active'
+                        for item in response.controller
+                    )
+                    self.controller_error = (
+                        '' if self.controller_active
+                        else 'arm_controller no está active'
+                    )
+                except Exception as exc:  # ROS service errors are runtime data.
+                    self.controller_active = False
+                    self.controller_error = f'falló list_controllers: {exc}'
+                self.controller_future = None
+                self.controller_future_started_at = None
 
         if (self.controller_future is None
                 and self.controller_client.service_is_ready()):
             self.controller_future = self.controller_client.call_async(
                 ListControllers.Request()
             )
+            self.controller_future_started_at = now
 
     def _node_graph_status(self):
         expected = {
@@ -181,6 +203,9 @@ class SystemReadinessNode(Node):
             'proximity_monitor',
             'safety_supervisor_node',
             'simulation_command_adapter',
+            'cartesian_command_adapter',
+            'cartesian_jog_adapter',
+            'cartesian_trajectory_adapter',
             'horizon_preview',
             'system_readiness',
         }
@@ -228,6 +253,11 @@ class SystemReadinessNode(Node):
             '/thesis/proximity_status': 'supervisor',
             '/thesis/supervised_command': 'adaptador',
             '/thesis/supervised_jog_command': 'adaptador',
+            '/thesis/cartesian_candidate': 'adaptador cartesiano',
+            '/thesis/cartesian_jog_intent': 'adaptador JOG cartesiano',
+            '/thesis/cartesian_trajectory_candidate': (
+                'coordinador cartesiano'
+            ),
         }
         missing = []
         for topic, consumer in expected_subscribers.items():
@@ -272,15 +302,7 @@ class SystemReadinessNode(Node):
 def main(args=None):
     """Run the readiness monitor using a wall-clock timer."""
     rclpy.init(args=args)
-    node = SystemReadinessNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(SystemReadinessNode())
 
 
 if __name__ == '__main__':

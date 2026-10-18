@@ -19,7 +19,11 @@ from thesis_core.clearance_geometry import (
     minimum_configuration_clearance,
 )
 from thesis_core.jaco_kinematics import CAPSULE_RADII, SEGMENT_NAMES
+from thesis_core.obstacle_contract import validate_obstacle
 from thesis_core.ros_runtime import spin_node
+
+
+SAFETY_REFERENCE_FRAME = 'world'
 
 
 class ProximityMonitorNode(Node):
@@ -30,6 +34,7 @@ class ProximityMonitorNode(Node):
 
         self.declare_parameter('reference_frame', 'world')
         self.declare_parameter('evaluation_rate_hz', 20.0)
+        self.declare_parameter('tf_lookup_timeout_sec', 0.04)
         self.declare_parameter('status_publishing_enabled', True)
         self.declare_parameter('status_topic', '/thesis/proximity_status')
         self.declare_parameter('segment_names', ['segment'])
@@ -50,6 +55,8 @@ class ProximityMonitorNode(Node):
             'obstacle_input_topic', '/thesis/obstacle_in_model_frame'
         )
         self.declare_parameter('obstacle_pose_timeout_sec', 0.5)
+        self.declare_parameter('obstacle_max_age_sec', 0.5)
+        self.declare_parameter('obstacle_future_tolerance_sec', 0.05)
         self.declare_parameter('warning_distance', 0.30)
         self.declare_parameter('reduction_distance', 0.15)
         self.declare_parameter('stop_distance', 0.05)
@@ -96,6 +103,12 @@ class ProximityMonitorNode(Node):
         self.obstacle_pose_timeout_sec = float(
             self.get_parameter('obstacle_pose_timeout_sec').value
         )
+        self.obstacle_max_age_sec = float(
+            self.get_parameter('obstacle_max_age_sec').value
+        )
+        self.obstacle_future_tolerance_sec = float(
+            self.get_parameter('obstacle_future_tolerance_sec').value
+        )
         if self.obstacle_pose_timeout_sec <= 0.0:
             raise ValueError(
                 'obstacle_pose_timeout_sec must be greater than zero'
@@ -105,6 +118,7 @@ class ProximityMonitorNode(Node):
         )
         self.dynamic_obstacle_center = None
         self.dynamic_obstacle_velocity = (0.0, 0.0, 0.0)
+        self.dynamic_obstacle_stamp = None
         self.previous_obstacle_center = None
         self.previous_obstacle_time = None
         self.last_obstacle_pose_time = None
@@ -126,8 +140,18 @@ class ProximityMonitorNode(Node):
         self.previous_state = None
 
         rate = float(self.get_parameter('evaluation_rate_hz').value)
-        if rate <= 0.0:
+        self.tf_lookup_timeout_sec = float(
+            self.get_parameter('tf_lookup_timeout_sec').value
+        )
+        if not math.isfinite(rate) or rate <= 0.0:
             raise ValueError('evaluation_rate_hz must be greater than zero')
+        if (not math.isfinite(self.tf_lookup_timeout_sec) or
+                self.tf_lookup_timeout_sec <= 0.0 or
+                self.tf_lookup_timeout_sec > 1.0 / rate):
+            raise ValueError(
+                'tf_lookup_timeout_sec must be positive and no greater '
+                'than the evaluation period'
+            )
         self.timer = self.create_timer(1.0 / rate, self.evaluate)
 
         self.get_logger().info(
@@ -155,10 +179,31 @@ class ProximityMonitorNode(Node):
                 'Ignoring invalid obstacle or unexpected reference frame'
             )
             return
+        now_sec = self.get_clock().now().nanoseconds / 1e9
+        try:
+            validate_obstacle(
+                (msg.center.x, msg.center.y, msg.center.z),
+                (msg.velocity.x, msg.velocity.y, msg.velocity.z),
+                msg.radius,
+                msg.uncertainty,
+                float(msg.header.stamp.sec) +
+                float(msg.header.stamp.nanosec) * 1e-9,
+                now_sec,
+                self.obstacle_max_age_sec,
+                self.obstacle_future_tolerance_sec,
+            )
+        except ValueError as exc:
+            self.get_logger().warning(
+                f'Ignoring stale or invalid obstacle: {exc}'
+            )
+            self.topic_obstacle = None
+            self.last_topic_obstacle_time = None
+            return
         self.topic_obstacle = (
             Point(x=msg.center.x, y=msg.center.y, z=msg.center.z),
             msg.radius + msg.uncertainty,
             (msg.velocity.x, msg.velocity.y, msg.velocity.z),
+            msg.header.stamp,
         )
         self.last_topic_obstacle_time = time.monotonic()
 
@@ -170,16 +215,16 @@ class ProximityMonitorNode(Node):
             root_frame = child_frame.replace('::', '/').split('/', 1)[0]
             if child_frame == self.obstacle_frame or root_frame == (
                     self.obstacle_frame):
-                selected = transform.transform.translation
+                selected = transform
                 break
 
         if selected is None:
             return
 
         center = Point(
-            x=float(selected.x),
-            y=float(selected.y),
-            z=float(selected.z),
+            x=float(selected.transform.translation.x),
+            y=float(selected.transform.translation.y),
+            z=float(selected.transform.translation.z),
         )
         if not all(math.isfinite(value) for value in (
             center.x, center.y, center.z
@@ -199,8 +244,13 @@ class ProximityMonitorNode(Node):
         self.previous_obstacle_center = center
         self.previous_obstacle_time = now
         self.last_obstacle_pose_time = now
+        self.dynamic_obstacle_stamp = selected.header.stamp
 
     def _validate_configuration(self):
+        if self.reference_frame != SAFETY_REFERENCE_FRAME:
+            raise ValueError(
+                f'reference_frame must be {SAFETY_REFERENCE_FRAME!r}'
+            )
         segment_count = len(self.segment_names)
         sizes = (
             segment_count,
@@ -235,11 +285,13 @@ class ProximityMonitorNode(Node):
                 'Thresholds must satisfy 0 <= stop < reduction < warning'
             )
 
-    def _frame_point(self, frame_name):
+    def _frame_point(self, frame_name, source_stamp, timeout):
+        """Return a frame origin only at the obstacle acquisition time."""
         transform = self.tf_buffer.lookup_transform(
             self.reference_frame,
             frame_name,
-            Time(),
+            Time.from_msg(source_stamp),
+            timeout=timeout,
         )
         translation = transform.transform.translation
         return Point(
@@ -255,7 +307,20 @@ class ProximityMonitorNode(Node):
                     time.monotonic() - self.last_topic_obstacle_time >
                     self.obstacle_pose_timeout_sec):
                 return None
-            return self.topic_obstacle
+            obstacle, radius, velocity, source_stamp = self.topic_obstacle
+            try:
+                validate_obstacle(
+                    (obstacle.x, obstacle.y, obstacle.z), velocity,
+                    radius, 0.0,
+                    float(source_stamp.sec) +
+                    float(source_stamp.nanosec) * 1e-9,
+                    self.get_clock().now().nanoseconds / 1e9,
+                    self.obstacle_max_age_sec,
+                    self.obstacle_future_tolerance_sec,
+                )
+            except ValueError:
+                return None
+            return obstacle, radius, velocity, source_stamp
 
         x_value = float(self.get_parameter('obstacle_x').value)
         y_value = float(self.get_parameter('obstacle_y').value)
@@ -266,6 +331,7 @@ class ProximityMonitorNode(Node):
         if (
             self.dynamic_obstacle_center is not None
             and self.last_obstacle_pose_time is not None
+            and self.dynamic_obstacle_stamp is not None
             and time.monotonic() - self.last_obstacle_pose_time
             <= self.obstacle_pose_timeout_sec
         ):
@@ -273,13 +339,28 @@ class ProximityMonitorNode(Node):
                 self.dynamic_obstacle_center,
                 radius,
                 self.dynamic_obstacle_velocity,
+                self.dynamic_obstacle_stamp,
             )
 
         return Point(x=x_value, y=y_value, z=z_value), radius, (
             0.0,
             0.0,
             0.0,
-        )
+        ), self.get_clock().now().to_msg()
+
+    def _publish_tf_stop(self, source_stamp, obstacle, obstacle_radius, reason):
+        """Publish a conservative STOP when TF geometry is unavailable."""
+        message = ProximityStatus()
+        message.stamp = source_stamp
+        message.reference_frame = self.reference_frame
+        message.state = 'STOP'
+        message.minimum_clearance = 0.0
+        message.limiting_segment = reason
+        message.obstacle_center = obstacle
+        message.obstacle_radius = obstacle_radius
+        self.publisher.publish(message)
+        self.previous_state = 'STOP'
+        self.get_logger().warning(f'Proximity STOP: {reason}')
 
     def _state_for_clearance(self, clearance):
         if clearance <= float(self.get_parameter('stop_distance').value):
@@ -325,16 +406,25 @@ class ProximityMonitorNode(Node):
         if obstacle_data is None:
             # Withhold proximity status until a fresh obstacle estimate arrives.
             return
-        obstacle, obstacle_radius, obstacle_velocity = obstacle_data
+        obstacle, obstacle_radius, obstacle_velocity, source_stamp = obstacle_data
         self._publish_obstacle_marker(obstacle, obstacle_radius)
         unavailable = set()
         segments = []
+        tf_deadline = time.monotonic() + self.tf_lookup_timeout_sec
 
         for start_frame, end_frame in zip(
                 self.start_frames, self.end_frames):
             try:
-                start = self._frame_point(start_frame)
-                end = self._frame_point(end_frame)
+                start = self._frame_point(
+                    start_frame,
+                    source_stamp,
+                    Duration(seconds=max(0.0, tf_deadline - time.monotonic())),
+                )
+                end = self._frame_point(
+                    end_frame,
+                    source_stamp,
+                    Duration(seconds=max(0.0, tf_deadline - time.monotonic())),
+                )
             except TransformException:
                 unavailable.update((start_frame, end_frame))
                 continue
@@ -356,6 +446,9 @@ class ProximityMonitorNode(Node):
             self.missing_frames = unavailable
 
         if unavailable or len(segments) != len(self.segment_names):
+            self._publish_tf_stop(
+                source_stamp, obstacle, obstacle_radius, 'TF_UNAVAILABLE'
+            )
             return
 
         try:
@@ -378,7 +471,9 @@ class ProximityMonitorNode(Node):
         )
 
         message = ProximityStatus()
-        message.stamp = self.get_clock().now().to_msg()
+        # Preserve acquisition time; receipt time is tracked separately by
+        # downstream consumers and must not make delayed geometry look fresh.
+        message.stamp = source_stamp
         message.reference_frame = self.reference_frame
         message.state = state
         message.minimum_clearance = result.clearance

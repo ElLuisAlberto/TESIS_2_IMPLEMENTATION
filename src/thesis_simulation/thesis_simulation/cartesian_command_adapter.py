@@ -23,6 +23,7 @@ from thesis_core.joint_model import (
     JOINT_VELOCITY_LIMITS,
     shortest_joint_delta,
 )
+from thesis_core.ros_runtime import spin_node
 from thesis_interfaces.msg import (
     CartesianCommand,
     CommandDecision,
@@ -319,15 +320,7 @@ class CartesianCommandAdapter(Node):
 def main(args=None):
     """Run the simulation-only Cartesian conversion node."""
     rclpy.init(args=args)
-    node = CartesianCommandAdapter()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    spin_node(CartesianCommandAdapter())
 
 
 if __name__ == '__main__':

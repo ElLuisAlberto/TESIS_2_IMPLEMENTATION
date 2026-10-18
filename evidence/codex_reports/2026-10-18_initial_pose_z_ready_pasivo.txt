@@ -1,0 +1,104 @@
+Evidencia: initial_pose=z_ready en Gazebo headless pasivo
+Fecha: 2026-10-18
+
+CAMBIOS
+- jaco_gazebo.ros2_control.xacro:
+  initial_pose=default conserva (0, pi, pi, 0, 0, 0).
+  initial_pose=z_ready usa READY_JOINTS:
+    (0, 2.6179938779914944, 3.6651914291880923,
+     0, 0.3490658503988659, 0) rad.
+- jaco_gazebo.launch.py declara initial_pose con choices default|z_ready y lo
+  reenvía al xacro.
+- thesis_system.launch.py declara el mismo argumento y lo reenvía al launch de
+  Gazebo.
+- No se modificaron controladores, IK, tolerancias ni salidas de movimiento.
+
+COMPILACIÓN
+Comando:
+  source /opt/ros/humble/setup.bash
+  colcon build --packages-select thesis_simulation \
+    --event-handlers console_direct+
+
+Resultado:
+  Finished <<< thesis_simulation [1.14s]
+  Summary: 1 package finished [1.44s]
+
+ARRANQUE PASIVO
+Argumentos:
+  initial_pose:=z_ready
+  simulation_output_enabled:=false
+  start_gui:=false
+  start_rviz:=false
+  headless:=true
+
+El log de gz_ros2_control confirmó los initial_value:
+  joint_1 = 0.000000
+  joint_2 = 2.617994
+  joint_3 = 3.665191
+  joint_4 = 0.000000
+  joint_5 = 0.349066
+  joint_6 = 0.000000
+
+simulation_command_adapter confirmó:
+  "Adaptador Gazebo preparado; salida simulada desactivada".
+
+READY
+Consulta con std_msgs/msg/String explícito, --no-daemon --spin-time 2 y plazo
+global de 20 s:
+  ATTEMPT=1 RC=0 ELAPSED=4s
+  data: READY
+  READY_VERIFIED=true TOTAL_ELAPSED=4s
+
+JOINT_STATES
+Consulta única con sensor_msgs/msg/JointState explícito,
+--no-daemon --spin-time 2. El cliente informó una muestra perdida antes de
+recibir una muestra completa.
+
+Valores del brazo, reordenados canónicamente:
+  j2n6s300_joint_1 = -0.0000007781312459
+  j2n6s300_joint_2 =  2.6179962104475950
+  j2n6s300_joint_3 =  3.6652482363424013
+  j2n6s300_joint_4 = -0.0000569950819708
+  j2n6s300_joint_5 =  0.3491676816638928
+  j2n6s300_joint_6 =  0.0000091412312384
+
+Las velocidades de las seis articulaciones estaban entre aproximadamente
+5e-16 y 2e-13 rad/s. La diferencia máxima respecto a READY_JOINTS fue
+aproximadamente 0.000102 rad (0.0058 grados), compatible con estabilización
+numérica de Gazebo.
+
+TF INICIAL
+tf2_echo se ejecutó como cliente independiente y se detuvo solo ese cliente.
+Cuatro muestras consecutivas fueron estables:
+  Translation: [0.596, 0.070, 0.926] m
+  Quaternion xyzw: [-0.287, 0.225, -0.709, 0.603]
+  RPY: [-0.737, -0.135, -1.680] rad
+       [-42.208, -7.761, -96.265] grados
+
+HALLAZGO DE SEGURIDAD
+Con el obstáculo demo en su posición predeterminada, proximity_monitor publicó:
+  STOP: clearance=-0.032 m, segment=wrist_2_to_tool
+
+system_readiness llegó a READY porque su contrato exige dato de proximidad
+reciente, pero no exige estado ALLOW. Por tanto, la postura inicial está
+correctamente aplicada, pero no debe autorizarse todavía una prueba de
+movimiento Z con ese obstáculo/configuración.
+
+CIERRE
+- No se publicó ninguna intención cartesiana o articular.
+- Se envió SIGINT únicamente al launch.
+- Durante el desmontaje reaparecieron RuntimeError de rclpy en algunos nodos;
+  son posteriores a la validación y no se modificaron por quedar fuera del
+  alcance solicitado.
+
+RESULTADO
+- Compilación: APROBADA.
+- READY en 20 s: APROBADO (4 s).
+- Seis joint_states en READY_JOINTS: APROBADO.
+- TF inicial estable y coherente: APROBADA.
+- Movimiento/comandos: NINGUNO.
+- Aptitud para movimiento Z con obstáculo demo actual: NO AUTORIZADA por STOP.
+
+Logs:
+  /tmp/tesis_z_ready_initial_pose_logs/2026-10-18-13-06-11-798485-miNave-75103
+

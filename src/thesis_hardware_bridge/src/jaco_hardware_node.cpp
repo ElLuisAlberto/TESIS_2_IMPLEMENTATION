@@ -33,6 +33,7 @@
 #include "thesis_interfaces/msg/execution_trajectory.hpp"
 #include "thesis_interfaces/msg/joint_command.hpp"
 #include "thesis_interfaces/msg/pipeline_timing.hpp"
+#include "thesis_interfaces/msg/proximity_status.hpp"
 
 namespace
 {
@@ -46,6 +47,18 @@ using thesis_hardware_bridge::kRadiansToDegrees;
 
 constexpr double kFingerDegreesPerUnit = 80.0 / 6800.0;
 constexpr std::size_t kPublishedJointCount = 12;
+
+std::string join_reasons(const std::vector<std::string> & reasons)
+{
+  std::ostringstream stream;
+  for (std::size_t index = 0; index < reasons.size(); ++index) {
+    if (index != 0) {
+      stream << "; ";
+    }
+    stream << reasons[index];
+  }
+  return stream.str();
+}
 
 std::string bool_text(bool value)
 {
@@ -80,6 +93,33 @@ double duration_seconds(const builtin_interfaces::msg::Duration & duration)
          static_cast<double>(duration.nanosec) * 1.0e-9;
 }
 
+bool zero_stamp(const builtin_interfaces::msg::Time & stamp)
+{
+  return stamp.sec == 0 && stamp.nanosec == 0;
+}
+
+std::string admission_detail(thesis_hardware_bridge::CommandAdmission admission)
+{
+  using Admission = thesis_hardware_bridge::CommandAdmission;
+  switch (admission) {
+    case Admission::kEmptyId:
+      return "command_id is empty";
+    case Admission::kReusedId:
+      return "command_id is active or recently terminal";
+    case Admission::kZeroStamp:
+      return "message stamp is zero";
+    case Admission::kStaleStamp:
+      return "message stamp is stale";
+    case Admission::kFutureStamp:
+      return "message stamp exceeds future tolerance";
+    case Admission::kNotActive:
+      return "command_id does not match the active goal";
+    case Admission::kAccepted:
+      return "accepted";
+  }
+  return "invalid command admission";
+}
+
 }  // namespace
 
 class JacoHardwareNode : public rclcpp::Node
@@ -96,6 +136,7 @@ public:
     declare_parameter("state_publish_rate_hz", 20.0);
     declare_parameter("control_rate_hz", 100.0);
     declare_parameter("state_timeout_sec", 0.20);
+    declare_parameter("safety_input_timeout_sec", 0.75);
     declare_parameter("jog_command_timeout_sec", 0.18);
     declare_parameter("max_jog_message_age_sec", 0.15);
     declare_parameter("execution_control_timeout_sec", 0.35);
@@ -115,6 +156,8 @@ public:
       get_parameter("state_publish_rate_hz").as_double();
     control_rate_hz_ = get_parameter("control_rate_hz").as_double();
     state_timeout_sec_ = get_parameter("state_timeout_sec").as_double();
+    safety_input_timeout_sec_ =
+      get_parameter("safety_input_timeout_sec").as_double();
     jog_timeout_sec_ =
       get_parameter("jog_command_timeout_sec").as_double();
     max_jog_message_age_sec_ =
@@ -149,6 +192,8 @@ public:
       std::bind(&JacoHardwareNode::feedback_tick, this));
     diagnostic_timer_ = create_wall_timer(
       500ms, std::bind(&JacoHardwareNode::publish_diagnostics, this));
+    safety_interlock_timer_ = create_wall_timer(
+      50ms, std::bind(&JacoHardwareNode::safety_interlock_tick, this));
 
     publish_connection_state();
     publish_armed_state();
@@ -191,10 +236,11 @@ private:
 
   void validate_parameters()
   {
-    const std::array<double, 10> positive_values = {
+    const std::array<double, 11> positive_values = {
       state_publish_rate_hz_,
       control_rate_hz_,
       state_timeout_sec_,
+      safety_input_timeout_sec_,
       jog_timeout_sec_,
       max_jog_message_age_sec_,
       execution_control_timeout_sec_,
@@ -262,6 +308,17 @@ private:
     connected_publisher_ =
       create_publisher<std_msgs::msg::Bool>(
       "/thesis/hardware/connected", latched_qos);
+    system_ready_subscription_ = create_subscription<std_msgs::msg::Bool>(
+      "/thesis/system_ready", 10,
+      std::bind(
+        &JacoHardwareNode::system_ready_callback, this,
+        std::placeholders::_1));
+    proximity_subscription_ =
+      create_subscription<thesis_interfaces::msg::ProximityStatus>(
+      "/thesis/proximity_status", 10,
+      std::bind(
+        &JacoHardwareNode::proximity_callback, this,
+        std::placeholders::_1));
 
     command_subscription_ =
       create_subscription<thesis_interfaces::msg::JointCommand>(
@@ -720,6 +777,85 @@ private:
            state_timeout_sec_;
   }
 
+  bool safety_input_is_fresh(
+    bool received, const SteadyTime & received_at,
+    const SteadyTime & now) const
+  {
+    return received && std::chrono::duration<double>(now - received_at).count() >= 0.0 &&
+           std::chrono::duration<double>(now - received_at).count() <=
+           safety_input_timeout_sec_;
+  }
+
+  bool safety_supervisor_available()
+  {
+    const auto nodes = get_node_graph_interface()->get_node_names_and_namespaces();
+    return std::any_of(
+      nodes.begin(), nodes.end(),
+      [](const auto & node) {
+        return node.first == "safety_supervisor_node";
+      });
+  }
+
+  thesis_hardware_bridge::ArmInterlockInputs arm_interlock_inputs(
+    const SteadyTime & now)
+  {
+    thesis_hardware_bridge::ArmInterlockInputs inputs;
+    inputs.output_permitted = output_permitted_;
+    inputs.connected = connected_;
+    inputs.joint_state_fresh = state_is_fresh(now);
+    inputs.system_ready = system_ready_;
+    inputs.system_ready_fresh = safety_input_is_fresh(
+      has_system_ready_, last_system_ready_at_, now);
+    inputs.proximity_valid = proximity_valid_;
+    inputs.proximity_fresh = safety_input_is_fresh(
+      has_proximity_, last_proximity_at_, now);
+    inputs.supervisor_available = safety_supervisor_available();
+    inputs.safety_stop_active = proximity_stop_active_ ||
+      supervisor_stop_active_;
+    return inputs;
+  }
+
+  void safety_interlock_tick()
+  {
+    const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    const auto inputs = arm_interlock_inputs(now);
+    if (thesis_hardware_bridge::should_disarm_for_interlock_loss(
+        armed_, inputs))
+    {
+      stop_motion(
+        "safety arm interlock lost: " + join_reasons(
+          thesis_hardware_bridge::arm_interlock_reasons(inputs)),
+        true, "CANCELED");
+    }
+  }
+
+  void system_ready_callback(const std_msgs::msg::Bool::SharedPtr message)
+  {
+    const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    system_ready_ = message->data;
+    has_system_ready_ = true;
+    last_system_ready_at_ = std::chrono::steady_clock::now();
+  }
+
+  void proximity_callback(
+    const thesis_interfaces::msg::ProximityStatus::SharedPtr message)
+  {
+    const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    const std::string state = message->state;
+    proximity_valid_ = thesis_hardware_bridge::proximity_sample_is_valid(
+      state,
+      message->reference_frame,
+      message->minimum_clearance,
+      message->obstacle_radius,
+      zero_stamp(message->stamp),
+      message_age_seconds(message->stamp),
+      safety_input_timeout_sec_);
+    proximity_stop_active_ = proximity_valid_ && state == "STOP";
+    has_proximity_ = true;
+    last_proximity_at_ = std::chrono::steady_clock::now();
+  }
+
   double message_age_seconds(
     const builtin_interfaces::msg::Time & stamp)
   {
@@ -736,6 +872,23 @@ private:
     const double duration = duration_seconds(message->duration);
     JointVector target{};
     std::string error;
+    const auto admission = thesis_hardware_bridge::admit_point_command(
+      message->command_id,
+      zero_stamp(message->stamp),
+      message_age_seconds(message->stamp),
+      max_jog_message_age_sec_,
+      recent_point_command_ids_);
+    if (admission != thesis_hardware_bridge::CommandAdmission::kAccepted) {
+      const std::string detail = admission_detail(admission);
+      publish_execution(
+        message->command_id, "REJECTED", detail,
+        positions_, target, duration, nullptr);
+      if (active_goal_ || jog_active_) {
+        stop_motion("rejected supervised point command: " + detail,
+          false, "CANCELED");
+      }
+      return;
+    }
     if (!message_to_joint_vector(*message, target, error) ||
       !std::isfinite(duration) || duration <= 0.0)
     {
@@ -852,6 +1005,37 @@ private:
     const thesis_interfaces::msg::ExecutionControl::SharedPtr message)
   {
     const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    if (message->state == "STOP") {
+      supervisor_stop_active_ = true;
+      publish_timing(
+        message->command_id,
+        active_goal_ ? active_goal_->intent_stamp : jog_intent_stamp_,
+        "STOP_DETECTED", message->reason_code);
+      stop_motion(
+        "supervisor STOP: " + message->reason, false, "CANCELED");
+      return;
+    }
+
+    const std::string active_command_id =
+      active_goal_ ? active_goal_->command_id : "";
+    const auto admission = thesis_hardware_bridge::admit_execution_control(
+      message->command_id,
+      active_command_id,
+      zero_stamp(message->stamp),
+      message_age_seconds(message->stamp),
+      max_jog_message_age_sec_,
+      false);
+    if (admission != thesis_hardware_bridge::CommandAdmission::kAccepted) {
+      const std::string detail = admission_detail(admission);
+      RCLCPP_WARN(
+        get_logger(), "Rejected execution control: %s", detail.c_str());
+      if (active_goal_) {
+        stop_motion(
+          "rejected execution control: " + detail, false, "CANCELED");
+      }
+      return;
+    }
+
     double scale = 0.0;
     try {
       scale = thesis_hardware_bridge::effective_speed_scale(
@@ -864,7 +1048,7 @@ private:
       return;
     }
 
-    if (message->state == "STOP" || scale <= 0.0) {
+    if (scale <= 0.0) {
       publish_timing(
         message->command_id,
         active_goal_ ? active_goal_->intent_stamp : jog_intent_stamp_,
@@ -873,9 +1057,8 @@ private:
         "supervisor STOP: " + message->reason, false, "CANCELED");
       return;
     }
-    if (active_goal_ &&
-      message->command_id == active_goal_->command_id)
-    {
+    if (active_goal_) {
+      supervisor_stop_active_ = false;
       const auto now = std::chrono::steady_clock::now();
       active_goal_->control_received = true;
       if (std::abs(scale - active_goal_->speed_scale) > 1.0e-6) {
@@ -943,21 +1126,12 @@ private:
       response->message = "JACO output disarmed";
       return;
     }
-    if (!output_permitted_) {
-      response->success = false;
-      response->message =
-        "hardware_output_enabled is false; restart with explicit permission";
-      return;
-    }
-    if (!connected_) {
-      response->success = false;
-      response->message = "JACO backend is not connected";
-      return;
-    }
     const auto now = std::chrono::steady_clock::now();
-    if (!state_is_fresh(now)) {
+    const auto reasons = thesis_hardware_bridge::arm_interlock_reasons(
+      arm_interlock_inputs(now));
+    if (!reasons.empty()) {
       response->success = false;
-      response->message = "joint state is unavailable or stale";
+      response->message = "ARM interlock rejected: " + join_reasons(reasons);
       return;
     }
     if (armed_) {
@@ -1261,9 +1435,17 @@ private:
       key_value(
         "selected_device_index", std::to_string(selected_device_index_)),
       key_value("connected", bool_text(connected_)),
+      key_value("api_open", bool_text(api_open_ || mock_hardware_)),
+      key_value("control_api_started", bool_text(control_api_started_)),
       key_value("output_permitted", bool_text(output_permitted_)),
       key_value("armed", bool_text(armed_)),
+      key_value("active_goal", bool_text(active_goal_.has_value())),
+      key_value("jog_active", bool_text(jog_active_)),
       key_value("state_valid", bool_text(state_valid_)),
+      key_value("system_ready", bool_text(system_ready_)),
+      key_value("proximity_valid", bool_text(proximity_valid_)),
+      key_value("safety_stop_active", bool_text(
+        proximity_stop_active_ || supervisor_stop_active_)),
       key_value("fault", bool_text(fault_)),
       key_value(
         "read_failures", std::to_string(consecutive_read_failures_)),
@@ -1315,6 +1497,12 @@ private:
   bool api_open_{false};
   bool control_api_started_{false};
   bool state_valid_{false};
+  bool system_ready_{false};
+  bool has_system_ready_{false};
+  bool proximity_valid_{false};
+  bool has_proximity_{false};
+  bool proximity_stop_active_{false};
+  bool supervisor_stop_active_{false};
   bool shutdown_complete_{false};
   bool jog_active_{false};
   bool point_timing_pending_{false};
@@ -1322,6 +1510,7 @@ private:
   double state_publish_rate_hz_{20.0};
   double control_rate_hz_{100.0};
   double state_timeout_sec_{0.20};
+  double safety_input_timeout_sec_{0.75};
   double jog_timeout_sec_{0.18};
   double max_jog_message_age_sec_{0.15};
   double execution_control_timeout_sec_{0.35};
@@ -1356,6 +1545,7 @@ private:
   std::string usb_lock_file_;
   std::string last_error_;
   std::string jog_command_id_;
+  thesis_hardware_bridge::RecentCommandIds recent_point_command_ids_;
   builtin_interfaces::msg::Time jog_intent_stamp_;
   JointVector positions_{};
   JointVector velocities_{};
@@ -1363,6 +1553,8 @@ private:
   JointVector last_sent_velocity_{};
   std::array<double, 3> fingers_{};
   SteadyTime last_state_at_{};
+  SteadyTime last_system_ready_at_{};
+  SteadyTime last_proximity_at_{};
   SteadyTime last_jog_at_{};
   SteadyTime last_mock_update_{};
   SteadyTime last_rate_sample_at_{std::chrono::steady_clock::now()};
@@ -1389,9 +1581,14 @@ private:
     jog_subscription_;
   rclcpp::Subscription<thesis_interfaces::msg::ExecutionControl>::SharedPtr
     control_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr
+    system_ready_subscription_;
+  rclcpp::Subscription<thesis_interfaces::msg::ProximityStatus>::SharedPtr
+    proximity_subscription_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr arm_service_;
   rclcpp::TimerBase::SharedPtr feedback_timer_;
   rclcpp::TimerBase::SharedPtr diagnostic_timer_;
+  rclcpp::TimerBase::SharedPtr safety_interlock_timer_;
 };
 
 int main(int argc, char ** argv)

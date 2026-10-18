@@ -6,6 +6,7 @@ from thesis_telemetry.telemetry_math import (
     RunningStats,
     ZeroVelocityDetector,
     percentile95,
+    should_record_execution_event,
 )
 
 
@@ -39,3 +40,22 @@ def test_motion_resets_zero_velocity_confirmation():
     assert not detector.update((0.02,))
     assert not detector.update((0.0,))
     assert detector.update((0.0,))
+
+
+def test_execution_lifecycle_keeps_one_terminal_per_command():
+    terminal_commands = set()
+    assert should_record_execution_event(
+        'ACCEPTED', 'physical-1', terminal_commands
+    )
+    assert should_record_execution_event(
+        'SUCCEEDED', 'physical-1', terminal_commands
+    )
+    assert not should_record_execution_event(
+        'SUCCEEDED', 'physical-1', terminal_commands
+    )
+    assert not should_record_execution_event(
+        'FAILED', 'physical-1', terminal_commands
+    )
+    assert should_record_execution_event(
+        'FAILED', 'physical-2', terminal_commands
+    )

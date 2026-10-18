@@ -25,9 +25,12 @@ def generate_launch_description():
     obstacle_x = LaunchConfiguration('obstacle_x')
     obstacle_y = LaunchConfiguration('obstacle_y')
     obstacle_z = LaunchConfiguration('obstacle_z')
+    initial_pose = LaunchConfiguration('initial_pose')
     simulation_output_enabled = LaunchConfiguration(
         'simulation_output_enabled'
     )
+    start_rviz = LaunchConfiguration('start_rviz')
+    headless = LaunchConfiguration('headless')
 
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -38,6 +41,9 @@ def generate_launch_description():
             'obstacle_x': obstacle_x,
             'obstacle_y': obstacle_y,
             'obstacle_z': obstacle_z,
+            'initial_pose': initial_pose,
+            'start_rviz': start_rviz,
+            'headless': headless,
         }.items(),
     )
 
@@ -154,7 +160,47 @@ def generate_launch_description():
             ),
             'maximum_position_step_m': 0.10,
             'maximum_orientation_step_rad': 0.3490658504,
+            'position_tolerance_m': 0.0005,
+        }],
+    )
+
+    cartesian_jog_adapter = Node(
+        package='thesis_simulation',
+        executable='cartesian_jog_adapter',
+        name='cartesian_jog_adapter',
+        output='screen',
+        parameters=[{
+            'use_sim_time': ParameterValue(
+                use_sim_time, value_type=bool
+            ),
+            'horizon_sec': 1.0,
+            'integration_step_sec': 0.10,
+            'maximum_linear_ik_step_m': 0.005,
+            'maximum_angular_ik_step_rad': 0.0174532925,
+            'maximum_linear_speed_mps': 0.15,
+            'maximum_angular_speed_radps': 0.5235987756,
             'position_tolerance_m': 0.003,
+            'orientation_tolerance_rad': 0.0017453293,
+        }],
+    )
+
+    cartesian_trajectory_adapter = Node(
+        package='thesis_simulation',
+        executable='cartesian_trajectory_adapter',
+        name='cartesian_trajectory_adapter',
+        output='screen',
+        parameters=[{
+            'use_sim_time': ParameterValue(
+                use_sim_time, value_type=bool
+            ),
+            'horizon_sec': 1.0,
+            'maximum_displacement_m': 0.60,
+            'maximum_rotation_rad': 3.1415926536,
+            'minimum_linear_speed_mps': 0.005,
+            'maximum_linear_speed_mps': 0.15,
+            'minimum_angular_speed_radps': 0.0087266463,
+            'maximum_angular_speed_radps': 0.5235987756,
+            'joint_timing_margin': 1.20,
         }],
     )
 
@@ -185,6 +231,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'obstacle_z', default_value='0.65',
             description='Obstacle Z coordinate in world, metres.',
+        ),
+        DeclareLaunchArgument(
+            'initial_pose',
+            default_value='default',
+            choices=('default', 'z_ready'),
+            description='Initial Gazebo joint pose preset.',
         ),
         DeclareLaunchArgument(
             'obstacle_radius', default_value='0.12',
@@ -229,6 +281,14 @@ def generate_launch_description():
             description='Start the joint control GUI.',
         ),
         DeclareLaunchArgument(
+            'start_rviz', default_value='true',
+            description='Start RViz for interactive simulation runs.',
+        ),
+        DeclareLaunchArgument(
+            'headless', default_value='false',
+            description='Run Ignition Gazebo without its GUI.',
+        ),
+        DeclareLaunchArgument(
             'readiness_timeout_sec', default_value='0.75',
             description='Wall-time limit for live ROS data, seconds.',
         ),
@@ -245,6 +305,8 @@ def generate_launch_description():
             demo_obstacle,
             horizon_preview,
             cartesian_adapter,
+            cartesian_jog_adapter,
+            cartesian_trajectory_adapter,
             gui,
             readiness,
         ]

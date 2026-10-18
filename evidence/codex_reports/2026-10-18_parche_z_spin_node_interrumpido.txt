@@ -1,0 +1,41 @@
+Evidencia: regresiones Z y uso de spin_node en system_readiness
+Fecha: 2026-10-18
+
+ALCANCE IMPLEMENTADO
+- Se agregaron exclusivamente dos regresiones IK para Z en
+  src/thesis_core/test/test_cartesian_kinematics.py:
+  1. +20 mm Z desde el estado capturado de Gazebo debe ser rechazado con
+     residuo superior a 10 mm.
+  2. +20 mm Z desde READY_JOINTS debe converger con tolerancia de 0.5 mm y
+     tolerancia angular existente de 1 grado.
+- system_readiness_node.py importa thesis_core.ros_runtime.spin_node y main()
+  ejecuta spin_node(SystemReadinessNode()).
+- No se modificaron la IK, las tolerancias ni los lanzamientos.
+
+PRUEBA DIRIGIDA INTENTADA
+Comando:
+  source /opt/ros/humble/setup.bash && \
+  PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONPATH=src/thesis_core:src/thesis_simulation \
+  python3 -m pytest -q \
+    src/thesis_core/test/test_cartesian_kinematics.py \
+    src/thesis_core/test/test_ros_runtime.py
+
+Resultado:
+  ERROR collecting src/thesis_core/test/test_ros_runtime.py
+  ModuleNotFoundError: No module named 'rclpy'
+  1 error during collection
+  exit_code=2
+
+DIAGNÓSTICO DEL PROCEDIMIENTO
+- La asignación de PYTHONPATH del comando sustituyó, en vez de ampliar, el
+  PYTHONPATH configurado por /opt/ros/humble/setup.bash.
+- Por ello rclpy quedó fuera de la ruta de importación.
+- Las pruebas no llegaron a ejecutarse; este resultado no demuestra un fallo
+  de las regresiones ni del parche, pero impide darlos por verificados.
+
+DETENCIÓN
+- Conforme a la instrucción de detenerse ante cualquier fallo, no se reintentó
+  el comando, no se compiló y no se inició la pila headless.
+- No se inició ROS/Gazebo, no se publicó ninguna intención y no hubo movimiento.
+

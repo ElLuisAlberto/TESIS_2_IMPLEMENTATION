@@ -52,6 +52,10 @@ def generate_launch_description():
     allow_gui_arm_control = LaunchConfiguration(
         'allow_gui_arm_control'
     )
+    start_telemetry = LaunchConfiguration('start_telemetry')
+    telemetry_output_directory = LaunchConfiguration(
+        'telemetry_output_directory'
+    )
     kinova_library_dir = LaunchConfiguration('kinova_library_dir')
 
     robot_description = {
@@ -98,7 +102,8 @@ def generate_launch_description():
             'use_demo_obstacle',
             default_value='false',
             description=(
-                'Publish a synthetic obstacle. Use only for offline/bench tests.'
+                'Publish a synthetic obstacle. Use only for offline/bench '
+                'tests.'
             ),
         ),
         DeclareLaunchArgument(
@@ -118,12 +123,15 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'start_gui',
-            default_value='true',
-            description='Start the joint command interface.',
+            default_value='false',
+            description=(
+                'Start the joint command interface. Disabled by default for '
+                'read-only physical connection.'
+            ),
         ),
         DeclareLaunchArgument(
             'allow_gui_arm_control',
-            default_value='true',
+            default_value='false',
             description=(
                 'Show arm/disarm controls in the physical GUI. Runtime '
                 'arming still requires hardware_output_enabled=true.'
@@ -133,6 +141,16 @@ def generate_launch_description():
             'start_rviz',
             default_value='true',
             description='Start RViz2.',
+        ),
+        DeclareLaunchArgument(
+            'start_telemetry',
+            default_value='true',
+            description='Start the read-only CSV telemetry observer.',
+        ),
+        DeclareLaunchArgument(
+            'telemetry_output_directory',
+            default_value='~/thesis_telemetry',
+            description='Parent directory for physical-session telemetry.',
         ),
         DeclareLaunchArgument(
             'kinova_library_dir',
@@ -287,7 +305,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': False,
-                'require_armed': True,
+                'require_armed': False,
                 'require_proximity_status': True,
                 'timeout_sec': 0.50,
                 'rate_hz': 2.0,
@@ -306,6 +324,17 @@ def generate_launch_description():
                 'allow_hardware_arm_control': ParameterValue(
                     allow_gui_arm_control, value_type=bool
                 ),
+            }],
+        ),
+        Node(
+            package='thesis_telemetry',
+            executable='telemetry_logger',
+            name='telemetry_logger',
+            output='screen',
+            condition=IfCondition(start_telemetry),
+            parameters=[{
+                'use_sim_time': False,
+                'output_directory': telemetry_output_directory,
             }],
         ),
         Node(

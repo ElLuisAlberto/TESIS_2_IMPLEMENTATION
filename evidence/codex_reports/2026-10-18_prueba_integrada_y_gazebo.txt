@@ -1,0 +1,35 @@
+Prueba independiente Y en Gazebo headless
+Fecha: 2026-10-18
+Configuración: simulation_output_enabled:=true, start_gui:=false, start_rviz:=false, headless:=true.
+Sin hardware físico, cámara RGB-D, GUI, RViz ni sudo.
+
+Precondiciones (consultas con --no-daemon --spin-time 2)
+- /joint_states: muestra completa de seis articulaciones; rc=0.
+- TF world -> j2n6s300_end_effector: estable en [0.000, 0.064, 1.181], RPY [0.000, 0.000, -1.571].
+- /thesis/system_readiness: READY; rc=0.
+- /thesis/proximity_status: ALLOW, clearance mínimo 0.37500213411929284 m; rc=0.
+- /thesis/supervised_command: publicador safety_supervisor_node y suscriptores horizon_preview y simulation_command_adapter; rc=0.
+
+Comando único publicado
+$ ros2 topic pub --once /thesis/cartesian_candidate thesis_interfaces/msg/CartesianCommand "{stamp: {sec: 0, nanosec: 0}, command_id: 'codex-y-20261018-002', frame_id: 'world', x: 0.000, y: 0.084, z: 1.181, roll: 0.0, pitch: 0.0, yaw: -1.57079632679, duration: {sec: 5, nanosec: 0}}"
+
+Resultado de tópicos
+/thesis/command_decision:
+  accepted: false
+  state: REJECTED
+  reason_code: INVERSE_KINEMATICS_FAILED
+  reason: Pose no alcanzable desde la configuración actual: error lineal=0.0003 m,
+          error angular=0.01 grados.
+
+/thesis/candidate_command, /thesis/supervised_command y /thesis/execution_trajectory:
+  sin mensajes para codex-y-20261018-002.
+La decisión anterior procede del adaptador cartesiano; no hubo decisión ni trayectoria del supervisor,
+porque la conversión IK se rechazó antes de publicar un JointCommand candidato.
+
+Estado final
+/joint_states: postura inicial conservada.
+/thesis/system_readiness: READY.
+TF final: Translation [0.000, 0.064, 1.181], RPY [0.000, 0.000, -1.571].
+Desplazamiento observado: (0.000, 0.000, 0.000) m.
+
+Cierre: SIGINT al launch; comprobación de procesos sin salida. No quedaron procesos de simulación.

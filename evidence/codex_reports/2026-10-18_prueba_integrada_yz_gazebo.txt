@@ -1,0 +1,59 @@
+Intento de prueba integrada cartesiana Y/Z en Gazebo
+Fecha: 2026-10-18
+Restricciones aplicadas: Gazebo headless, sin GUI, RViz, hardware, cámara RGB-D ni sudo.
+
+Actualización de procedimiento previa
+- AGENTS.md y el plan cartesiano se actualizaron para usar `--no-daemon --spin-time 2`
+  en consultas de nodos y tópicos.
+
+Pila iniciada
+$ ros2 launch thesis_simulation thesis_system.launch.py simulation_output_enabled:=true start_gui:=false start_rviz:=false headless:=true
+Proceso de simulación: ign gazebo -r -s -v 3 .../jaco_empty.sdf
+No se observó GUI.
+
+Precondiciones observadas antes de Y
+$ ros2 node list --no-daemon --spin-time 2
+rc=0
+Incluyó /safety_supervisor_node, /simulation_command_adapter, los tres adaptadores
+cartesianos, /joint_state_broadcaster, /robot_state_publisher y /system_readiness.
+
+$ ros2 topic echo --once --no-daemon --spin-time 2 /joint_states
+rc=0
+Muestra con las seis articulaciones j2n6s300 y articulaciones de dedos.
+
+$ ros2 topic echo --once --no-daemon --spin-time 2 /thesis/proximity_status
+rc=0
+state: ALLOW
+minimum_clearance: 0.37500213411929284
+
+$ ros2 topic info --no-daemon --spin-time 2 -v /thesis/supervised_command
+rc=0
+Publisher: safety_supervisor_node
+
+$ ros2 run tf2_ros tf2_echo world j2n6s300_end_effector
+Transformación estable: Translation [0.000, 0.064, 1.181], RPY [0.000, 0.000, -1.571].
+
+La primera consulta de system_readiness no descubrió aún el publicador. Se repitió sin
+publicar mensajes:
+$ ros2 topic info --no-daemon --spin-time 3 -v /thesis/system_readiness
+rc=0; Publisher: system_readiness
+$ ros2 topic echo --once --no-daemon --spin-time 3 /thesis/system_readiness
+rc=0
+data: READY
+
+Publicación Y rechazada automáticamente antes de ejecutarse
+Objetivo intentado: world (0.000, 0.084, 1.181), delta esperado en una simulación nueva:
+(0.000, +0.020, 0.000) m.
+
+La revisión automática rechazó el comando sin iniciarlo:
+"La intención declarada para Y debía conservar la posición X final de 0,020 m, pero el
+payload fija x: 0.000, provocando también un desplazamiento de −0,020 m en X; no es una
+prueba exclusivamente del eje Y autorizada."
+
+No se publicó ningún CartesianCommand. Z no se intentó.
+
+Cierre
+Se envió SIGINT al launch.
+$ ps -eo pid=,comm=,args= | grep -E '[r]os2 launch|[i]gn gazebo|[g]z sim|[i]gn gui|[g]z gui|[r]obot_state_publisher|[s]afety_supervisor|[c]artesian_.*adapter|[s]imulation_command_adapter' || true
+(sin salida)
+No quedaron procesos.

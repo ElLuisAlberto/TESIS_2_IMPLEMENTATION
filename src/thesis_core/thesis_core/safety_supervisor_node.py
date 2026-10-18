@@ -1,5 +1,6 @@
 import math
 import time
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -52,6 +53,31 @@ from thesis_core.ros_runtime import spin_node
 MIN_DURATION_SEC = 0.1
 MAX_DURATION_SEC = 30.0
 MIN_RUNTIME_REMAINING_SEC = 0.10
+RECENT_POINT_COMMAND_ID_CAPACITY = 256
+MAX_FUTURE_MESSAGE_TOLERANCE_SEC = 0.05
+SAFETY_REFERENCE_FRAME = 'world'
+
+
+class RecentCommandIds:
+    """Bounded in-memory replay protection for point-command identifiers."""
+
+    def __init__(self, capacity=RECENT_POINT_COMMAND_ID_CAPACITY):
+        if not isinstance(capacity, int) or capacity <= 0:
+            raise ValueError('recent command ID capacity must be positive')
+        self._capacity = capacity
+        self._ids = deque()
+        self._known = set()
+
+    def contains(self, command_id):
+        return command_id in self._known
+
+    def remember(self, command_id):
+        if command_id in self._known:
+            return
+        if len(self._ids) >= self._capacity:
+            self._known.remove(self._ids.popleft())
+        self._ids.append(command_id)
+        self._known.add(command_id)
 
 
 def message_age_seconds(now_nanoseconds, stamp):
@@ -62,6 +88,48 @@ def message_age_seconds(now_nanoseconds, stamp):
     if stamp_nanoseconds <= 0:
         return math.inf
     return (int(now_nanoseconds) - stamp_nanoseconds) * 1.0e-9
+
+
+def source_stamp_is_fresh(now_nanoseconds, stamp, maximum_age_sec):
+    """Reject zero, stale, and future source timestamps fail-closed."""
+    age_sec = message_age_seconds(now_nanoseconds, stamp)
+    return (
+        math.isfinite(age_sec)
+        and -MAX_FUTURE_MESSAGE_TOLERANCE_SEC <= age_sec <= maximum_age_sec
+    )
+
+
+def proximity_reference_frame_is_valid(reference_frame):
+    """Accept only the canonical safety geometry frame."""
+    return reference_frame == SAFETY_REFERENCE_FRAME
+
+
+def admit_point_command(
+    now_nanoseconds,
+    stamp,
+    command_id,
+    maximum_age_sec,
+    recent_command_ids,
+):
+    """Return the point-command admission result and reserve accepted IDs.
+
+    A nonempty ID is reserved before validating its timestamp so a rejected
+    terminal attempt cannot be replayed later during the bounded window.
+    """
+    if not isinstance(command_id, str) or not command_id.strip():
+        return False, 'POINT_COMMAND_ID_EMPTY'
+    if recent_command_ids.contains(command_id):
+        return False, 'POINT_COMMAND_ID_REUSED'
+
+    recent_command_ids.remember(command_id)
+    age_sec = message_age_seconds(now_nanoseconds, stamp)
+    if not math.isfinite(age_sec):
+        return False, 'POINT_COMMAND_STAMP_ZERO'
+    if age_sec < -MAX_FUTURE_MESSAGE_TOLERANCE_SEC:
+        return False, 'POINT_COMMAND_STAMP_FUTURE'
+    if age_sec > maximum_age_sec:
+        return False, 'POINT_COMMAND_STAMP_STALE'
+    return True, ''
 
 
 def runtime_remaining_time(duration, elapsed):
@@ -159,10 +227,15 @@ class SafetySupervisorNode(Node):
 
         self.current_positions = {}
         self.last_state_receive_ns = None
+        self.last_state_arrival_ns = None
         self.proximity_status = None
         self.last_proximity_receive_ns = None
+        self.last_proximity_arrival_ns = None
+        self.last_proximity_rejection_reason = None
         self.last_proximity_decision = 'UNAVAILABLE'
         self.active_execution = None
+        self.pending_point_command_id = None
+        self.recent_point_command_ids = RecentCommandIds()
         self.last_execution_receive_ns = None
         self.last_runtime_command_id = None
         self.last_runtime_state = None
@@ -352,6 +425,16 @@ class SafetySupervisorNode(Node):
         self.timing_publisher.publish(event)
 
     def joint_state_callback(self, msg):
+        now_ns = self.get_clock().now().nanoseconds
+        maximum_age = float(self.get_parameter('max_state_age_sec').value)
+        if not source_stamp_is_fresh(now_ns, msg.header.stamp, maximum_age):
+            self.current_positions = {}
+            self.last_state_receive_ns = None
+            self.last_state_arrival_ns = now_ns
+            self.get_logger().warning(
+                'Rejected JointState with zero, stale, or future source stamp'
+            )
+            return
         positions = {}
 
         for joint_name, position in zip(
@@ -362,15 +445,47 @@ class SafetySupervisorNode(Node):
                 positions[joint_name] = float(position)
 
         self.current_positions = positions
+        # Existing freshness users intentionally compare against this origin
+        # timestamp. Arrival remains available for latency diagnostics.
         self.last_state_receive_ns = (
-            self.get_clock().now().nanoseconds
+            int(msg.header.stamp.sec) * 1_000_000_000 +
+            int(msg.header.stamp.nanosec)
         )
+        self.last_state_arrival_ns = now_ns
 
     def proximity_status_callback(self, msg):
+        now_ns = self.get_clock().now().nanoseconds
+        maximum_age = float(
+            self.get_parameter('max_proximity_age_sec').value
+        )
+        if not source_stamp_is_fresh(now_ns, msg.stamp, maximum_age):
+            self.proximity_status = None
+            self.last_proximity_receive_ns = None
+            self.last_proximity_arrival_ns = now_ns
+            self.last_proximity_rejection_reason = 'PROXIMITY_STAMP_INVALID'
+            self.get_logger().warning(
+                'Rejected proximity with zero, stale, or future source stamp'
+            )
+            return
+        if not proximity_reference_frame_is_valid(
+                getattr(msg, 'reference_frame', '')):
+            self.proximity_status = None
+            self.last_proximity_receive_ns = None
+            self.last_proximity_arrival_ns = now_ns
+            self.last_proximity_rejection_reason = 'PROXIMITY_FRAME_INVALID'
+            self.get_logger().warning(
+                'Rejected proximity with invalid reference frame '
+                f'{getattr(msg, "reference_frame", "")!r}; expected '
+                f'{SAFETY_REFERENCE_FRAME!r}'
+            )
+            return
         self.proximity_status = msg
         self.last_proximity_receive_ns = (
-            self.get_clock().now().nanoseconds
+            int(msg.stamp.sec) * 1_000_000_000 +
+            int(msg.stamp.nanosec)
         )
+        self.last_proximity_arrival_ns = now_ns
+        self.last_proximity_rejection_reason = None
 
     def execution_callback(self, msg):
         """Track execution and fail closed on controller failure."""
@@ -382,6 +497,7 @@ class SafetySupervisorNode(Node):
                 self.runtime_recovery_count = 0
                 self.runtime_stability.reset('COMMAND_CHANGED')
             self.active_execution = msg
+            self.pending_point_command_id = msg.command_id
             self.last_execution_receive_ns = now_ns
             self.last_runtime_command_id = msg.command_id
             return
@@ -421,6 +537,8 @@ class SafetySupervisorNode(Node):
         }
         if msg.status in terminal_statuses and active_matches:
             self.active_execution = None
+            if getattr(self, 'pending_point_command_id', None) == msg.command_id:
+                self.pending_point_command_id = None
             self.last_execution_receive_ns = None
             self.last_runtime_command_id = None
             self.last_runtime_state = None
@@ -1352,6 +1470,19 @@ class SafetySupervisorNode(Node):
         decision.reason = reason
         self.decision_publisher.publish(decision)
 
+    def reject_point_command(self, msg, reason_code, reason):
+        """Publish a rejection and stop a matching active/pending point."""
+        self.publish_decision(msg, False, 'REJECTED', reason_code, reason)
+        active_id = (
+            self.active_execution.command_id
+            if self.active_execution is not None else None
+        )
+        if msg.command_id in {
+            active_id,
+            getattr(self, 'pending_point_command_id', None),
+        }:
+            self.publish_runtime_stop(msg.command_id, reason_code, reason)
+
     def joint_limit_violation(self, joint_positions):
         """Return the first joint-limit violation in a configuration."""
         for joint_name, position in zip(
@@ -1694,6 +1825,22 @@ class SafetySupervisorNode(Node):
             )
             return None
 
+        # Prediction can impose further restrictions, but it must never relax
+        # a conservative STOP already decided by the upstream monitor.
+        if state == 'STOP':
+            self.last_proximity_decision = 'STOP'
+            self.last_prediction_reason_code = 'UPSTREAM_PROXIMITY_STOP'
+            self.publish_decision(
+                msg, False, 'STOP', 'UPSTREAM_PROXIMITY_STOP',
+                f'STOP {msg.command_id}: upstream proximity STOP, '
+                f'clearance={clearance:.3f} m, segment={segment}',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: upstream proximity STOP, '
+                f'clearance={clearance:.3f} m, segment={segment}'
+            )
+            return None
+
         prediction = self.predict_candidate(msg)
         if prediction is False:
             return None
@@ -1906,6 +2053,24 @@ class SafetySupervisorNode(Node):
         )
         receive_time = self.get_clock().now()
 
+        accepted, rejection_code = admit_point_command(
+            receive_time.nanoseconds,
+            msg.stamp,
+            msg.command_id,
+            float(self.get_parameter('max_jog_message_age_sec').value),
+            self.recent_point_command_ids,
+        )
+        if not accepted:
+            self.reject_point_command(
+                msg,
+                rejection_code,
+                f'REJECTED {msg.command_id}: {rejection_code}',
+            )
+            self.get_logger().warning(
+                f'REJECTED {msg.command_id}: {rejection_code}'
+            )
+            return
+
         if len(msg.joint_names) == 0:
             self.publish_decision(
                 msg, False, 'REJECTED', 'VALIDATION_REJECTED',
@@ -2020,17 +2185,12 @@ class SafetySupervisorNode(Node):
         ):
             return
 
-        candidate_stamp_ns = (
-            int(msg.stamp.sec) * 1_000_000_000
-            + int(msg.stamp.nanosec)
-        )
+        input_latency_ms = message_age_seconds(
+            receive_time.nanoseconds,
+            msg.stamp,
+        ) * 1e3
 
-        receive_ns = receive_time.nanoseconds
-
-        input_latency_ms = (
-            receive_ns - candidate_stamp_ns
-        ) / 1e6
-
+        self.pending_point_command_id = msg.command_id
         self.supervised_publisher.publish(supervised_msg)
         self.publish_timing(msg, 'SUPERVISED_PUBLISH')
 

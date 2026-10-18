@@ -1,0 +1,86 @@
+Evidencia de repetición cartesiana Z en Gazebo headless
+Fecha: 2026-10-18
+
+ALCANCE
+- Pila nueva e independiente de Y.
+- simulation_output_enabled:=true.
+- start_gui:=false, start_rviz:=false, headless:=true.
+- Sin hardware físico, cámara RGB-D o sudo.
+- Se publicó exactamente una intención cartesiana.
+
+PRECONDICIÓN READY
+Consulta con tipo explícito std_msgs/msg/String y plazo global de 20 s:
+  ATTEMPT=1 RC=0 ELAPSED=4s
+  data: 'WAITING: arm_controller no está active'
+  El mensaje no se aceptó como READY.
+
+  ATTEMPT=2 RC=0 ELAPSED=7s
+  data: READY
+  READY_VERIFIED=true TOTAL_ELAPSED=7s
+
+OTRAS PRECONDICIONES
+- /joint_states: se recibió una muestra completa del brazo y dedos; rc=0.
+  El CLI informó una muestra perdida antes de entregar la muestra completa.
+- /thesis/proximity_status:
+    state: ALLOW
+    minimum_clearance: 0.37500213411929284 m
+    limiting_segment: upper_arm_to_forearm
+- /thesis/supervised_command:
+    Publisher: safety_supervisor_node
+    Subscribers: simulation_command_adapter y horizon_preview
+- TF inicial world -> j2n6s300_end_effector, estable:
+    Translation [0.000, 0.064, 1.181]
+    RPY [-0.000, 0.000, -1.571] rad
+
+ÚNICA INTENCIÓN
+Tópico: /thesis/cartesian_candidate
+Tipo: thesis_interfaces/msg/CartesianCommand
+command_id: codex-z-repeat-20261018-001
+Objetivo absoluto:
+  x=0.000 m
+  y=0.064 m
+  z=1.201 m
+  roll=0.0 rad
+  pitch=0.0 rad
+  yaw=-1.57079632679 rad
+  duration=5 s
+
+El objetivo nominal conserva X/Y/orientación y suma 0.020 m a la Z mostrada
+por TF. El validador, usando la TF interna sin redondear, midió un paso inicial
+de 0.019923 m y giro solicitado de 0.000 grados.
+
+RESULTADO
+El adaptador cartesiano rechazó la intención antes de generar un
+JointCommand:
+  reason_code implícito: INVERSE_KINEMATICS_FAILED
+  reason: Pose no alcanzable desde la configuración actual:
+          error lineal=0.0199 m; error angular=0.00 grados.
+
+Validación:
+  CHECK_INTENCION_CARTESIANA=OK
+  CHECK_CONVERSION_IK=FALLO
+  CHECK_SUPERVISION=FALLO
+    REJECTED: Pose no alcanzable desde la configuración actual...
+  CHECK_EJECUCION=FALLO
+    estado=AUSENTE
+  ERROR_POSICION_M=0.019923
+  ERROR_ORIENTACION_GRADOS=0.000
+  RESULTADO=REVISAR
+
+La decisión REJECTED fue publicada por el adaptador cartesiano. Al no existir
+JointCommand candidato, la intención no llegó al supervisor preventivo ni al
+action server/controlador de Gazebo. No hubo trayectoria ni ejecución.
+
+TF FINAL
+  Translation [0.000, 0.064, 1.181]
+  RPY [-0.000, 0.000, -90.000] grados
+
+La TF final coincide con la inicial: no hubo movimiento en X, Y o Z ni cambio
+de orientación. Conforme a la regla de detención, no se publicó otro objetivo.
+
+CIERRE
+- Se envió SIGINT únicamente al launch después de confirmar la TF final.
+- No quedaron procesos de simulación.
+- Durante el apagado, system_readiness terminó con RuntimeError al convertir un
+  mensaje en rclpy. Ocurrió después de haber publicado READY y después del
+  rechazo Z; se registra como anomalía de cierre, no como causa del rechazo IK.

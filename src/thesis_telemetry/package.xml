@@ -7,6 +7,7 @@
   <description>Temporal instrumentation and CSV telemetry.</description>
   <maintainer email="luisito@todo.todo">luisito</maintainer>
   <license>TODO: License declaration</license>
+  <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>thesis_interfaces</exec_depend>

@@ -10,10 +10,13 @@ from pathlib import Path
 import time
 
 import rclpy
+from diagnostic_msgs.msg import DiagnosticArray
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 from thesis_interfaces.msg import (
     ExecutionControl,
+    ExecutionTrajectory,
     JointCommand,
     PipelineTiming,
     ProximityStatus,
@@ -23,6 +26,7 @@ from thesis_core.joint_model import JOINT_NAMES, shortest_joint_delta
 from thesis_telemetry.telemetry_math import (
     RunningStats,
     ZeroVelocityDetector,
+    should_record_execution_event,
     stamp_to_ns,
     vector_text,
 )
@@ -62,6 +66,13 @@ class TelemetryLogger(Node):
         'metric', 'count', 'mean_sec', 'stddev_sec',
         'minimum_sec', 'maximum_sec', 'percentile95_sec',
     )
+    EXECUTION_FIELDS = (
+        'timestamp_ros_sec', 'command_id', 'intent_stamp_ros_sec',
+        'status', 'detail', 'start_time_ros_sec', 'duration_sec',
+        'q_actual', 'q_inicio', 'q_objetivo', 'connected', 'armed',
+        'hardware_output_enabled', 'proximity_state',
+        'proximity_frame', 'proximity_segment',
+    )
 
     def __init__(self) -> None:
         super().__init__('telemetry_logger')
@@ -84,6 +95,9 @@ class TelemetryLogger(Node):
             'latency_metrics.csv', self.LATENCY_FIELDS
         )
         self.summary_path = self.run_directory / 'statistics.csv'
+        self.execution_handle, self.execution_writer = self._open_csv(
+            'execution_events.csv', self.EXECUTION_FIELDS
+        )
 
         self.traces: dict[tuple[str, int], Trace] = {}
         self.latest_key_by_command: dict[str, tuple[str, int]] = {}
@@ -96,6 +110,11 @@ class TelemetryLogger(Node):
         self.missing_messages = 0
         self.rows_since_flush = 0
         self.pending_stop: dict[str, tuple[int, int]] = {}
+        self.connected = False
+        self.armed = False
+        self.hardware_output_enabled = False
+        self.latest_proximity = None
+        self.terminal_commands: set[str] = set()
 
         epsilon = float(self.get_parameter(
             'velocity_epsilon_rad_s'
@@ -148,6 +167,30 @@ class TelemetryLogger(Node):
             '/thesis/execution_control',
             self.control_callback,
             50,
+        )
+        self.create_subscription(
+            ExecutionTrajectory,
+            '/thesis/execution_trajectory',
+            self.execution_callback,
+            50,
+        )
+        self.create_subscription(
+            Bool,
+            '/thesis/hardware/connected',
+            lambda msg: setattr(self, 'connected', bool(msg.data)),
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            '/thesis/hardware/armed',
+            lambda msg: setattr(self, 'armed', bool(msg.data)),
+            10,
+        )
+        self.create_subscription(
+            DiagnosticArray,
+            '/thesis/hardware/diagnostics',
+            self.hardware_diagnostic_callback,
+            10,
         )
         self.summary_timer = self.create_timer(1.0, self.write_summary)
         self.get_logger().info(
@@ -308,6 +351,17 @@ class TelemetryLogger(Node):
 
     def proximity_callback(self, msg: ProximityStatus) -> None:
         self.last_proximity_stamp_ns = stamp_to_ns(msg.stamp)
+        self.latest_proximity = msg
+
+    def hardware_diagnostic_callback(self, msg: DiagnosticArray) -> None:
+        """Capture the adapter's effective output permission."""
+        for status in msg.status:
+            if status.name != 'thesis_hardware_bridge/JACO2':
+                continue
+            values = {item.key: item.value for item in status.values}
+            self.hardware_output_enabled = (
+                values.get('output_permitted') == 'true'
+            )
 
     def target_callback(self, msg: JointCommand) -> None:
         if tuple(msg.joint_names) != tuple(JOINT_NAMES):
@@ -376,6 +430,46 @@ class TelemetryLogger(Node):
         self._record_cost(callback_start)
         self._flush_if_required()
 
+    def execution_callback(self, msg: ExecutionTrajectory) -> None:
+        """Persist one correlated lifecycle event and one terminal per ID."""
+        if not should_record_execution_event(
+                msg.status, msg.command_id, self.terminal_commands):
+            return
+        target_data = self.targets.get(msg.command_id)
+        intent_ns = target_data[2] if target_data is not None else 0
+        proximity = self.latest_proximity
+        self.execution_writer.writerow({
+            'timestamp_ros_sec': f'{stamp_to_ns(msg.stamp) / 1e9:.9f}',
+            'command_id': msg.command_id or 'UNAVAILABLE',
+            'intent_stamp_ros_sec': f'{intent_ns / 1e9:.9f}',
+            'status': msg.status or 'UNAVAILABLE',
+            'detail': msg.detail,
+            'start_time_ros_sec': (
+                f'{stamp_to_ns(msg.start_time) / 1e9:.9f}'
+            ),
+            'duration_sec': f'{float(msg.duration_sec):.9f}',
+            'q_actual': vector_text(self.current_positions or ()),
+            'q_inicio': vector_text(tuple(msg.start_positions)),
+            'q_objetivo': vector_text(tuple(msg.target_positions)),
+            'connected': str(self.connected).lower(),
+            'armed': str(self.armed).lower(),
+            'hardware_output_enabled': str(
+                self.hardware_output_enabled
+            ).lower(),
+            'proximity_state': (
+                proximity.state if proximity is not None else 'UNAVAILABLE'
+            ),
+            'proximity_frame': (
+                proximity.reference_frame
+                if proximity is not None else 'UNAVAILABLE'
+            ),
+            'proximity_segment': (
+                proximity.limiting_segment
+                if proximity is not None else 'UNAVAILABLE'
+            ),
+        })
+        self.execution_handle.flush()
+
     def _record_cost(self, callback_start: int) -> None:
         elapsed_sec = (time.perf_counter_ns() - callback_start) / 1e9
         self.stats['instrumentation_cost'].add(elapsed_sec)
@@ -415,6 +509,7 @@ class TelemetryLogger(Node):
         self.latency_handle.flush()
         self.samples_handle.close()
         self.latency_handle.close()
+        self.execution_handle.close()
         return super().destroy_node()
 
 

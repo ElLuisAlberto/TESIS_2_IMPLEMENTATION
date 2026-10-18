@@ -54,3 +54,43 @@ def test_live_context_exception_is_preserved(monkeypatch):
 
     node.destroy_node.assert_called_once_with()
     shutdown.assert_called_once_with()
+
+
+def test_humble_take_message_shutdown_race_is_not_reported(monkeypatch):
+    """The exact rclpy subscription race observed on SIGINT is harmless."""
+    node = Mock()
+    shutdown = Mock()
+    monkeypatch.setattr(
+        ros_runtime.rclpy,
+        'spin',
+        Mock(side_effect=RuntimeError(
+            'Unable to convert call argument to Python object '
+            '(compile in debug mode for details)'
+        )),
+    )
+    monkeypatch.setattr(ros_runtime.rclpy, 'ok', lambda: True)
+    monkeypatch.setattr(ros_runtime.rclpy, 'shutdown', shutdown)
+
+    ros_runtime.spin_node(node)
+
+    node.destroy_node.assert_called_once_with()
+    shutdown.assert_called_once_with()
+
+
+def test_keyboard_interrupt_during_destroy_is_not_reported(monkeypatch):
+    """A second SIGINT during node cleanup must not print a traceback."""
+    node = Mock()
+    node.destroy_node.side_effect = KeyboardInterrupt()
+    shutdown = Mock()
+    monkeypatch.setattr(
+        ros_runtime.rclpy,
+        'spin',
+        Mock(side_effect=KeyboardInterrupt()),
+    )
+    monkeypatch.setattr(ros_runtime.rclpy, 'ok', lambda: True)
+    monkeypatch.setattr(ros_runtime.rclpy, 'shutdown', shutdown)
+
+    ros_runtime.spin_node(node)
+
+    node.destroy_node.assert_called_once_with()
+    shutdown.assert_called_once_with()

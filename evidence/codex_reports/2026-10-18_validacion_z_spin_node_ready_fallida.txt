@@ -1,0 +1,85 @@
+Evidencia: validación del parche Z / spin_node
+Fecha: 2026-10-18
+
+ALCANCE
+- Validación sin modificar código fuente.
+- Solo los paquetes afectados: thesis_core y thesis_simulation.
+- Pila Gazebo headless, sin GUI ni RViz.
+- simulation_output_enabled:=false.
+- No se publicó ninguna intención ni comando de movimiento.
+
+COMPILACIÓN
+Comando:
+  source /opt/ros/humble/setup.bash
+  colcon build --packages-select thesis_core thesis_simulation \
+    --event-handlers console_direct+
+
+Resultado:
+  Finished <<< thesis_core [30.4s]
+  Finished <<< thesis_simulation [30.7s]
+  Summary: 2 packages finished [1min 1s]
+
+PRUEBAS DIRIGIDAS
+El entorno conservó el PYTHONPATH de ROS y añadió las rutas fuente:
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  export PYTHONPATH="$PWD/src/thesis_core:$PWD/src/thesis_simulation:${PYTHONPATH:-}"
+
+Casos ejecutados:
+- test_initial_z_target_preserves_unreachable_rejection
+- test_ready_pose_supports_twenty_millimetre_z_target
+- archivo completo test_ros_runtime.py
+
+Resultado:
+  ..... [100%]
+  5 passed in 0.07s
+
+PILA HEADLESS PASIVA
+Argumentos:
+  simulation_output_enabled:=false
+  start_gui:=false
+  start_rviz:=false
+  headless:=true
+
+Confirmaciones del launch:
+- Ignition inició como servidor headless.
+- simulation_command_adapter informó que la salida simulada estaba
+  desactivada.
+- joint_state_broadcaster y arm_controller fueron cargados, configurados y
+  activados.
+- No se publicó ninguna intención cartesiana o articular.
+
+VERIFICACIÓN READY
+Consulta observacional con tipo explícito std_msgs/msg/String,
+--no-daemon --spin-time 2 y plazo global de 20 s.
+
+Resultado:
+  ATTEMPT=1 RC=0 ELAPSED=4s  WAITING: esperando controller_manager
+  ATTEMPT=2 RC=0 ELAPSED=7s  WAITING: esperando controller_manager
+  ATTEMPT=3 RC=0 ELAPSED=10s WAITING: esperando controller_manager
+  ATTEMPT=4 RC=0 ELAPSED=13s WAITING: esperando controller_manager
+  ATTEMPT=5 RC=0 ELAPSED=16s WAITING: esperando controller_manager
+  ATTEMPT=6 RC=0 ELAPSED=19s WAITING: esperando controller_manager
+  ATTEMPT=7 RC=124 ELAPSED=20s
+  READY_VERIFIED=false TOTAL_ELAPSED=20s
+  exit_code=1
+
+DETENCIÓN Y CIERRE
+- Conforme a la instrucción, no se reintentó READY ni se realizaron más
+  validaciones después del fallo.
+- Se envió SIGINT únicamente al launch ya iniciado para limpiar la pila.
+- Todos los procesos enumerados por launch terminaron limpiamente, incluido
+  system_readiness.
+- No apareció el RuntimeError de rclpy ni otro traceback durante el cierre.
+
+RESULTADO
+- Compilación: APROBADA.
+- Regresiones Z y spin_node: APROBADAS (5/5).
+- READY dentro de 20 s: FALLÓ.
+- Cierre solicitado tras READY: NO EJECUTABLE porque READY no se alcanzó.
+- Cierre de seguridad posterior al timeout: LIMPIO, sin excepción rclpy.
+- Validación global: INTERRUMPIDA / NO APROBADA.
+
+Logs ROS/Gazebo:
+  /tmp/tesis_z_spin_passive_ros_logs/2026-10-18-12-50-18-369837-miNave-72099
+

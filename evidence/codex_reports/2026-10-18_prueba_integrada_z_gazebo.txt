@@ -1,0 +1,20 @@
+Prueba independiente Z en Gazebo headless
+Fecha: 2026-10-18
+Configuración: simulation_output_enabled:=true, start_gui:=false, start_rviz:=false, headless:=true.
+Sin hardware físico, cámara RGB-D, GUI, RViz ni sudo.
+
+Precondiciones observadas (consultas con --no-daemon --spin-time 2)
+- /joint_states: muestra completa de seis articulaciones; rc=0.
+- TF world -> j2n6s300_end_effector: estable en [0.000, 0.064, 1.181], RPY [0.000, 0.000, -1.571].
+- /thesis/proximity_status: ALLOW, clearance mínimo 0.37500213411929284 m; rc=0.
+- /thesis/supervised_command: publicador safety_supervisor_node; rc=0.
+- /thesis/system_readiness: el publicador se descubrió con rc=0, pero dos intentos de
+  `ros2 topic echo --once --no-daemon --spin-time 2` no obtuvieron tipo ni mensaje;
+  ambos terminaron rc=1 con "topic ... does not appear to be published yet".
+
+Resultado
+No se publicó el objetivo Z `world (0.000, 0.064, 1.201)`: la precondición
+system_readiness no pudo verificarse como READY. No hubo decisión del supervisor,
+trayectoria ni estado de ejecución.
+
+Cierre: SIGINT al launch; comprobación de procesos sin salida. No quedaron procesos de simulación.

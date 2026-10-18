@@ -56,8 +56,14 @@ setup(
             'thesis_simulation.simulation_command_adapter:main',
             'cartesian_command_adapter = '
             'thesis_simulation.cartesian_command_adapter:main',
+            'cartesian_jog_adapter = '
+            'thesis_simulation.cartesian_jog_adapter:main',
+            'cartesian_trajectory_adapter = '
+            'thesis_simulation.cartesian_trajectory_adapter:main',
             'cartesian_sim_validator = '
             'thesis_simulation.cartesian_sim_validator:main',
+            'cartesian_trajectory_validator = '
+            'thesis_simulation.cartesian_trajectory_validator:main',
             'system_readiness = '
             'thesis_simulation.system_readiness_node:main',
         ],

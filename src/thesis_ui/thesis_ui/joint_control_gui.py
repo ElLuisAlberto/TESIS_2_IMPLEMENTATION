@@ -11,6 +11,7 @@ from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QHeaderView
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QComboBox
 from PyQt5.QtWidgets import QDoubleSpinBox
 from PyQt5.QtWidgets import QGridLayout
 from PyQt5.QtWidgets import QGroupBox
@@ -21,12 +22,14 @@ from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtWidgets import QPushButton
 from PyQt5.QtWidgets import QScrollArea
 from PyQt5.QtWidgets import QSlider
+from PyQt5.QtWidgets import QTabWidget
 from PyQt5.QtWidgets import QTableWidget
 from PyQt5.QtWidgets import QTableWidgetItem
 from PyQt5.QtWidgets import QVBoxLayout
 from PyQt5.QtWidgets import QWidget
 
 import rclpy
+from geometry_msgs.msg import TwistStamped
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
@@ -35,6 +38,8 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool
 from thesis_interfaces.msg import (
     CartesianCommand,
+    CartesianTrajectoryCommand,
+    CartesianTrajectoryStatus,
     CommandDecision,
     ExecutionControl,
     ExecutionTrajectory,
@@ -74,6 +79,10 @@ ALLOWED_SPEED_DEG = tuple(
     math.degrees(JOINT_VELOCITY_LIMITS[name]) for name in JOINT_NAMES
 )
 JOG_INPUT_TIMEOUT_SEC = 0.30
+CARTESIAN_JOG_LABELS = ('X', 'Y', 'Z', 'Roll', 'Pitch', 'Yaw')
+CARTESIAN_JOG_DEFAULT_SPEEDS = (0.04, 0.04, 0.04, 10.0, 10.0, 10.0)
+CARTESIAN_JOG_MAXIMUM_SPEEDS = (0.15, 0.15, 0.15, 30.0, 30.0, 30.0)
+CARTESIAN_JOG_NOTCH_STEPS = (0.005, 0.005, 0.005, 1.0, 1.0, 1.0)
 
 
 class WheelIntention:
@@ -184,6 +193,7 @@ class JointGuiNode(Node):
         self.last_prediction = None
         self.last_execution = None
         self.last_execution_control = None
+        self.last_cartesian_trajectory_status = None
         self.execution_by_id = {}
         self.last_proximity = None
         self.proximity_received_at = None
@@ -223,6 +233,9 @@ class JointGuiNode(Node):
         self.jog_intent_publisher = self.create_publisher(
             JointCommand, '/thesis/jog_intent', jog_qos,
         )
+        self.cartesian_jog_publisher = self.create_publisher(
+            TwistStamped, '/thesis/cartesian_jog_intent', jog_qos,
+        )
         self.last_decision = None
         self.decision_subscription = self.create_subscription(
             CommandDecision,
@@ -245,6 +258,22 @@ class JointGuiNode(Node):
         self.cartesian_candidate_publisher = self.create_publisher(
             CartesianCommand,
             '/thesis/cartesian_candidate',
+            10,
+        )
+        self.cartesian_trajectory_publisher = self.create_publisher(
+            CartesianTrajectoryCommand,
+            '/thesis/cartesian_trajectory_candidate',
+            10,
+        )
+        self.cartesian_trajectory_cancel_publisher = self.create_publisher(
+            String,
+            '/thesis/cartesian_trajectory_cancel',
+            10,
+        )
+        self.cartesian_trajectory_subscription = self.create_subscription(
+            CartesianTrajectoryStatus,
+            '/thesis/cartesian_trajectory_status',
+            self.cartesian_trajectory_status_callback,
             10,
         )
 
@@ -417,6 +446,15 @@ class JointGuiNode(Node):
         self.last_execution_control = msg
         self.control_received_at = time.monotonic()
 
+    def cartesian_trajectory_status_callback(self, msg):
+        """Store the latest simulation-only Cartesian trajectory state."""
+        self.last_cartesian_trajectory_status = msg
+
+    def cartesian_trajectory_is_active(self):
+        """Return whether the long Cartesian coordinator owns JOG control."""
+        status = self.last_cartesian_trajectory_status
+        return status is not None and status.status in ('RUNNING', 'PAUSED')
+
     def state_is_ready(self):
         if self.last_state_time is None:
             return False
@@ -483,6 +521,9 @@ class JointGuiNode(Node):
             'Control manual continuo': (
                 self.jog_intent_publisher.get_subscription_count() > 0
             ),
+            'JOG cartesiano': (
+                self.cartesian_jog_publisher.get_subscription_count() > 0
+            ),
             'JOG supervisado': (
                 self.count_publishers(
                     '/thesis/supervised_jog_command'
@@ -518,6 +559,10 @@ class JointGuiNode(Node):
             'Gazebo /clock': self.count_publishers('/clock') > 0,
             'Adaptador cartesiano': (
                 self.cartesian_candidate_publisher
+                .get_subscription_count() > 0
+            ),
+            'Trayectoria cartesiana': (
+                self.cartesian_trajectory_publisher
                 .get_subscription_count() > 0
             ),
             **status,
@@ -585,6 +630,56 @@ class JointGuiNode(Node):
             self.cartesian_candidate_publisher.get_subscription_count(),
         )
 
+    def publish_cartesian_jog(self, linear, angular):
+        """Publish one generic world-frame velocity intention."""
+        msg = TwistStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'world'
+        (
+            msg.twist.linear.x,
+            msg.twist.linear.y,
+            msg.twist.linear.z,
+        ) = tuple(float(value) for value in linear)
+        (
+            msg.twist.angular.x,
+            msg.twist.angular.y,
+            msg.twist.angular.z,
+        ) = tuple(float(value) for value in angular)
+        self.cartesian_jog_publisher.publish(msg)
+
+    def publish_cartesian_trajectory(
+        self, mode, pose, linear_speed_mps, angular_speed_radps
+    ):
+        """Publish a long Cartesian simulation intention."""
+        msg = CartesianTrajectoryCommand()
+        now = self.get_clock().now()
+        msg.stamp = now.to_msg()
+        msg.command_id = f'cartesian_path_gui_{now.nanoseconds}'
+        msg.frame_id = 'world'
+        msg.mode = str(mode)
+        (
+            msg.x,
+            msg.y,
+            msg.z,
+            msg.roll,
+            msg.pitch,
+            msg.yaw,
+        ) = pose
+        msg.linear_speed_mps = float(linear_speed_mps)
+        msg.angular_speed_radps = float(angular_speed_radps)
+        self.last_cartesian_trajectory_status = None
+        self.cartesian_trajectory_publisher.publish(msg)
+        return (
+            msg.command_id,
+            self.cartesian_trajectory_publisher.get_subscription_count(),
+        )
+
+    def cancel_cartesian_trajectory(self, command_id='*'):
+        """Request cancellation without bypassing the adapter watchdog."""
+        msg = String()
+        msg.data = str(command_id or '*')
+        self.cartesian_trajectory_cancel_publisher.publish(msg)
+
 
 class JointControlWindow(QMainWindow):
 
@@ -610,6 +705,18 @@ class JointControlWindow(QMainWindow):
         self.jog_velocity_deg_s = [0.0] * len(JOINT_NAMES)
         self.jog_last_input_time = [None] * len(JOINT_NAMES)
         self.jog_last_motion_time = [None] * len(JOINT_NAMES)
+        self.manual_control_tabs = None
+        self.cartesian_jog_mode_button = None
+        self.cartesian_jog_sliders = []
+        self.cartesian_jog_speed_inputs = []
+        self.cartesian_jog_velocity_labels = []
+        self.cartesian_jog_pose_labels = []
+        self.cartesian_pose_sample = None
+        self.cartesian_measured_velocity = [None] * 6
+        self.cartesian_wheel_intentions = [
+            WheelIntention(0.25, step)
+            for step in CARTESIAN_JOG_NOTCH_STEPS
+        ]
         self.pending_command_id = None
         self.pending_since = None
         self.shutdown_started = False
@@ -618,6 +725,14 @@ class JointControlWindow(QMainWindow):
         self.cartesian_target_inputs = []
         self.cartesian_target_initialized = False
         self.cartesian_send_button = None
+        self.cartesian_trajectory_mode = None
+        self.cartesian_trajectory_inputs = []
+        self.cartesian_linear_speed_input = None
+        self.cartesian_angular_speed_input = None
+        self.cartesian_trajectory_send_button = None
+        self.cartesian_trajectory_cancel_button = None
+        self.cartesian_trajectory_status_label = None
+        self.cartesian_trajectory_pending_id = None
         self.minimum_safe_duration = None
         self.prediction_is_stale = False
 
@@ -641,6 +756,7 @@ class JointControlWindow(QMainWindow):
 
         self.jog_timer = QTimer(self)
         self.jog_timer.timeout.connect(self.publish_jog_intent)
+        self.jog_timer.timeout.connect(self.publish_cartesian_jog_intent)
         self.jog_timer.start(50)
 
     def build_ui(self):
@@ -808,7 +924,105 @@ class JointControlWindow(QMainWindow):
             velocity_label.setStyleSheet('font-weight: bold; color: #166534;')
             self.jog_velocity_labels.append(velocity_label)
             jog_layout.addWidget(velocity_label, row, 3)
-        main_layout.addWidget(jog_group)
+        if self.is_hardware_mode:
+            main_layout.addWidget(jog_group)
+        else:
+            manual_group = QGroupBox('Control manual continuo supervisado')
+            manual_layout = QVBoxLayout(manual_group)
+            self.manual_control_tabs = QTabWidget()
+
+            joint_tab = QWidget()
+            joint_tab_layout = QVBoxLayout(joint_tab)
+            joint_tab_layout.setContentsMargins(4, 4, 4, 4)
+            joint_tab_layout.addWidget(jog_group)
+            self.manual_control_tabs.addTab(joint_tab, 'Joints')
+
+            cartesian_tab = QWidget()
+            cartesian_layout = QGridLayout(cartesian_tab)
+            self.cartesian_jog_mode_button = QPushButton(
+                'ACTIVAR CONTROL CARTESIANO CONTINUO'
+            )
+            self.cartesian_jog_mode_button.setCheckable(True)
+            self.cartesian_jog_mode_button.toggled.connect(
+                self.toggle_cartesian_jog_mode
+            )
+            cartesian_layout.addWidget(
+                self.cartesian_jog_mode_button, 0, 0, 1, 5
+            )
+            cartesian_note = QLabel(
+                'Gire la rueda sobre una barra. X/Y/Z se expresan respecto '
+                'a world; Roll/Pitch/Yaw giran alrededor de sus ejes. Más '
+                'pulsos = mayor velocidad hasta Vmáx. Sin pulsos durante '
+                '0.25 s: intención cero. El adaptador IK y el supervisor '
+                'deciden la velocidad finalmente ejecutada. La postura '
+                'vertical inicial puede ser singular para algunos ejes.'
+            )
+            cartesian_note.setWordWrap(True)
+            cartesian_layout.addWidget(cartesian_note, 1, 0, 1, 5)
+            for column, text in enumerate((
+                'Eje', 'Actual', 'Rueda / intención', 'Vmáx', 'Estado'
+            )):
+                header = QLabel(text)
+                header.setObjectName('headerLabel')
+                cartesian_layout.addWidget(header, 2, column)
+
+            for index, axis_label in enumerate(CARTESIAN_JOG_LABELS):
+                row = index + 3
+                linear_axis = index < 3
+                current_label = QLabel('--')
+                slider = QSlider(Qt.Horizontal)
+                slider.setRange(-100, 100)
+                slider.setValue(0)
+                slider.setSingleStep(10)
+                slider.setPageStep(25)
+                slider.installEventFilter(self)
+                slider.setToolTip(
+                    'Coloque el cursor aquí y gire la rueda. La barra '
+                    'muestra la fracción instantánea de Vmáx.'
+                )
+                speed_input = QDoubleSpinBox()
+                speed_input.setRange(
+                    0.005 if linear_axis else 0.5,
+                    CARTESIAN_JOG_MAXIMUM_SPEEDS[index],
+                )
+                speed_input.setDecimals(3 if linear_axis else 1)
+                speed_input.setSingleStep(0.005 if linear_axis else 0.5)
+                speed_input.setValue(CARTESIAN_JOG_DEFAULT_SPEEDS[index])
+                speed_input.setSuffix(' m/s' if linear_axis else ' °/s')
+                velocity_label = QLabel(
+                    'Intención: +0.000 m/s'
+                    if linear_axis else 'Intención: +0.0 °/s'
+                )
+                velocity_label.setStyleSheet(
+                    'font-weight: bold; color: #166534;'
+                )
+                self.cartesian_jog_pose_labels.append(current_label)
+                self.cartesian_jog_sliders.append(slider)
+                self.cartesian_jog_speed_inputs.append(speed_input)
+                self.cartesian_jog_velocity_labels.append(velocity_label)
+                cartesian_layout.addWidget(QLabel(axis_label), row, 0)
+                cartesian_layout.addWidget(current_label, row, 1)
+                cartesian_layout.addWidget(slider, row, 2)
+                cartesian_layout.addWidget(speed_input, row, 3)
+                cartesian_layout.addWidget(velocity_label, row, 4)
+
+            recommended_pose = QPushButton(
+                'CARGAR POSTURA CARTESIANA RECOMENDADA EN JOINTS'
+            )
+            recommended_pose.clicked.connect(
+                lambda: self.load_pose(CARTESIAN_READY_POSE_DEG)
+            )
+            recommended_pose.setToolTip(
+                'Carga el objetivo articular; después envíelo antes de '
+                'activar el control cartesiano continuo.'
+            )
+            cartesian_layout.addWidget(recommended_pose, 9, 0, 1, 5)
+
+            self.manual_control_tabs.addTab(
+                cartesian_tab, 'X/Y/Z + orientación'
+            )
+            manual_layout.addWidget(self.manual_control_tabs)
+            main_layout.addWidget(manual_group)
 
         connection_group = QGroupBox(
             'Conexiones del brazo físico'
@@ -835,7 +1049,11 @@ class JointControlWindow(QMainWindow):
             ]
         else:
             connection_names = [
-                'Gazebo /clock', 'Adaptador cartesiano', *connection_names
+                'Gazebo /clock',
+                'Adaptador cartesiano',
+                'JOG cartesiano',
+                'Trayectoria cartesiana',
+                *connection_names,
             ]
 
         for name in connection_names:
@@ -958,6 +1176,111 @@ class JointControlWindow(QMainWindow):
                 self.cartesian_send_button, 8, 0, 1, 4
             )
             main_layout.addWidget(cartesian_group)
+
+            trajectory_group = QGroupBox(
+                'Trayectoria cartesiana larga simulada'
+            )
+            trajectory_layout = QGridLayout(trajectory_group)
+            trajectory_note = QLabel(
+                'Movimiento recto del efector con velocidad nominal manual. '
+                'El coordinador resuelve puntos IK y el supervisor puede '
+                'permitir, reducir, pausar o reanudar cada horizonte. '
+                'Límites: 0.60 m, 180°, 0.005–0.15 m/s y 0.5–30 °/s.'
+            )
+            trajectory_note.setWordWrap(True)
+            trajectory_layout.addWidget(trajectory_note, 0, 0, 1, 4)
+
+            trajectory_layout.addWidget(QLabel('Modo:'), 1, 0)
+            self.cartesian_trajectory_mode = QComboBox()
+            self.cartesian_trajectory_mode.addItem(
+                'Relativo a la pose medida', 'RELATIVE'
+            )
+            self.cartesian_trajectory_mode.addItem(
+                'Absoluto respecto a world', 'ABSOLUTE'
+            )
+            self.cartesian_trajectory_mode.currentIndexChanged.connect(
+                self.configure_cartesian_trajectory_mode
+            )
+            trajectory_layout.addWidget(
+                self.cartesian_trajectory_mode, 1, 1, 1, 3
+            )
+
+            labels = ('X', 'Y', 'Z', 'Roll', 'Pitch', 'Yaw')
+            for index, label in enumerate(labels):
+                row = index + 2
+                position_axis = index < 3
+                value_input = QDoubleSpinBox()
+                value_input.setDecimals(3 if position_axis else 1)
+                value_input.setSingleStep(0.01 if position_axis else 5.0)
+                value_input.setSuffix(' m' if position_axis else ' °')
+                self.cartesian_trajectory_inputs.append(value_input)
+                trajectory_layout.addWidget(QLabel(label), row, 0)
+                trajectory_layout.addWidget(value_input, row, 1)
+
+            trajectory_layout.addWidget(
+                QLabel('Velocidad lineal nominal:'), 2, 2
+            )
+            self.cartesian_linear_speed_input = QDoubleSpinBox()
+            self.cartesian_linear_speed_input.setRange(0.005, 0.15)
+            self.cartesian_linear_speed_input.setDecimals(3)
+            self.cartesian_linear_speed_input.setSingleStep(0.005)
+            self.cartesian_linear_speed_input.setValue(0.04)
+            self.cartesian_linear_speed_input.setSuffix(' m/s')
+            trajectory_layout.addWidget(
+                self.cartesian_linear_speed_input, 2, 3
+            )
+
+            trajectory_layout.addWidget(
+                QLabel('Velocidad angular nominal:'), 3, 2
+            )
+            self.cartesian_angular_speed_input = QDoubleSpinBox()
+            self.cartesian_angular_speed_input.setRange(0.5, 30.0)
+            self.cartesian_angular_speed_input.setDecimals(1)
+            self.cartesian_angular_speed_input.setSingleStep(0.5)
+            self.cartesian_angular_speed_input.setValue(10.0)
+            self.cartesian_angular_speed_input.setSuffix(' °/s')
+            trajectory_layout.addWidget(
+                self.cartesian_angular_speed_input, 3, 3
+            )
+
+            trajectory_ready_pose = QPushButton(
+                'Cargar postura articular recomendada'
+            )
+            trajectory_ready_pose.clicked.connect(
+                lambda: self.load_pose(CARTESIAN_READY_POSE_DEG)
+            )
+            trajectory_layout.addWidget(
+                trajectory_ready_pose, 4, 2, 1, 2
+            )
+
+            self.cartesian_trajectory_send_button = QPushButton(
+                'INICIAR TRAYECTORIA CARTESIANA'
+            )
+            self.cartesian_trajectory_send_button.clicked.connect(
+                self.send_cartesian_trajectory
+            )
+            self.cartesian_trajectory_cancel_button = QPushButton(
+                'CANCELAR Y MANTENER POSTURA'
+            )
+            self.cartesian_trajectory_cancel_button.clicked.connect(
+                self.cancel_cartesian_trajectory
+            )
+            trajectory_layout.addWidget(
+                self.cartesian_trajectory_send_button, 8, 0, 1, 2
+            )
+            trajectory_layout.addWidget(
+                self.cartesian_trajectory_cancel_button, 8, 2, 1, 2
+            )
+
+            self.cartesian_trajectory_status_label = QLabel(
+                'Trayectoria: sin orden activa.'
+            )
+            self.cartesian_trajectory_status_label.setWordWrap(True)
+            trajectory_layout.addWidget(
+                self.cartesian_trajectory_status_label, 9, 0, 1, 4
+            )
+            self.configure_cartesian_trajectory_mode()
+            main_layout.addWidget(trajectory_group)
 
         command_group = QGroupBox('Configuración del comando')
         command_layout = QHBoxLayout(command_group)
@@ -1235,17 +1558,33 @@ class JointControlWindow(QMainWindow):
     def refresh_ui(self):
         state_ready = self.ros_node.state_is_ready()
         jog_active = self.jog_mode_button.isChecked()
+        cartesian_jog_active = (
+            self.cartesian_jog_mode_button is not None
+            and self.cartesian_jog_mode_button.isChecked()
+        )
+        manual_active = jog_active or cartesian_jog_active
         system_ready = self.system_is_ready()
+        self.refresh_cartesian_trajectory_status()
+        trajectory_active = (
+            self.cartesian_trajectory_pending_id is not None
+            or self.ros_node.cartesian_trajectory_is_active()
+        )
         if jog_active and not system_ready:
             self.jog_mode_button.setChecked(False)
             jog_active = False
+            manual_active = cartesian_jog_active
+        if cartesian_jog_active and not system_ready:
+            self.cartesian_jog_mode_button.setChecked(False)
+            cartesian_jog_active = False
+            manual_active = jog_active
         busy = (
             self.pending_command_id is not None
             or self.ros_node.execution_is_active()
+            or trajectory_active
         )
         connected = self.ros_node.candidate_publisher.get_subscription_count() > 0
         self.send_button.setEnabled(
-            state_ready and connected and not busy and not jog_active
+            state_ready and connected and not busy and not manual_active
             and system_ready
         )
         if self.cartesian_send_button is not None:
@@ -1261,8 +1600,31 @@ class JointControlWindow(QMainWindow):
                 and cartesian_connected
                 and self.cartesian_target_initialized
                 and not busy
-                and not jog_active
+                and not manual_active
                 and system_ready
+            )
+        if self.cartesian_trajectory_send_button is not None:
+            publisher = getattr(
+                self.ros_node, 'cartesian_trajectory_publisher', None
+            )
+            trajectory_connected = (
+                publisher is not None
+                and publisher.get_subscription_count() > 0
+            )
+            point_busy = (
+                self.pending_command_id is not None
+                or self.ros_node.execution_is_active()
+            )
+            self.cartesian_trajectory_send_button.setEnabled(
+                state_ready
+                and system_ready
+                and trajectory_connected
+                and not point_busy
+                and not trajectory_active
+                and not manual_active
+            )
+            self.cartesian_trajectory_cancel_button.setEnabled(
+                trajectory_active
             )
         self.send_button.setText(
             'ESPERANDO RESULTADO DEL COMANDO' if busy
@@ -1464,9 +1826,68 @@ class JointControlWindow(QMainWindow):
                 f'color: {color}; font-weight: bold;'
             )
 
+    def refresh_cartesian_trajectory_status(self):
+        """Render long Cartesian progress and release terminal UI locks."""
+        label = self.cartesian_trajectory_status_label
+        if label is None:
+            return
+        status = self.ros_node.last_cartesian_trajectory_status
+        if status is None:
+            if self.cartesian_trajectory_pending_id is not None:
+                label.setText(
+                    'Trayectoria: planificando IK y esperando respuesta...'
+                )
+                label.setStyleSheet('color: #92400e;')
+            return
+        terminal = status.status in (
+            'SUCCEEDED', 'FAILED', 'CANCELED', 'REJECTED'
+        )
+        if (
+            terminal
+            and status.command_id == self.cartesian_trajectory_pending_id
+        ):
+            self.cartesian_trajectory_pending_id = None
+        error_text = ''
+        if status.position_error_m >= 0.0:
+            error_text = (
+                f' | error={status.position_error_m:.3f} m, '
+                f'{math.degrees(status.orientation_error_rad):.2f}°'
+            )
+        label.setText(
+            f'Trayectoria {status.status}: avance {status.progress:.0%} | '
+            f'escala {status.speed_scale:.2f} | '
+            f'restante {status.remaining_distance_m:.3f} m | '
+            f'duración nominal {status.planned_duration_sec:.2f} s'
+            f'{error_text}. {status.detail}'
+        )
+        color = {
+            'RUNNING': '#166534',
+            'PAUSED': '#c2410c',
+            'SUCCEEDED': '#166534',
+            'FAILED': '#b91c1c',
+            'CANCELED': '#b91c1c',
+            'REJECTED': '#b91c1c',
+        }.get(status.status, '#334155')
+        label.setStyleSheet(f'color: {color}; font-weight: bold;')
+
     def refresh_volume_mode(self):
         """Explain which safe trajectory feeds the continuous volume."""
-        if self.jog_mode_button.isChecked():
+        if self.ros_node.cartesian_trajectory_is_active():
+            text = (
+                'VOLUMEN SUPERVISADO CARTESIANO: cada horizonte de la '
+                'trayectoria larga se recalcula desde el estado medido.'
+            )
+            color = '#166534'
+        elif (
+            self.cartesian_jog_mode_button is not None
+            and self.cartesian_jog_mode_button.isChecked()
+        ):
+            text = (
+                'VOLUMEN SUPERVISADO CARTESIANO CONTINUO: la velocidad '
+                'X/Y/Z/Roll/Pitch/Yaw se convierte a un horizonte articular.'
+            )
+            color = '#166534'
+        elif self.jog_mode_button.isChecked():
             text = (
                 'VOLUMEN SUPERVISADO CONTINUO: activo automáticamente con '
                 'el JOG seguro; no requiere activar la previsualización.'
@@ -1614,6 +2035,17 @@ class JointControlWindow(QMainWindow):
                     self.jog_mode_button.isChecked()
                     and control.command_id == 'jog_continuous'
                 )
+                or (
+                    self.cartesian_jog_mode_button is not None
+                    and self.cartesian_jog_mode_button.isChecked()
+                    and control.command_id == 'cartesian_jog_continuous'
+                )
+                or (
+                    node.cartesian_trajectory_is_active()
+                    and node.last_cartesian_trajectory_status is not None
+                    and control.command_id
+                    == node.last_cartesian_trajectory_status.command_id
+                )
             )
         )
         values = ['Sin evaluación activa', '--', '--']
@@ -1646,6 +2078,10 @@ class JointControlWindow(QMainWindow):
         if pose is None:
             for label in self.pose_labels:
                 label.setText('--')
+            for label in self.cartesian_jog_pose_labels:
+                label.setText('--')
+            self.cartesian_pose_sample = None
+            self.cartesian_measured_velocity = [None] * 6
             return
 
         values = [
@@ -1659,6 +2095,58 @@ class JointControlWindow(QMainWindow):
 
         for label, value in zip(self.pose_labels, values):
             label.setText(value)
+        for label, value in zip(self.cartesian_jog_pose_labels, values):
+            label.setText(value)
+
+        now = time.monotonic()
+        if self.cartesian_pose_sample is not None:
+            previous_pose, previous_time = self.cartesian_pose_sample
+            elapsed = now - previous_time
+            if 0.02 <= elapsed <= 0.50:
+                measured = [
+                    (pose[index] - previous_pose[index]) / elapsed
+                    for index in range(3)
+                ]
+                measured.extend(
+                    math.degrees(
+                        math.atan2(
+                            math.sin(pose[index] - previous_pose[index]),
+                            math.cos(pose[index] - previous_pose[index]),
+                        )
+                    ) / elapsed
+                    for index in range(3, 6)
+                )
+                self.cartesian_measured_velocity = measured
+        self.cartesian_pose_sample = (tuple(pose), now)
+        for index, (slider, maximum_input, velocity_label) in enumerate(zip(
+            self.cartesian_jog_sliders,
+            self.cartesian_jog_speed_inputs,
+            self.cartesian_jog_velocity_labels,
+        )):
+            velocity = self.active_cartesian_jog_velocity(index, now)
+            maximum = maximum_input.value()
+            fraction = 0.0 if maximum <= 0.0 else velocity / maximum
+            blocker = QSignalBlocker(slider)
+            slider.setValue(int(round(100.0 * fraction)))
+            del blocker
+            if index < 3:
+                measured = self.cartesian_measured_velocity[index]
+                measured_text = (
+                    '--' if measured is None else f'{measured:+.3f} m/s'
+                )
+                velocity_label.setText(
+                    f'Intención: {velocity:+.3f} m/s | '
+                    f'medida: {measured_text}'
+                )
+            else:
+                measured = self.cartesian_measured_velocity[index]
+                measured_text = (
+                    '--' if measured is None else f'{measured:+.1f} °/s'
+                )
+                velocity_label.setText(
+                    f'Intención: {velocity:+.1f} °/s | '
+                    f'medida: {measured_text}'
+                )
 
     def refresh_prediction_status(self):
         if self.prediction_is_stale:
@@ -1963,7 +2451,10 @@ class JointControlWindow(QMainWindow):
 
     def active_jog_velocity(self, index, now=None):
         now = time.monotonic() if now is None else now
-        if not self.jog_mode_button.isChecked() or not self.ros_node.state_is_ready():
+        if (
+            not self.jog_mode_button.isChecked()
+            or not self.ros_node.state_is_ready()
+        ):
             self.wheel_intentions[index].clear()
             return 0.0
         return self.wheel_intentions[index].velocity(
@@ -1990,11 +2481,44 @@ class JointControlWindow(QMainWindow):
                 return True
             if event.type() in (QEvent.Leave, QEvent.FocusOut):
                 self.wheel_intentions[index].clear()
+        cartesian_button = getattr(self, 'cartesian_jog_mode_button', None)
+        if (
+            cartesian_button is not None
+            and watched in self.cartesian_jog_sliders
+        ):
+            index = self.cartesian_jog_sliders.index(watched)
+            if event.type() == QEvent.Wheel:
+                if (
+                    cartesian_button.isChecked()
+                    and self.ros_node.state_is_ready()
+                ):
+                    for other_index, intention in enumerate(
+                        self.cartesian_wheel_intentions
+                    ):
+                        if other_index != index:
+                            intention.clear()
+                    self.cartesian_wheel_intentions[index].add(
+                        time.monotonic(), event.angleDelta().y() / 120.0
+                    )
+                event.accept()
+                return True
+            if cartesian_button.isChecked() and event.type() in (
+                QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                QEvent.MouseButtonDblClick, QEvent.MouseMove,
+                QEvent.KeyPress, QEvent.KeyRelease,
+            ):
+                return True
+            if event.type() in (QEvent.Leave, QEvent.FocusOut):
+                self.cartesian_wheel_intentions[index].clear()
         return super().eventFilter(watched, event)
 
     def changeEvent(self, event):
         if event.type() == QEvent.ActivationChange and not self.isActiveWindow():
             for intention in getattr(self, 'wheel_intentions', []):
+                intention.clear()
+            for intention in getattr(
+                self, 'cartesian_wheel_intentions', []
+            ):
                 intention.clear()
         super().changeEvent(event)
 
@@ -2118,6 +2642,64 @@ class JointControlWindow(QMainWindow):
         target_input = self.cartesian_target_inputs[index]
         target_input.setValue(target_input.value() + increment)
 
+    def configure_cartesian_trajectory_mode(self, index=None):
+        """Configure long-trajectory fields for relative or absolute input."""
+        del index
+        if self.cartesian_trajectory_mode is None:
+            return
+        mode = self.cartesian_trajectory_mode.currentData()
+        if mode == 'RELATIVE':
+            for item_index, value_input in enumerate(
+                self.cartesian_trajectory_inputs
+            ):
+                limit = 0.60 if item_index < 3 else 180.0
+                value_input.setRange(-limit, limit)
+                value_input.setValue(0.0)
+            return
+
+        self.ros_node.update_end_effector_pose()
+        pose = self.ros_node.end_effector_pose
+        for item_index, value_input in enumerate(
+            self.cartesian_trajectory_inputs
+        ):
+            if item_index < 3:
+                minimum, maximum = -1.50, 1.50
+                if item_index == 2:
+                    minimum, maximum = -0.20, 1.80
+            else:
+                minimum, maximum = -180.0, 180.0
+            value_input.setRange(minimum, maximum)
+        if pose is None:
+            return
+        values = list(pose[:3]) + [
+            math.degrees(value) for value in pose[3:]
+        ]
+        for value_input, value in zip(
+            self.cartesian_trajectory_inputs, values
+        ):
+            value_input.setValue(value)
+
+    def manual_control_active(self):
+        """Return whether either mutually exclusive wheel mode is active."""
+        cartesian_active = (
+            self.cartesian_jog_mode_button is not None
+            and self.cartesian_jog_mode_button.isChecked()
+        )
+        return self.jog_mode_button.isChecked() or cartesian_active
+
+    def set_manual_command_lock(self, locked):
+        """Lock point and trajectory controls while a JOG owns motion."""
+        self.preview_button.setChecked(False)
+        self.preview_button.setEnabled(not locked)
+        self.duration_input.setEnabled(not locked)
+        joint_active = self.jog_mode_button.isChecked()
+        for target_input in self.target_inputs:
+            target_input.setEnabled(not locked)
+        for slider in self.target_sliders:
+            slider.setEnabled(not locked or joint_active)
+        for button in self.decrease_buttons + self.increase_buttons:
+            button.setEnabled(not locked)
+
     def toggle_jog_mode(self, checked):
         for intention in self.wheel_intentions:
             intention.clear()
@@ -2125,6 +2707,8 @@ class JointControlWindow(QMainWindow):
             not self.ros_node.state_is_ready()
             or not self.system_is_ready()
             or self.ros_node.execution_is_active()
+            or self.ros_node.cartesian_trajectory_is_active()
+            or self.cartesian_trajectory_pending_id is not None
             or self.pending_command_id is not None
             or self.ros_node.jog_intent_publisher.get_subscription_count() == 0
         ):
@@ -2141,17 +2725,16 @@ class JointControlWindow(QMainWindow):
             return
 
         if checked:
+            if (
+                self.cartesian_jog_mode_button is not None
+                and self.cartesian_jog_mode_button.isChecked()
+            ):
+                self.cartesian_jog_mode_button.setChecked(False)
             self.copy_current_pose()
             self.reset_direct_jog_state()
-            self.preview_button.setChecked(False)
-            self.preview_button.setEnabled(False)
-            self.duration_input.setEnabled(False)
-            for target_input in self.target_inputs:
-                target_input.setEnabled(False)
-            for button in self.decrease_buttons + self.increase_buttons:
-                button.setEnabled(False)
+            self.set_manual_command_lock(True)
             self.jog_mode_button.setText(
-                'DESACTIVAR CONTROL MANUAL CONTINUO'
+                'DESACTIVAR CONTROL ARTICULAR CONTINUO'
             )
             self.status_label.setText(
                 'CONTROL POR RUEDA ACTIVO: gire la rueda sobre una barra. '
@@ -2163,12 +2746,8 @@ class JointControlWindow(QMainWindow):
                 self.jog_velocity_deg_s[index] = 0.0
                 self.jog_last_motion_time[index] = None
             self.publish_jog_intent(force_hold=True)
-            self.preview_button.setEnabled(True)
-            self.duration_input.setEnabled(True)
-            for target_input in self.target_inputs:
-                target_input.setEnabled(True)
-            for button in self.decrease_buttons + self.increase_buttons:
-                button.setEnabled(True)
+            if not self.manual_control_active():
+                self.set_manual_command_lock(False)
             self.jog_mode_button.setText(
                 'ACTIVAR CONTROL MANUAL CONTINUO'
             )
@@ -2177,6 +2756,93 @@ class JointControlWindow(QMainWindow):
                 'postura actual.'
             )
             self.status_label.setStyleSheet('color: #334155;')
+
+    def toggle_cartesian_jog_mode(self, checked):
+        """Enable simulation-only Cartesian velocity control by wheel."""
+        for intention in self.cartesian_wheel_intentions:
+            intention.clear()
+        button = self.cartesian_jog_mode_button
+        if button is None:
+            return
+        publisher = getattr(self.ros_node, 'cartesian_jog_publisher', None)
+        if checked and (
+            self.is_hardware_mode
+            or not self.ros_node.state_is_ready()
+            or not self.system_is_ready()
+            or self.ros_node.execution_is_active()
+            or self.ros_node.cartesian_trajectory_is_active()
+            or self.cartesian_trajectory_pending_id is not None
+            or self.pending_command_id is not None
+            or publisher is None
+            or publisher.get_subscription_count() == 0
+        ):
+            blocker = QSignalBlocker(button)
+            button.setChecked(False)
+            blocker.unblock()
+            QMessageBox.warning(
+                self,
+                'Control cartesiano continuo no disponible',
+                'Se requiere sistema READY, /joint_states reciente, el '
+                'adaptador JOG cartesiano conectado y ninguna trayectoria '
+                'activa.',
+            )
+            return
+
+        if checked:
+            if self.jog_mode_button.isChecked():
+                self.jog_mode_button.setChecked(False)
+            self.set_manual_command_lock(True)
+            button.setText('DESACTIVAR CONTROL CARTESIANO CONTINUO')
+            self.status_label.setText(
+                'CONTROL CARTESIANO POR RUEDA ACTIVO: use una barra de '
+                'X/Y/Z/Roll/Pitch/Yaw. Al cesar los pulsos se solicita HOLD.'
+            )
+            self.status_label.setStyleSheet('color: #166534;')
+        else:
+            self.publish_cartesian_jog_intent(force_stop=True)
+            for slider in self.cartesian_jog_sliders:
+                slider.setValue(0)
+            if not self.manual_control_active():
+                self.set_manual_command_lock(False)
+            button.setText('ACTIVAR CONTROL CARTESIANO CONTINUO')
+            self.status_label.setText(
+                'Control cartesiano continuo desactivado; se solicitó HOLD.'
+            )
+            self.status_label.setStyleSheet('color: #334155;')
+
+    def active_cartesian_jog_velocity(self, index, now=None):
+        """Return the finite-window linear or angular wheel velocity."""
+        now = time.monotonic() if now is None else now
+        button = self.cartesian_jog_mode_button
+        if (
+            button is None
+            or not button.isChecked()
+            or not self.ros_node.state_is_ready()
+        ):
+            self.cartesian_wheel_intentions[index].clear()
+            return 0.0
+        return self.cartesian_wheel_intentions[index].velocity(
+            now, self.cartesian_jog_speed_inputs[index].value()
+        )
+
+    def publish_cartesian_jog_intent(self, force_stop=False):
+        """Publish a generic velocity request for simulation-only IK."""
+        button = self.cartesian_jog_mode_button
+        if button is None:
+            return
+        if not force_stop and not button.isChecked():
+            return
+        publisher = getattr(self.ros_node, 'cartesian_jog_publisher', None)
+        if publisher is None or publisher.get_subscription_count() == 0:
+            return
+        velocities = [0.0] * 6 if force_stop else [
+            self.active_cartesian_jog_velocity(index)
+            for index in range(6)
+        ]
+        self.ros_node.publish_cartesian_jog(
+            velocities[:3],
+            tuple(math.radians(value) for value in velocities[3:]),
+        )
 
     def publish_jog_intent(self, force_hold=False):
         if not force_hold and not self.jog_mode_button.isChecked():
@@ -2221,7 +2887,12 @@ class JointControlWindow(QMainWindow):
         self.ros_node.jog_intent_publisher.publish(msg)
 
     def publish_preview_intent(self):
-        if self.jog_mode_button.isChecked():
+        if self.manual_control_active():
+            return
+        if (
+            self.ros_node.cartesian_trajectory_is_active()
+            or self.cartesian_trajectory_pending_id is not None
+        ):
             return
         if not self.preview_button.isChecked():
             return
@@ -2240,11 +2911,13 @@ class JointControlWindow(QMainWindow):
         self.ros_node.intent_publisher.publish(msg)
 
     def send_candidate(self):
-        if self.jog_mode_button.isChecked():
+        if self.manual_control_active():
             return
         if (
             self.pending_command_id is not None
             or self.ros_node.execution_is_active()
+            or self.ros_node.cartesian_trajectory_is_active()
+            or self.cartesian_trajectory_pending_id is not None
         ):
             return
         if self.ros_node.candidate_publisher.get_subscription_count() == 0:
@@ -2337,11 +3010,13 @@ class JointControlWindow(QMainWindow):
         """Send one simulation-only pose request to the IK adapter."""
         if self.is_hardware_mode or self.cartesian_send_button is None:
             return
-        if self.jog_mode_button.isChecked():
+        if self.manual_control_active():
             return
         if (
             self.pending_command_id is not None
             or self.ros_node.execution_is_active()
+            or self.ros_node.cartesian_trajectory_is_active()
+            or self.cartesian_trajectory_pending_id is not None
         ):
             return
         publisher = getattr(
@@ -2414,14 +3089,118 @@ class JointControlWindow(QMainWindow):
         )
         self.status_label.setStyleSheet('color: #92400e;')
 
+    def send_cartesian_trajectory(self):
+        """Send one simulation-only long Cartesian trajectory intention."""
+        if (
+            self.is_hardware_mode
+            or self.cartesian_trajectory_send_button is None
+            or self.manual_control_active()
+            or self.pending_command_id is not None
+            or self.ros_node.execution_is_active()
+            or self.ros_node.cartesian_trajectory_is_active()
+            or self.cartesian_trajectory_pending_id is not None
+        ):
+            return
+        publisher = getattr(
+            self.ros_node, 'cartesian_trajectory_publisher', None
+        )
+        if publisher is None or publisher.get_subscription_count() == 0:
+            self.status_label.setText(
+                'Inicie el coordinador de trayectoria cartesiana simulada.'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            return
+        if not self.ros_node.state_is_ready():
+            QMessageBox.warning(
+                self,
+                'Estado no disponible',
+                'No se enviará la trayectoria sin /joint_states reciente.',
+            )
+            return
+        if not self.system_is_ready():
+            QMessageBox.warning(
+                self,
+                'Sistema todavía no disponible',
+                self.system_readiness_text(),
+            )
+            return
+
+        values = tuple(
+            item.value() for item in self.cartesian_trajectory_inputs
+        )
+        pose = values[:3] + tuple(
+            math.radians(value) for value in values[3:]
+        )
+        mode = self.cartesian_trajectory_mode.currentData()
+        command_id, subscriber_count = (
+            self.ros_node.publish_cartesian_trajectory(
+                mode,
+                pose,
+                self.cartesian_linear_speed_input.value(),
+                math.radians(self.cartesian_angular_speed_input.value()),
+            )
+        )
+        self.preview_button.setChecked(False)
+        self.cartesian_trajectory_pending_id = command_id
+        self.cartesian_trajectory_status_label.setText(
+            f'Trayectoria {command_id}: planificando IK...'
+        )
+        self.cartesian_trajectory_status_label.setStyleSheet(
+            'color: #92400e; font-weight: bold;'
+        )
+        if subscriber_count == 0:
+            self.status_label.setText(
+                'TRAYECTORIA NO CONECTADA: no existe coordinador activo.'
+            )
+            self.status_label.setStyleSheet('color: #b91c1c;')
+            return
+        self.status_label.setText(
+            f'TRAYECTORIA PENDIENTE: {command_id} enviada al coordinador.'
+        )
+        self.status_label.setStyleSheet('color: #92400e;')
+
+    def cancel_cartesian_trajectory(self):
+        """Cancel the active long trajectory and let the watchdog hold."""
+        status = self.ros_node.last_cartesian_trajectory_status
+        command_id = (
+            self.cartesian_trajectory_pending_id
+            if status is None else status.command_id
+        )
+        self.ros_node.cancel_cartesian_trajectory(command_id or '*')
+        self.status_label.setText(
+            'Cancelación cartesiana solicitada; esperando HOLD seguro.'
+        )
+        self.status_label.setStyleSheet('color: #92400e;')
+
     def closeEvent(self, event):
         if self.shutdown_started:
             event.accept()
             return
         self.shutdown_started = True
         ros_available = rclpy.ok()
+        if (
+            ros_available
+            and (
+                self.cartesian_trajectory_pending_id is not None
+                or self.ros_node.cartesian_trajectory_is_active()
+            )
+        ):
+            status = self.ros_node.last_cartesian_trajectory_status
+            command_id = (
+                self.cartesian_trajectory_pending_id
+                if status is None else status.command_id
+            )
+            self.ros_node.cancel_cartesian_trajectory(
+                command_id or '*'
+            )
         if ros_available and self.jog_mode_button.isChecked():
             self.publish_jog_intent(force_hold=True)
+        if (
+            ros_available
+            and self.cartesian_jog_mode_button is not None
+            and self.cartesian_jog_mode_button.isChecked()
+        ):
+            self.publish_cartesian_jog_intent(force_stop=True)
         self.jog_timer.stop()
         self.ros_timer.stop()
         self.ui_timer.stop()
