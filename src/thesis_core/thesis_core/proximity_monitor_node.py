@@ -26,6 +26,11 @@ from thesis_core.ros_runtime import spin_node
 SAFETY_REFERENCE_FRAME = 'world'
 
 
+def create_dedicated_tf_listener(buffer):
+    """Keep TF reception concurrent with bounded lookup callbacks."""
+    return TransformListener(buffer, None, spin_thread=True)
+
+
 class ProximityMonitorNode(Node):
     """Evaluate minimum clearance between JACO2 capsules and an obstacle."""
 
@@ -91,7 +96,14 @@ class ProximityMonitorNode(Node):
             10,
         )
         self.tf_buffer = Buffer(cache_time=Duration(seconds=5.0))
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        # `evaluate()` performs bounded exact-stamp lookups.  Spinning the TF
+        # listener through this node's executor would prevent `/tf` callbacks
+        # from filling the buffer while that timer callback is waiting.  Give
+        # the listener its own node and executor so the bounded wait can
+        # actually receive an arriving transform.  This does not change the
+        # requested frame or timestamp: `_frame_point()` still requests the
+        # obstacle acquisition stamp and a missing transform still yields STOP.
+        self.tf_listener = create_dedicated_tf_listener(self.tf_buffer)
         self.obstacle_frame = str(
             self.get_parameter('obstacle_frame').value
         )
@@ -348,7 +360,9 @@ class ProximityMonitorNode(Node):
             0.0,
         ), self.get_clock().now().to_msg()
 
-    def _publish_tf_stop(self, source_stamp, obstacle, obstacle_radius, reason):
+    def _publish_tf_stop(
+        self, source_stamp, obstacle, obstacle_radius, reason
+    ):
         """Publish a conservative STOP when TF geometry is unavailable."""
         message = ProximityStatus()
         message.stamp = source_stamp
@@ -404,9 +418,14 @@ class ProximityMonitorNode(Node):
             return
         obstacle_data = self._obstacle()
         if obstacle_data is None:
-            # Withhold proximity status until a fresh obstacle estimate arrives.
+            # Wait for a fresh obstacle estimate before publishing status.
             return
-        obstacle, obstacle_radius, obstacle_velocity, source_stamp = obstacle_data
+        (
+            obstacle,
+            obstacle_radius,
+            obstacle_velocity,
+            source_stamp,
+        ) = obstacle_data
         self._publish_obstacle_marker(obstacle, obstacle_radius)
         unavailable = set()
         segments = []

@@ -43,14 +43,21 @@ def identity_matrix():
 
 
 def multiply(first, second):
-    return [
-        [
-            sum(first[row][index] * second[index][column]
-                for index in range(4))
-            for column in range(4)
-        ]
-        for row in range(4)
-    ]
+    """Multiply two 4x4 matrices without generator overhead."""
+    result = []
+    for row in range(4):
+        a0, a1, a2, a3 = first[row]
+        result.append([
+            a0 * second[0][0] + a1 * second[1][0]
+            + a2 * second[2][0] + a3 * second[3][0],
+            a0 * second[0][1] + a1 * second[1][1]
+            + a2 * second[2][1] + a3 * second[3][1],
+            a0 * second[0][2] + a1 * second[1][2]
+            + a2 * second[2][2] + a3 * second[3][2],
+            a0 * second[0][3] + a1 * second[1][3]
+            + a2 * second[2][3] + a3 * second[3][3],
+        ])
+    return result
 
 
 def transform_matrix(xyz, rpy):
@@ -85,6 +92,12 @@ def rotation_z(angle):
     ]
 
 
+JOINT_ORIGIN_TRANSFORMS = tuple(
+    transform_matrix(xyz, rpy) for xyz, rpy in JOINT_ORIGINS
+)
+END_EFFECTOR_TRANSFORM = transform_matrix(*END_EFFECTOR_ORIGIN)
+
+
 def translation(matrix):
     return (matrix[0][3], matrix[1][3], matrix[2][3])
 
@@ -113,13 +126,12 @@ def end_effector_transform(joint_positions):
         raise ValueError('JACO2 joint positions must be finite')
 
     current = identity_matrix()
-    for joint_position, (xyz, rpy) in zip(
-            joint_positions, JOINT_ORIGINS):
-        current = multiply(current, transform_matrix(xyz, rpy))
+    for joint_position, origin_transform in zip(
+            joint_positions, JOINT_ORIGIN_TRANSFORMS):
+        current = multiply(current, origin_transform)
         current = multiply(current, rotation_z(joint_position))
 
-    end_xyz, end_rpy = END_EFFECTOR_ORIGIN
-    return multiply(current, transform_matrix(end_xyz, end_rpy))
+    return multiply(current, END_EFFECTOR_TRANSFORM)
 
 
 def end_effector_pose(joint_positions):
@@ -138,18 +150,14 @@ def capsule_segments(joint_positions):
     current = identity_matrix()
     frames = [translation(current)]
 
-    for joint_position, (xyz, rpy) in zip(
+    for joint_position, origin_transform in zip(
             joint_positions,
-            JOINT_ORIGINS):
-        current = multiply(current, transform_matrix(xyz, rpy))
+            JOINT_ORIGIN_TRANSFORMS):
+        current = multiply(current, origin_transform)
         current = multiply(current, rotation_z(joint_position))
         frames.append(translation(current))
 
-    end_xyz, end_rpy = END_EFFECTOR_ORIGIN
-    end_effector = multiply(
-        current,
-        transform_matrix(end_xyz, end_rpy),
-    )
+    end_effector = multiply(current, END_EFFECTOR_TRANSFORM)
 
     capsule_points = frames[:6] + [translation(end_effector)]
     return tuple(zip(capsule_points[:-1], capsule_points[1:]))

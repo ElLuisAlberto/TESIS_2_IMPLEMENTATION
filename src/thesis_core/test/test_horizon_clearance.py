@@ -2,6 +2,7 @@
 
 import pytest
 
+from thesis_core.clearance_geometry import minimum_configuration_clearance
 from thesis_core.horizon_clearance import evaluate_capsule_horizon
 
 
@@ -71,4 +72,40 @@ def test_minimum_sample_and_time_are_coherent():
     result = evaluate((1.15, 1.0, 0.0))
     assert result.minimum.sample_time == pytest.approx(
         TIMES[result.minimum.sample_index]
+    )
+
+
+def test_fast_horizon_matches_canonical_geometry_for_every_sample():
+    center = (0.5, 1.5, 0.0)
+    velocity = (0.0, -1.0, 0.0)
+    result = evaluate(center, velocity)
+    canonical = tuple(
+        minimum_configuration_clearance(
+            segment_sample,
+            NAMES,
+            RADII,
+            tuple(
+                center[axis] + velocity[axis] * sample_time
+                for axis in range(3)
+            ),
+            0.10,
+            sample_index,
+            sample_time,
+        )
+        for sample_index, (sample_time, segment_sample) in enumerate(
+            zip(TIMES, samples())
+        )
+    )
+    expected = min(canonical, key=lambda item: item.clearance)
+
+    assert result.sample_clearances == pytest.approx(
+        tuple(item.clearance for item in canonical), abs=1.0e-12
+    )
+    assert result.minimum.clearance == pytest.approx(
+        expected.clearance, abs=1.0e-12
+    )
+    assert result.minimum.segment_name == expected.segment_name
+    assert result.minimum.sample_index == expected.sample_index
+    assert result.minimum.closest_robot_point == pytest.approx(
+        expected.closest_robot_point, abs=1.0e-12
     )

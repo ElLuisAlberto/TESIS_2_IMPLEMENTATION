@@ -5,10 +5,11 @@ import math
 from typing import Optional, Sequence, Tuple
 
 from thesis_core.clearance_geometry import (
+    DEGENERATE_SEGMENT_EPSILON_SQ,
     Segment3,
     SegmentClearance,
     finite_point,
-    minimum_configuration_clearance,
+    positive_radius,
 )
 from thesis_core.jaco_kinematics import (
     CAPSULE_RADII,
@@ -56,7 +57,9 @@ def total_protective_margin(
         latency_uncertainty,
     ))
     if not all(math.isfinite(value) and value >= 0.0 for value in components):
-        raise ValueError('uncertainty components must be finite and non-negative')
+        raise ValueError(
+            'uncertainty components must be finite and non-negative'
+        )
     total = sum(components)
     if not math.isfinite(total) or total <= 0.0:
         raise ValueError('total protective margin must be finite and positive')
@@ -86,7 +89,7 @@ def interpolated_threshold_crossing_time(
     clearances: Sequence[float],
     threshold: float,
 ) -> Optional[float]:
-    """Return the first downward threshold crossing using linear interpolation."""
+    """Return the first downward crossing using linear interpolation."""
     values = tuple(float(value) for value in clearances)
     times = _sample_times(sample_times, len(values))
     limit = float(threshold)
@@ -109,6 +112,64 @@ def interpolated_threshold_crossing_time(
     return None
 
 
+def _minimum_prevalidated_clearance(
+    segments: Sequence[Segment3],
+    segment_names: Sequence[str],
+    capsule_radii: Sequence[float],
+    obstacle_center: Sequence[float],
+    obstacle_radius: float,
+    sample_index: int,
+    sample_time: float,
+) -> SegmentClearance:
+    """Evaluate one already validated sample without repeated allocations."""
+    best = None
+    for segment_index, ((start, end), name, radius) in enumerate(zip(
+        segments, segment_names, capsule_radii
+    )):
+        axis_x = end[0] - start[0]
+        axis_y = end[1] - start[1]
+        axis_z = end[2] - start[2]
+        rel_x = obstacle_center[0] - start[0]
+        rel_y = obstacle_center[1] - start[1]
+        rel_z = obstacle_center[2] - start[2]
+        denominator = (
+            axis_x * axis_x + axis_y * axis_y + axis_z * axis_z
+        )
+        if denominator <= DEGENERATE_SEGMENT_EPSILON_SQ:
+            closest = start
+        else:
+            factor = (
+                rel_x * axis_x + rel_y * axis_y + rel_z * axis_z
+            ) / denominator
+            factor = max(0.0, min(1.0, factor))
+            closest = (
+                start[0] + factor * axis_x,
+                start[1] + factor * axis_y,
+                start[2] + factor * axis_z,
+            )
+        clearance = (
+            math.dist(obstacle_center, closest) - radius - obstacle_radius
+        )
+        if best is None or clearance < best[0]:
+            best = (
+                clearance, name, segment_index, start, end, closest, radius
+            )
+    clearance, name, segment_index, start, end, closest, radius = best
+    return SegmentClearance(
+        clearance=clearance,
+        segment_name=name,
+        segment_index=segment_index,
+        sample_index=sample_index,
+        sample_time=sample_time,
+        capsule_start=start,
+        capsule_end=end,
+        closest_robot_point=closest,
+        obstacle_center=tuple(obstacle_center),
+        capsule_radius=radius,
+        obstacle_radius=obstacle_radius,
+    )
+
+
 def evaluate_capsule_horizon(
     capsule_samples: Sequence[Sequence[Segment3]],
     sample_times: Sequence[float],
@@ -120,12 +181,31 @@ def evaluate_capsule_horizon(
     protective_margin: float = DEFAULT_PROTECTIVE_MARGIN_M,
 ) -> HorizonClearance:
     """Evaluate every capsule/sample pair and both safety thresholds."""
-    samples = tuple(tuple(sample) for sample in capsule_samples)
+    raw_samples = tuple(tuple(sample) for sample in capsule_samples)
+    samples = tuple(
+        tuple((
+            finite_point(start, 'capsule start'),
+            finite_point(end, 'capsule end'),
+        ) for start, end in sample)
+        for sample in raw_samples
+    )
     times = _sample_times(sample_times, len(samples))
     center = finite_point(obstacle_center, 'obstacle center')
     velocity = finite_point(obstacle_velocity, 'obstacle velocity')
     names = tuple(segment_names)
-    radii = tuple(capsule_radii)
+    radii = tuple(
+        positive_radius(value, 'capsule radius')
+        for value in capsule_radii
+    )
+    obstacle = positive_radius(obstacle_radius, 'obstacle radius')
+    if (
+        not names
+        or len(names) != len(radii)
+        or any(len(sample) != len(names) for sample in samples)
+    ):
+        raise ValueError(
+            'segments, names and radii must have equal size'
+        )
     margin = float(protective_margin)
     if not math.isfinite(margin) or margin < 0.0:
         raise ValueError('protective margin must be finite and non-negative')
@@ -137,12 +217,14 @@ def evaluate_capsule_horizon(
             center[axis] + velocity[axis] * sample_time
             for axis in range(3)
         )
-        results.append(minimum_configuration_clearance(
+        if not all(math.isfinite(value) for value in predicted_center):
+            raise ValueError('predicted obstacle center must be finite')
+        results.append(_minimum_prevalidated_clearance(
             segments,
             names,
             radii,
             predicted_center,
-            obstacle_radius,
+            obstacle,
             sample_index,
             sample_time,
         ))

@@ -7,6 +7,7 @@ from typing import Optional, Sequence, Tuple
 import rclpy
 from control_msgs.msg import JointTrajectoryControllerState
 from geometry_msgs.msg import Point
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
@@ -200,7 +201,18 @@ class HorizonPreview(Node):
             self.receive_controller_state,
             10,
         )
-        self.timer = self.create_timer(1 / self.rate, self.tick)
+        # The preview is a user-facing visualization.  Scheduling it from the
+        # simulated ROS clock makes its apparent refresh rate fall with
+        # Gazebo's real-time factor (10 Hz became roughly 6--7 wall-clock Hz
+        # under load).  Keep message stamps on ROS time, but drive rendering
+        # from a monotonic clock so RViz remains fluid without changing any
+        # safety or trajectory semantics.
+        self.preview_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.timer = self.create_timer(
+            1 / self.rate,
+            self.tick,
+            clock=self.preview_clock,
+        )
         self.previous_tick = None
         self.get_logger().info(
             f'Horizon preview started: source={self.source}, '
@@ -547,7 +559,9 @@ class HorizonPreview(Node):
             marker.color.b = blue
             marker.color.a = min(0.48, predicted_alpha + 0.20)
             marker.lifetime.sec = 1
-            marker.points = [Point(x=x, y=y, z=z) for x, y, z in capsule.points]
+            marker.points = [
+                Point(x=x, y=y, z=z) for x, y, z in capsule.points
+            ]
             output.markers.append(marker)
 
         for index, (radius, points) in enumerate(zip(
@@ -605,8 +619,16 @@ class HorizonPreview(Node):
             skeleton.lifetime.sec = 1
             for capsule in volume.samples[index]:
                 skeleton.points.extend([
-                    Point(x=capsule.start[0], y=capsule.start[1], z=capsule.start[2]),
-                    Point(x=capsule.end[0], y=capsule.end[1], z=capsule.end[2]),
+                    Point(
+                        x=capsule.start[0],
+                        y=capsule.start[1],
+                        z=capsule.start[2],
+                    ),
+                    Point(
+                        x=capsule.end[0],
+                        y=capsule.end[1],
+                        z=capsule.end[2],
+                    ),
                 ])
             output.markers.append(skeleton)
 
