@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -27,6 +28,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "std_srvs/srv/set_bool.hpp"
 #include "thesis_hardware_bridge/bridge_logic.hpp"
 #include "thesis_interfaces/msg/execution_control.hpp"
@@ -96,6 +98,15 @@ double duration_seconds(const builtin_interfaces::msg::Duration & duration)
 bool zero_stamp(const builtin_interfaces::msg::Time & stamp)
 {
   return stamp.sec == 0 && stamp.nanosec == 0;
+}
+
+bool geometric_capsule_segment(const std::string & name)
+{
+  static const std::array<std::string, 6> segments = {
+    "base_to_shoulder", "shoulder_to_upper_arm",
+    "upper_arm_to_forearm", "forearm_to_wrist_1",
+    "wrist_1_to_wrist_2", "wrist_2_to_tool"};
+  return std::find(segments.begin(), segments.end(), name) != segments.end();
 }
 
 std::string admission_detail(thesis_hardware_bridge::CommandAdmission admission)
@@ -305,6 +316,9 @@ private:
     armed_publisher_ =
       create_publisher<std_msgs::msg::Bool>(
       "/thesis/hardware/armed", latched_qos);
+    arm_epoch_publisher_ =
+      create_publisher<std_msgs::msg::String>(
+      "/thesis/hardware/arm_epoch", latched_qos);
     connected_publisher_ =
       create_publisher<std_msgs::msg::Bool>(
       "/thesis/hardware/connected", latched_qos);
@@ -654,7 +668,6 @@ private:
         -thesis_hardware_bridge::kVelocityLimits[index],
         thesis_hardware_bridge::kVelocityLimits[index]);
     }
-    last_sent_velocity_ = bounded;
     if (mock_hardware_) {
       return true;
     }
@@ -728,8 +741,14 @@ private:
     jog_timing_pending_ = false;
     jog_velocity_.fill(0.0);
     last_sent_velocity_.fill(0.0);
+    hold_target_ = positions_;
     if (disarm) {
       armed_ = false;
+      supervisor_stop_active_ =
+        thesis_hardware_bridge::next_supervisor_stop_active(
+        supervisor_stop_active_, false, false, true);
+      arm_epoch_.clear();
+      publish_arm_epoch();
       stop_control_api();
       publish_armed_state();
     }
@@ -812,6 +831,7 @@ private:
     inputs.supervisor_available = safety_supervisor_available();
     inputs.safety_stop_active = proximity_stop_active_ ||
       supervisor_stop_active_;
+    inputs.protective_recovery_active = protective_recovery_active_;
     return inputs;
   }
 
@@ -834,6 +854,10 @@ private:
   {
     const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     system_ready_ = message->data;
+    protective_recovery_active_ =
+      thesis_hardware_bridge::next_protective_recovery_active(
+      protective_recovery_active_, false, proximity_valid_, system_ready_,
+      supervisor_stop_active_);
     has_system_ready_ = true;
     last_system_ready_at_ = std::chrono::steady_clock::now();
   }
@@ -852,6 +876,12 @@ private:
       message_age_seconds(message->stamp),
       safety_input_timeout_sec_);
     proximity_stop_active_ = proximity_valid_ && state == "STOP";
+    const bool geometric_stop = proximity_stop_active_ &&
+      geometric_capsule_segment(message->limiting_segment);
+    protective_recovery_active_ =
+      thesis_hardware_bridge::next_protective_recovery_active(
+      protective_recovery_active_, geometric_stop, proximity_valid_,
+      system_ready_, supervisor_stop_active_);
     has_proximity_ = true;
     last_proximity_at_ = std::chrono::steady_clock::now();
   }
@@ -960,7 +990,22 @@ private:
     const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     publish_timing(
       message->command_id, message->stamp, "ADAPTER_RECEIVE");
+    // Remember the stream even while disarmed.  The arm transition blocks
+    // this command id so a GUI timer cannot revive a pre-arm JOG stream.
+    last_observed_jog_command_id_ = message->command_id;
     if (!output_permitted_ || !armed_ || active_goal_) {
+      return;
+    }
+    if (!thesis_hardware_bridge::jog_command_matches_arm_epoch(
+        message->command_id, arm_epoch_))
+    {
+      return;
+    }
+    const rclcpp::Time source_stamp(message->stamp);
+    if ((has_arm_epoch_ && source_stamp <= armed_at_) ||
+      (!blocked_jog_command_id_.empty() &&
+      message->command_id == blocked_jog_command_id_))
+    {
       return;
     }
     const double source_age = message_age_seconds(message->stamp);
@@ -991,6 +1036,20 @@ private:
         false, "CANCELED");
       return;
     }
+    if (std::all_of(
+        jog_velocity_.begin(), jog_velocity_.end(),
+        [](double velocity) {return std::abs(velocity) <= 1.0e-9;}))
+    {
+      stop_motion("zero supervised jog intention", false, "CANCELED");
+      return;
+    }
+    supervisor_stop_active_ =
+      thesis_hardware_bridge::next_supervisor_stop_active(
+      supervisor_stop_active_, false, true, false);
+    protective_recovery_active_ =
+      thesis_hardware_bridge::next_protective_recovery_active(
+      protective_recovery_active_, false, proximity_valid_, system_ready_,
+      supervisor_stop_active_);
     jog_active_ = true;
     jog_command_id_ = message->command_id;
     jog_intent_stamp_ = message->stamp;
@@ -1006,7 +1065,9 @@ private:
   {
     const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
     if (message->state == "STOP") {
-      supervisor_stop_active_ = true;
+      supervisor_stop_active_ =
+        thesis_hardware_bridge::next_supervisor_stop_active(
+        supervisor_stop_active_, true, false, false);
       publish_timing(
         message->command_id,
         active_goal_ ? active_goal_->intent_stamp : jog_intent_stamp_,
@@ -1150,6 +1211,21 @@ private:
       publish_diagnostics();
       return;
     }
+    // Establish a new motion epoch before exposing the armed latch.  This
+    // cancels any prior JOG, holds the measured posture, and makes queued or
+    // continuously retransmitted pre-arm messages ineligible for execution.
+    active_goal_.reset();
+    jog_active_ = false;
+    point_timing_pending_ = false;
+    jog_timing_pending_ = false;
+    jog_velocity_.fill(0.0);
+    last_sent_velocity_.fill(0.0);
+    hold_target_ = positions_;
+    armed_at_ = get_clock()->now();
+    has_arm_epoch_ = true;
+    blocked_jog_command_id_ = last_observed_jog_command_id_;
+    arm_epoch_ = "arm-" + std::to_string(++arm_epoch_sequence_);
+    publish_arm_epoch();
     armed_ = true;
     publish_armed_state();
     response->success = true;
@@ -1206,78 +1282,97 @@ private:
 
   void control_tick()
   {
-    const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
-    const auto now = std::chrono::steady_clock::now();
-    ++control_ticks_since_diagnostics_;
-    update_mock_state(now);
-    if (!armed_) {
-      return;
-    }
-    if (!state_is_fresh(now)) {
-      fault_ = true;
-      stop_motion("JACO joint state watchdog expired", true, "FAILED");
-      return;
-    }
-
     JointVector command{};
-    if (jog_active_) {
-      const double age =
-        std::chrono::duration<double>(now - last_jog_at_).count();
-      if (age > jog_timeout_sec_) {
-        publish_timing(
-          jog_command_id_, jog_intent_stamp_,
-          "HOLD_PUBLISH", "JOG_WATCHDOG_EXPIRED");
-        stop_motion("JOG watchdog expired", false, "CANCELED");
+    bool send_command = false;
+    {
+      // State is deliberately released before the potentially blocking Kinova
+      // output call below. Feedback owns this mutex while it updates and
+      // publishes the measured state, so a slow SendBasicTrajectory cannot
+      // starve /joint_states simply by holding the control-state lock.
+      const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+      const auto now = std::chrono::steady_clock::now();
+      ++control_ticks_since_diagnostics_;
+      update_mock_state(now);
+      if (!armed_) {
         return;
       }
-      command = jog_velocity_;
-    } else if (active_goal_) {
-      const double control_age = std::chrono::duration<double>(
-        now - active_goal_->last_control_at).count();
-      if (control_age > execution_control_timeout_sec_) {
-        stop_motion(
-          "execution-control watchdog expired", false, "CANCELED");
-        return;
-      }
-      if (!active_goal_->control_received) {
-        command.fill(0.0);
-      } else if (thesis_hardware_bridge::target_reached(
-          positions_, active_goal_->target, goal_tolerance_rad_))
-      {
-        const ActiveGoal completed = *active_goal_;
-        send_zero_burst();
-        active_goal_.reset();
-        publish_execution(
-          completed.command_id, "SUCCEEDED",
-          "physical target reached within tolerance",
-          completed.start, completed.target, completed.duration_sec,
-          &completed.start_stamp);
-        return;
-      } else {
-        const double elapsed = std::chrono::duration<double>(
-          now - active_goal_->started_at).count();
-        const double timeout = std::max(
-          active_goal_->duration_sec * goal_timeout_factor_,
-          active_goal_->duration_sec + goal_timeout_margin_sec_);
-        if (elapsed > timeout) {
-          stop_motion("physical goal timeout", false, "FAILED");
+      if (!state_is_fresh(now)) {
+        fault_ = true;
+        last_error_ = "JACO joint state watchdog expired";
+        stop_motion(last_error_, true, "FAILED");
           return;
         }
-        command = thesis_hardware_bridge::track_target_velocity(
-          positions_,
-          active_goal_->target,
-          active_goal_->nominal_velocity,
-          active_goal_->speed_scale,
-          1.0 / state_publish_rate_hz_,
-          position_tracking_gain_,
-          goal_tolerance_rad_);
+      if (!thesis_hardware_bridge::should_transmit_motion_command(
+          armed_, jog_active_, active_goal_.has_value()))
+      {
+        return;
       }
+      if (jog_active_) {
+        const double age =
+          std::chrono::duration<double>(now - last_jog_at_).count();
+        if (age > jog_timeout_sec_) {
+          publish_timing(
+            jog_command_id_, jog_intent_stamp_,
+            "HOLD_PUBLISH", "JOG_WATCHDOG_EXPIRED");
+          stop_motion("JOG watchdog expired", false, "CANCELED");
+          return;
+        }
+        command = jog_velocity_;
+      } else if (active_goal_) {
+        const double control_age = std::chrono::duration<double>(
+          now - active_goal_->last_control_at).count();
+        if (control_age > execution_control_timeout_sec_) {
+          stop_motion(
+            "execution-control watchdog expired", false, "CANCELED");
+          return;
+        }
+        if (!active_goal_->control_received) {
+          command.fill(0.0);
+        } else if (thesis_hardware_bridge::target_reached(
+            positions_, active_goal_->target, goal_tolerance_rad_))
+        {
+          const ActiveGoal completed = *active_goal_;
+          send_zero_burst();
+          active_goal_.reset();
+          publish_execution(
+            completed.command_id, "SUCCEEDED",
+            "physical target reached within tolerance",
+            completed.start, completed.target, completed.duration_sec,
+            &completed.start_stamp);
+          return;
+        } else {
+          const double elapsed = std::chrono::duration<double>(
+            now - active_goal_->started_at).count();
+          const double timeout = std::max(
+            active_goal_->duration_sec * goal_timeout_factor_,
+            active_goal_->duration_sec + goal_timeout_margin_sec_);
+          if (elapsed > timeout) {
+            stop_motion("physical goal timeout", false, "FAILED");
+            return;
+          }
+          command = thesis_hardware_bridge::track_target_velocity(
+            positions_,
+            active_goal_->target,
+            active_goal_->nominal_velocity,
+            active_goal_->speed_scale,
+            1.0 / state_publish_rate_hz_,
+            position_tracking_gain_,
+            goal_tolerance_rad_);
+        }
+      }
+      send_command = true;
     }
 
+    if (!send_command) {
+      return;
+    }
     if (!send_velocity(command)) {
+      const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
       handle_output_failure("physical command transmission failed");
       return;
     }
+    const std::lock_guard<std::recursive_mutex> state_lock(state_mutex_);
+    last_sent_velocity_ = command;
     ++output_commands_since_diagnostics_;
     if (active_goal_ && active_goal_->control_received &&
       point_timing_pending_)
@@ -1376,6 +1471,13 @@ private:
     armed_publisher_->publish(message);
   }
 
+  void publish_arm_epoch()
+  {
+    std_msgs::msg::String message;
+    message.data = arm_epoch_;
+    arm_epoch_publisher_->publish(message);
+  }
+
   void publish_connection_state()
   {
     std_msgs::msg::Bool message;
@@ -1446,6 +1548,9 @@ private:
       key_value("proximity_valid", bool_text(proximity_valid_)),
       key_value("safety_stop_active", bool_text(
         proximity_stop_active_ || supervisor_stop_active_)),
+      key_value(
+        "protective_recovery_active",
+        bool_text(protective_recovery_active_)),
       key_value("fault", bool_text(fault_)),
       key_value(
         "read_failures", std::to_string(consecutive_read_failures_)),
@@ -1503,6 +1608,7 @@ private:
   bool has_proximity_{false};
   bool proximity_stop_active_{false};
   bool supervisor_stop_active_{false};
+  bool protective_recovery_active_{false};
   bool shutdown_complete_{false};
   bool jog_active_{false};
   bool point_timing_pending_{false};
@@ -1545,12 +1651,16 @@ private:
   std::string usb_lock_file_;
   std::string last_error_;
   std::string jog_command_id_;
+  std::string last_observed_jog_command_id_;
+  std::string blocked_jog_command_id_;
+  std::string arm_epoch_;
   thesis_hardware_bridge::RecentCommandIds recent_point_command_ids_;
   builtin_interfaces::msg::Time jog_intent_stamp_;
   JointVector positions_{};
   JointVector velocities_{};
   JointVector jog_velocity_{};
   JointVector last_sent_velocity_{};
+  JointVector hold_target_{};
   std::array<double, 3> fingers_{};
   SteadyTime last_state_at_{};
   SteadyTime last_system_ready_at_{};
@@ -1558,6 +1668,9 @@ private:
   SteadyTime last_jog_at_{};
   SteadyTime last_mock_update_{};
   SteadyTime last_rate_sample_at_{std::chrono::steady_clock::now()};
+  rclcpp::Time armed_at_{0, 0, RCL_ROS_TIME};
+  bool has_arm_epoch_{false};
+  uint64_t arm_epoch_sequence_{0};
   std::optional<ActiveGoal> active_goal_;
   std::recursive_mutex state_mutex_;
   std::recursive_mutex api_mutex_;
@@ -1574,6 +1687,7 @@ private:
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr
     diagnostic_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr armed_publisher_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr arm_epoch_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr connected_publisher_;
   rclcpp::Subscription<thesis_interfaces::msg::JointCommand>::SharedPtr
     command_subscription_;

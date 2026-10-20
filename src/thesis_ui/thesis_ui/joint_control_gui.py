@@ -31,7 +31,9 @@ from PyQt5.QtWidgets import QWidget
 import rclpy
 from geometry_msgs.msg import TwistStamped
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy,
+)
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
@@ -201,6 +203,7 @@ class JointGuiNode(Node):
         self.end_effector_pose = None
         self.hardware_connected = False
         self.hardware_armed = False
+        self.hardware_arm_epoch = ''
         self.hardware_connected_received_at = None
         self.hardware_armed_received_at = None
         self.arm_request_future = None
@@ -217,6 +220,18 @@ class JointGuiNode(Node):
             '/thesis/hardware/armed',
             self.hardware_armed_callback,
             10,
+        )
+        latched_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.hardware_arm_epoch_subscription = self.create_subscription(
+            String,
+            '/thesis/hardware/arm_epoch',
+            self.hardware_arm_epoch_callback,
+            latched_qos,
         )
         self.hardware_arm_client = self.create_client(
             SetBool,
@@ -329,6 +344,10 @@ class JointGuiNode(Node):
         """Store the physical output latch."""
         self.hardware_armed = bool(msg.data)
         self.hardware_armed_received_at = time.monotonic()
+
+    def hardware_arm_epoch_callback(self, msg):
+        """Store the adapter-issued token for the current physical arm."""
+        self.hardware_arm_epoch = str(msg.data)
 
     def request_hardware_arm(self, value):
         """Start one non-blocking physical arm or disarm request."""
@@ -705,6 +724,8 @@ class JointControlWindow(QMainWindow):
         self.jog_velocity_deg_s = [0.0] * len(JOINT_NAMES)
         self.jog_last_input_time = [None] * len(JOINT_NAMES)
         self.jog_last_motion_time = [None] * len(JOINT_NAMES)
+        self.jog_intent_streaming = False
+        self.jog_command_id = None
         self.manual_control_tabs = None
         self.cartesian_jog_mode_button = None
         self.cartesian_jog_sliders = []
@@ -1543,6 +1564,29 @@ class JointControlWindow(QMainWindow):
         )
         return 'READY' if status_reader is None else status_reader()
 
+    def protective_recovery_available(self):
+        """Allow joint JOG only for a fresh geometric STOP withdrawal."""
+        if not self.is_hardware_mode:
+            return False
+        proximity = getattr(self.ros_node, 'last_proximity', None)
+        received_at = getattr(
+            self.ros_node, 'proximity_received_at', None
+        )
+        if (
+            proximity is None
+            or received_at is None
+            or time.monotonic() - received_at > 1.0
+        ):
+            return False
+        return (
+            proximity.state == 'STOP'
+            and proximity.reference_frame == 'world'
+            and proximity.limiting_segment != 'TF_UNAVAILABLE'
+            and math.isfinite(float(proximity.minimum_clearance))
+            and math.isfinite(float(proximity.obstacle_radius))
+            and float(proximity.obstacle_radius) >= 0.0
+        )
+
     def spin_ros(self):
         if not rclpy.ok():
             self.close()
@@ -1564,12 +1608,22 @@ class JointControlWindow(QMainWindow):
         )
         manual_active = jog_active or cartesian_jog_active
         system_ready = self.system_is_ready()
+        joint_jog_ready = (
+            system_ready or self.protective_recovery_available()
+        )
+        if self.is_hardware_mode and jog_active and (
+            not self.ros_node.hardware_armed
+            or not self.ros_node.hardware_arm_epoch
+        ):
+            self.cancel_manual_jog_for_hardware_transition()
+            jog_active = False
+            manual_active = cartesian_jog_active
         self.refresh_cartesian_trajectory_status()
         trajectory_active = (
             self.cartesian_trajectory_pending_id is not None
             or self.ros_node.cartesian_trajectory_is_active()
         )
-        if jog_active and not system_ready:
+        if jog_active and not joint_jog_ready:
             self.jog_mode_button.setChecked(False)
             jog_active = False
             manual_active = cartesian_jog_active
@@ -1948,6 +2002,9 @@ class JointControlWindow(QMainWindow):
         )
         if answer != QMessageBox.Yes:
             return
+        # A physical arm transition starts in HOLD.  Cancel local JOG before
+        # the service request, while output is still disarmed.
+        self.cancel_manual_jog_for_hardware_transition()
         accepted, detail = self.ros_node.request_hardware_arm(True)
         self.status_label.setText(detail)
         self.status_label.setStyleSheet(
@@ -1958,6 +2015,7 @@ class JointControlWindow(QMainWindow):
         """Request an immediate zero-velocity hold and runtime disarm."""
         if not self.is_hardware_mode:
             return
+        self.cancel_manual_jog_for_hardware_transition()
         accepted, detail = self.ros_node.request_hardware_arm(False)
         self.status_label.setText(detail)
         self.status_label.setStyleSheet(
@@ -2461,6 +2519,33 @@ class JointControlWindow(QMainWindow):
             now, self.jog_speed_inputs[index].value(),
         )
 
+    def begin_deliberate_jog_input(self):
+        """Mark one wheel event as a fresh, user-originated JOG stream."""
+        if self.is_hardware_mode:
+            if (
+                not self.ros_node.hardware_armed
+                or not self.ros_node.hardware_arm_epoch
+            ):
+                return
+            self.jog_command_id = (
+                f'jog:{self.ros_node.hardware_arm_epoch}:'
+                f'{time.monotonic_ns()}'
+            )
+            return
+        self.jog_command_id = f'jog-{time.monotonic_ns()}'
+
+    def cancel_manual_jog_for_hardware_transition(self):
+        """Clear GUI JOG state before either physical arm transition."""
+        if not self.is_hardware_mode:
+            return
+        for intention in self.wheel_intentions:
+            intention.clear()
+        self.jog_command_id = None
+        if self.jog_mode_button.isChecked():
+            self.jog_mode_button.setChecked(False)
+        else:
+            self.jog_intent_streaming = False
+
     def eventFilter(self, watched, event):
         button = getattr(self, 'jog_mode_button', None)
         if button is not None and button.isChecked() and watched in self.target_sliders:
@@ -2471,6 +2556,7 @@ class JointControlWindow(QMainWindow):
                     self.wheel_intentions[index].add(
                         time.monotonic(), event.angleDelta().y() / 120.0,
                     )
+                    self.begin_deliberate_jog_input()
                 event.accept()
                 return True
             if event.type() in (
@@ -2705,7 +2791,14 @@ class JointControlWindow(QMainWindow):
             intention.clear()
         if checked and (
             not self.ros_node.state_is_ready()
-            or not self.system_is_ready()
+            or (self.is_hardware_mode and (
+                not self.ros_node.hardware_armed
+                or not self.ros_node.hardware_arm_epoch
+            ))
+            or not (
+                self.system_is_ready()
+                or self.protective_recovery_available()
+            )
             or self.ros_node.execution_is_active()
             or self.ros_node.cartesian_trajectory_is_active()
             or self.cartesian_trajectory_pending_id is not None
@@ -2718,9 +2811,8 @@ class JointControlWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 'Control manual no disponible',
-                'Se requiere que el sistema esté READY, exista '
-                '/joint_states reciente y no haya una trayectoria por '
-                'objetivo en ejecución.',
+                'Se requiere READY o un STOP geométrico válido para retiro, '
+                '/joint_states reciente y ninguna trayectoria activa.',
             )
             return
 
@@ -2732,13 +2824,19 @@ class JointControlWindow(QMainWindow):
                 self.cartesian_jog_mode_button.setChecked(False)
             self.copy_current_pose()
             self.reset_direct_jog_state()
+            self.jog_command_id = None
+            self.jog_intent_streaming = False
             self.set_manual_command_lock(True)
             self.jog_mode_button.setText(
                 'DESACTIVAR CONTROL ARTICULAR CONTINUO'
             )
             self.status_label.setText(
-                'CONTROL POR RUEDA ACTIVO: gire la rueda sobre una barra. '
-                'La barra muestra el ángulo medido; no deja destinos pendientes.'
+                'RETIRO PROTECTIVO POR RUEDA ACTIVO: solo se ejecutarán '
+                'direcciones que aumenten la separación.'
+                if self.protective_recovery_available()
+                else 'CONTROL POR RUEDA ACTIVO: gire la rueda sobre una '
+                'barra. La barra muestra el ángulo medido; no deja destinos '
+                'pendientes.'
             )
             self.status_label.setStyleSheet('color: #166534;')
         else:
@@ -2746,6 +2844,7 @@ class JointControlWindow(QMainWindow):
                 self.jog_velocity_deg_s[index] = 0.0
                 self.jog_last_motion_time[index] = None
             self.publish_jog_intent(force_hold=True)
+            self.jog_command_id = None
             if not self.manual_control_active():
                 self.set_manual_command_lock(False)
             self.jog_mode_button.setText(
@@ -2847,6 +2946,11 @@ class JointControlWindow(QMainWindow):
     def publish_jog_intent(self, force_hold=False):
         if not force_hold and not self.jog_mode_button.isChecked():
             return
+        if self.is_hardware_mode and (
+            not self.ros_node.hardware_armed
+            or not self.ros_node.hardware_arm_epoch
+        ):
+            return
         if not self.ros_node.state_is_ready():
             return
         if self.ros_node.jog_intent_publisher.get_subscription_count() == 0:
@@ -2854,10 +2958,11 @@ class JointControlWindow(QMainWindow):
 
         horizon = 1.0
         current = [
-            self.ros_node.current_positions[name]
+            float(self.ros_node.current_positions[name])
             for name in JOINT_NAMES
         ]
         horizon_target = []
+        has_motion = False
         for index, current_value in enumerate(current):
             if force_hold:
                 horizon_target.append(current_value)
@@ -2868,6 +2973,7 @@ class JointControlWindow(QMainWindow):
                 max(velocity_deg_s, -maximum_speed),
                 maximum_speed,
             )
+            has_motion = has_motion or abs(velocity_deg_s) > 1.0e-9
             lower, upper = map(math.radians, JOINT_LIMITS_DEG[index])
             delta = math.radians(velocity_deg_s) * horizon
             # Do not command a jump back into range if the measured joint is outside.
@@ -2877,14 +2983,23 @@ class JointControlWindow(QMainWindow):
                 delta = max(delta, min(0.0, lower - current_value))
             horizon_target.append(current_value + delta)
 
+        if not force_hold and not has_motion:
+            if not self.jog_intent_streaming:
+                return
+            force_hold = True
+            horizon_target = list(current)
+        if not force_hold and self.jog_command_id is None:
+            return
+
         msg = JointCommand()
         msg.stamp = self.ros_node.get_clock().now().to_msg()
-        msg.command_id = 'jog_continuous'
+        msg.command_id = self.jog_command_id or 'jog_hold'
         msg.joint_names = list(JOINT_NAMES)
         msg.positions = horizon_target
         msg.duration.sec = 1
         msg.duration.nanosec = 0
         self.ros_node.jog_intent_publisher.publish(msg)
+        self.jog_intent_streaming = not force_hold
 
     def publish_preview_intent(self):
         if self.manual_control_active():

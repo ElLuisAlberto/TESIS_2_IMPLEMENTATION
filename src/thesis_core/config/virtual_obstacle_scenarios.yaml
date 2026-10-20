@@ -1,0 +1,23 @@
+obstacle_demo_source:
+  ros__parameters:
+    # One raw sphere; the bridge adds uncertainty to the effective radius.
+    frame_id: world
+    radius: 0.10
+    uncertainty: 0.02
+    rate_hz: 10.0
+    scenario: PARK
+    insert_stop_active: false
+
+    # Reference state measured from the physical JACO2 on 2026-10-19:
+    # [-1.551814113493139, 2.7496557685950496, 4.1168651479621845,
+    #  5.844626591509698, 5.973422388148109, 2.0808752988032992]
+    # PARK is the first +X 0.01 m grid pose with at least 0.40 m current
+    # clearance and at least 0.375 m projected clearance for J1 +/-3 deg.
+    # STOP poses are derived on wrist_2_to_tool with an
+    # effective sphere radius of 0.12 m and a positive surface clearance
+    # target equal to 30% of the configured 0.05 m STOP distance.
+    park_pose: [0.59, 0.0, 0.65]
+    block_start_pose:
+      [-0.2541344553253112, 0.47314710635248247, 0.7877059751122166]
+    insert_stop_pose:
+      [0.19163771787018302, 0.5676933085630497, 0.8102059751122166]

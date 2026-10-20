@@ -32,7 +32,39 @@ struct ArmInterlockInputs
   bool proximity_fresh{false};
   bool supervisor_available{false};
   bool safety_stop_active{true};
+  bool protective_recovery_active{false};
 };
+
+inline bool next_supervisor_stop_active(
+  bool current, bool stop_received, bool admitted_motion, bool disarmed)
+{
+  if (stop_received) {
+    return true;
+  }
+  if (admitted_motion || disarmed) {
+    return false;
+  }
+  return current;
+}
+
+inline bool next_protective_recovery_active(
+  bool current, bool geometric_stop, bool proximity_valid,
+  bool system_ready, bool supervisor_stop_active)
+{
+  if (geometric_stop) {
+    return true;
+  }
+  if (!proximity_valid) {
+    return false;
+  }
+  // A STOP decision and the following admitted recovery JOG travel through
+  // different topics.  Keep the recovery window across the STOP -> READY
+  // transition until that fresh motion has actually reached the adapter.
+  if (system_ready && !supervisor_stop_active) {
+    return false;
+  }
+  return current;
+}
 
 inline std::vector<std::string> arm_interlock_reasons(
   const ArmInterlockInputs & inputs)
@@ -47,7 +79,7 @@ inline std::vector<std::string> arm_interlock_reasons(
   if (!inputs.joint_state_fresh) {
     reasons.emplace_back("joint state is unavailable or stale");
   }
-  if (!inputs.system_ready) {
+  if (!inputs.system_ready && !inputs.protective_recovery_active) {
     reasons.emplace_back("system_ready is false");
   }
   if (!inputs.system_ready_fresh) {
@@ -62,7 +94,7 @@ inline std::vector<std::string> arm_interlock_reasons(
   if (!inputs.supervisor_available) {
     reasons.emplace_back("safety supervisor is unavailable");
   }
-  if (inputs.safety_stop_active) {
+  if (inputs.safety_stop_active && !inputs.protective_recovery_active) {
     reasons.emplace_back("STOP or HOLD is active");
   }
   return reasons;
@@ -72,6 +104,24 @@ inline bool should_disarm_for_interlock_loss(
   bool armed, const ArmInterlockInputs & inputs)
 {
   return armed && !arm_interlock_reasons(inputs).empty();
+}
+
+// An armed adapter in HOLD must not stream zero velocity packets.  A bounded
+// zero burst is issued when entering HOLD; further physical output is only
+// justified by an admitted motion mode.
+inline bool should_transmit_motion_command(
+  bool armed, bool jog_active, bool active_goal)
+{
+  return armed && (jog_active || active_goal);
+}
+
+// A JOG is valid only for the arm epoch that explicitly admitted it. Queued
+// messages can arrive after the arm service while having been made before it.
+inline bool jog_command_matches_arm_epoch(
+  const std::string & command_id, const std::string & arm_epoch)
+{
+  const std::string prefix = "jog:" + arm_epoch + ":";
+  return !arm_epoch.empty() && command_id.rfind(prefix, 0) == 0;
 }
 
 inline bool message_age_is_fresh(

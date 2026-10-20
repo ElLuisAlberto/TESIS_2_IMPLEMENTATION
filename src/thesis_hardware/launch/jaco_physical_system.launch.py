@@ -33,6 +33,9 @@ def generate_launch_description():
     default_capsule_config = os.path.join(
         core_share, 'config', 'jaco_capsules.yaml'
     )
+    default_obstacle_scenario_config = os.path.join(
+        core_share, 'config', 'virtual_obstacle_scenarios.yaml'
+    )
     xacro_file = os.path.join(
         description_share, 'urdf', 'j2n6s300_standalone.xacro'
     )
@@ -45,6 +48,9 @@ def generate_launch_description():
     expected_serial = LaunchConfiguration('expected_serial_number')
     hardware_config = LaunchConfiguration('hardware_config_file')
     capsule_config = LaunchConfiguration('capsule_config_file')
+    obstacle_scenario_config = LaunchConfiguration(
+        'obstacle_scenario_config_file'
+    )
     obstacle_input_topic = LaunchConfiguration('obstacle_input_topic')
     use_demo_obstacle = LaunchConfiguration('use_demo_obstacle')
     start_gui = LaunchConfiguration('start_gui')
@@ -94,6 +100,11 @@ def generate_launch_description():
             description='Physical-arm capsule geometry parameter file.',
         ),
         DeclareLaunchArgument(
+            'obstacle_scenario_config_file',
+            default_value=default_obstacle_scenario_config,
+            description='Named single-sphere scenario parameter file.',
+        ),
+        DeclareLaunchArgument(
             'obstacle_input_topic',
             default_value='/thesis/obstacle_input',
             description='Obstacle input before transformation to world.',
@@ -120,6 +131,18 @@ def generate_launch_description():
             'demo_obstacle_z',
             default_value='0.65',
             description='Synthetic test obstacle Z coordinate in metres.',
+        ),
+        DeclareLaunchArgument(
+            'demo_obstacle_scenario',
+            default_value='PARK',
+            description='FIXED, PARK, BLOCK_START or INSERT_STOP.',
+        ),
+        DeclareLaunchArgument(
+            'demo_insert_stop_active',
+            default_value='false',
+            description=(
+                'Move INSERT_STOP from PARK to its calibrated STOP pose.'
+            ),
         ),
         DeclareLaunchArgument(
             'start_gui',
@@ -178,7 +201,16 @@ def generate_launch_description():
             executable='robot_state_publisher',
             name='robot_state_publisher',
             output='screen',
-            parameters=[robot_description, {'use_sim_time': False}],
+            parameters=[robot_description, {
+                'use_sim_time': False,
+                # The hardware adapter publishes measured joints at 20 Hz.
+                # A 20 Hz cap here can skip every other sample due to normal
+                # scheduling jitter, leaving exact obstacle-stamp TF lookups
+                # without a bracketing transform.  Keep the cap above the
+                # measured-state source rate; this changes TF distribution
+                # only, never safety thresholds or fail-closed behavior.
+                'publish_frequency': 40.0,
+            }],
         ),
         Node(
             package='thesis_hardware_bridge',
@@ -226,26 +258,33 @@ def generate_launch_description():
             name='obstacle_demo_source',
             output='screen',
             condition=IfCondition(use_demo_obstacle),
-            parameters=[{
-                'use_sim_time': False,
-                'topic': obstacle_input_topic,
-                'frame_id': 'world',
-                'x': ParameterValue(
-                    LaunchConfiguration('demo_obstacle_x'),
-                    value_type=float,
-                ),
-                'y': ParameterValue(
-                    LaunchConfiguration('demo_obstacle_y'),
-                    value_type=float,
-                ),
-                'z': ParameterValue(
-                    LaunchConfiguration('demo_obstacle_z'),
-                    value_type=float,
-                ),
-                'radius': 0.10,
-                'uncertainty': 0.02,
-                'rate_hz': 10.0,
-            }],
+            parameters=[
+                obstacle_scenario_config,
+                {
+                    'use_sim_time': False,
+                    'topic': obstacle_input_topic,
+                    'scenario': LaunchConfiguration(
+                        'demo_obstacle_scenario'
+                    ),
+                    'insert_stop_active': ParameterValue(
+                        LaunchConfiguration('demo_insert_stop_active'),
+                        value_type=bool,
+                    ),
+                    # Retained for FIXED compatibility with older launches.
+                    'x': ParameterValue(
+                        LaunchConfiguration('demo_obstacle_x'),
+                        value_type=float,
+                    ),
+                    'y': ParameterValue(
+                        LaunchConfiguration('demo_obstacle_y'),
+                        value_type=float,
+                    ),
+                    'z': ParameterValue(
+                        LaunchConfiguration('demo_obstacle_z'),
+                        value_type=float,
+                    ),
+                },
+            ],
         ),
         Node(
             package='thesis_core',

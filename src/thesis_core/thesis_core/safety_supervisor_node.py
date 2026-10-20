@@ -111,7 +111,8 @@ def admit_point_command(
     maximum_age_sec,
     recent_command_ids,
 ):
-    """Return the point-command admission result and reserve accepted IDs.
+    """
+    Return the point-command admission result and reserve accepted IDs.
 
     A nonempty ID is reserved before validating its timestamp so a rejected
     terminal attempt cannot be replayed later during the bounded window.

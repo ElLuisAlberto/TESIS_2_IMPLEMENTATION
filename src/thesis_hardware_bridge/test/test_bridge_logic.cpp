@@ -1,6 +1,10 @@
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 
 #include "gtest/gtest.h"
 #include "thesis_hardware_bridge/bridge_logic.hpp"
@@ -94,6 +98,50 @@ TEST(BridgeLogic, StopAlwaysForcesZeroScale)
     bridge::effective_speed_scale("WARNING", 0.2), 1.0);
   EXPECT_DOUBLE_EQ(
     bridge::effective_speed_scale("REDUCTION", 0.35), 0.35);
+}
+
+TEST(BridgeLogic, ArmedHoldDoesNotStreamPhysicalVelocityCommands)
+{
+  EXPECT_FALSE(bridge::should_transmit_motion_command(true, false, false));
+  EXPECT_TRUE(bridge::should_transmit_motion_command(true, true, false));
+  EXPECT_TRUE(bridge::should_transmit_motion_command(true, false, true));
+  EXPECT_FALSE(bridge::should_transmit_motion_command(false, true, true));
+}
+
+TEST(BridgeLogic, SlowOutputDoesNotHoldFeedbackStateLock)
+{
+  // The adapter computes a command under state_mutex_ and releases it before
+  // the potentially slow Kinova output call. Model that ownership boundary:
+  // an output call may take 250 ms while a feedback update remains available.
+  std::mutex state_mutex;
+  std::atomic<bool> output_started{false};
+  std::thread slow_output([&output_started]() {
+    output_started.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  });
+  while (!output_started.load()) {
+    std::this_thread::yield();
+  }
+  const auto started = std::chrono::steady_clock::now();
+  {
+    const std::lock_guard<std::mutex> state_lock(state_mutex);
+  }
+  const auto elapsed = std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - started).count();
+  slow_output.join();
+  EXPECT_LT(elapsed, 100.0);
+}
+
+TEST(BridgeLogic, JogMustBelongToCurrentArmEpoch)
+{
+  EXPECT_FALSE(bridge::jog_command_matches_arm_epoch(
+      "jog_continuous", "arm-7"));
+  EXPECT_FALSE(bridge::jog_command_matches_arm_epoch(
+      "jog:arm-6:123", "arm-7"));
+  EXPECT_FALSE(bridge::jog_command_matches_arm_epoch(
+      "jog::123", ""));
+  EXPECT_TRUE(bridge::jog_command_matches_arm_epoch(
+      "jog:arm-7:123", "arm-7"));
 }
 
 TEST(BridgeLogic, KinovaVelocityFeedbackIsDecoded)
@@ -258,6 +306,65 @@ TEST(BridgeLogic, ArmInterlockDisarmsAfterSafetyLoss)
   inputs.proximity_fresh = false;
   EXPECT_TRUE(bridge::should_disarm_for_interlock_loss(true, inputs));
   EXPECT_FALSE(bridge::should_disarm_for_interlock_loss(false, inputs));
+}
+
+TEST(BridgeLogic, GeometricStopAllowsOnlyExplicitProtectiveRecovery)
+{
+  bridge::ArmInterlockInputs inputs;
+  inputs.output_permitted = true;
+  inputs.connected = true;
+  inputs.joint_state_fresh = true;
+  inputs.system_ready = false;
+  inputs.system_ready_fresh = true;
+  inputs.proximity_valid = true;
+  inputs.proximity_fresh = true;
+  inputs.supervisor_available = true;
+  inputs.safety_stop_active = true;
+
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  inputs.protective_recovery_active = true;
+  EXPECT_TRUE(bridge::arm_interlock_reasons(inputs).empty());
+  EXPECT_FALSE(bridge::should_disarm_for_interlock_loss(true, inputs));
+
+  inputs.proximity_fresh = false;
+  EXPECT_FALSE(bridge::arm_interlock_reasons(inputs).empty());
+  EXPECT_TRUE(bridge::should_disarm_for_interlock_loss(true, inputs));
+}
+
+TEST(BridgeLogic, SupervisorStopLatchClearsOnlyForAdmittedMotionOrDisarm)
+{
+  EXPECT_TRUE(bridge::next_supervisor_stop_active(
+      false, true, false, false));
+  EXPECT_TRUE(bridge::next_supervisor_stop_active(
+      true, false, false, false));
+  EXPECT_FALSE(bridge::next_supervisor_stop_active(
+      true, false, true, false));
+  EXPECT_FALSE(bridge::next_supervisor_stop_active(
+      true, false, false, true));
+  EXPECT_TRUE(bridge::next_supervisor_stop_active(
+      true, true, true, true));
+}
+
+TEST(BridgeLogic, RecoverySurvivesReadyRaceUntilFreshJogIsAdmitted)
+{
+  bool supervisor_stop = bridge::next_supervisor_stop_active(
+    false, true, false, false);
+  bool recovery = bridge::next_protective_recovery_active(
+    false, true, true, false, supervisor_stop);
+  EXPECT_TRUE(recovery);
+
+  // Proximity becomes REDUCTION/READY before the admitted JOG reaches the
+  // adapter.  The historical STOP must not cause an intervening disarm.
+  recovery = bridge::next_protective_recovery_active(
+    recovery, false, true, true, supervisor_stop);
+  EXPECT_TRUE(recovery);
+
+  supervisor_stop = bridge::next_supervisor_stop_active(
+    supervisor_stop, false, true, false);
+  recovery = bridge::next_protective_recovery_active(
+    recovery, false, true, true, supervisor_stop);
+  EXPECT_FALSE(supervisor_stop);
+  EXPECT_FALSE(recovery);
 }
 
 TEST(BridgeLogic, TargetToleranceUsesWrappedDistance)

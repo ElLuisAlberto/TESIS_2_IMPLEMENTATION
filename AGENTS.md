@@ -1,14 +1,15 @@
 # Reglas del proyecto
 
-- Trabajar inicialmente solo en simulación.
+- Trabajar inicialmente solo en simulación; se permite pasar al JACO2 físico cuando el usuario autorizado lo solicite explícitamente.
 - Preservar todos los cambios existentes.
 - No borrar ni sobrescribir archivos modificados sin autorización.
 - No usar `sudo` ni instalar paquetes sin autorización.
-- No activar `hardware_output`.
-- No enviar comandos al Kinova Jaco2 físico.
-- Se permite leer, analizar, editar código nuevo, compilar y probar la simulación.
+- Se permite activar `hardware_output` y enviar comandos al Kinova Jaco2 físico únicamente cuando el usuario haya confirmado que es operador autorizado, el área está despejada y la parada de emergencia es accesible.
+- Antes de la primera prueba física, verificar el estado de conexión, diagnóstico, armado y disponibilidad del sistema sin enviar movimiento.
+- Para movimientos físicos, comenzar con desplazamientos mínimos y velocidad reducida; solicitar confirmación del operador antes de cada etapa que pueda mover el brazo.
+- Se permite leer, analizar, editar código nuevo, compilar y probar tanto simulación como la interfaz física autorizada.
 - Antes de cambios importantes, explicar la causa.
-- Después de modificar, compilar solo los paquetes afectados, ejecutar las pruebas y generar un informe breve.
+- Después de modificar, compilar solo los paquetes afectados, ejecutar las pruebas aplicables y generar un informe breve.
 
 ## Organización de informes
 

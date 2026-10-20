@@ -16,6 +16,9 @@ __pycache__/
 *.db3
 *.mcap
 
+# Telemetría cruda de sesiones físicas (los informes resumidos sí se versionan)
+/evidence/physical_sessions/
+
 # Local backups and session files
 *~
 *.~*~

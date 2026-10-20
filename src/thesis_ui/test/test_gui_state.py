@@ -57,6 +57,8 @@ class FakeNode:
         self.last_decision = None
         self.last_execution = None
         self.last_execution_control = None
+        self.hardware_armed = False
+        self.hardware_arm_epoch = ''
         self.last_cartesian_trajectory_status = None
         self.last_proximity = SimpleNamespace(minimum_clearance=0.32)
         self.proximity_received_at = time.monotonic()
@@ -64,6 +66,7 @@ class FakeNode:
         self.execution_by_id = {}
         self.end_effector_pose = (0.485, 0.064, 1.040, 0, 0, 0)
         self.candidate_publisher = CapturingPublisher()
+        self.jog_intent_publisher = CapturingPublisher()
         self.cartesian_candidate_publisher = CapturingPublisher()
         self.cartesian_jog_publisher = CapturingPublisher()
         self.cartesian_trajectory_publisher = CapturingPublisher()
@@ -178,6 +181,87 @@ class GuiStateTests(unittest.TestCase):
             'VOLUMEN SUPERVISADO CONTINUO',
             self.window.volume_mode_label.text(),
         )
+
+    def test_joint_jog_needs_a_deliberate_wheel_input_before_publishing(self):
+        self.window.jog_mode_button.setChecked(True)
+        self.window.publish_jog_intent()
+        self.assertEqual(self.node.jog_intent_publisher.messages, [])
+
+        self.window.wheel_intentions[0].add(time.monotonic(), 1.0)
+        self.window.begin_deliberate_jog_input()
+        self.window.publish_jog_intent()
+        message = self.node.jog_intent_publisher.messages[-1]
+        self.assertTrue(message.command_id.startswith('jog-'))
+        self.assertNotEqual(
+            message.positions[0], self.node.current_positions[JOINT_NAMES[0]]
+        )
+
+    def test_hardware_transition_cancels_manual_jog_before_arming(self):
+        self.window.is_hardware_mode = True
+        self.node.hardware_armed = True
+        self.node.hardware_arm_epoch = 'arm-3'
+        self.window.jog_mode_button.setChecked(True)
+        self.window.wheel_intentions[0].add(time.monotonic(), 1.0)
+        self.window.begin_deliberate_jog_input()
+        self.window.publish_jog_intent()
+
+        self.window.cancel_manual_jog_for_hardware_transition()
+
+        self.assertFalse(self.window.jog_mode_button.isChecked())
+        self.assertFalse(self.window.jog_intent_streaming)
+        self.assertIsNone(self.window.jog_command_id)
+        hold = self.node.jog_intent_publisher.messages[-1]
+        self.assertEqual(hold.command_id, 'jog_hold')
+        self.assertEqual(
+            list(hold.positions),
+            [self.node.current_positions[name] for name in JOINT_NAMES],
+        )
+
+    def test_physical_jog_needs_current_arm_epoch_and_new_input(self):
+        self.window.is_hardware_mode = True
+        self.window.jog_mode_button.blockSignals(True)
+        self.window.jog_mode_button.setChecked(True)
+        self.window.jog_mode_button.blockSignals(False)
+        self.window.wheel_intentions[0].add(time.monotonic(), 1.0)
+        self.window.begin_deliberate_jog_input()
+        self.window.publish_jog_intent()
+        self.assertEqual(self.node.jog_intent_publisher.messages, [])
+
+        self.node.hardware_armed = True
+        self.node.hardware_arm_epoch = 'arm-4'
+        self.window.begin_deliberate_jog_input()
+        self.window.publish_jog_intent()
+        message = self.node.jog_intent_publisher.messages[-1]
+        self.assertTrue(message.command_id.startswith('jog:arm-4:'))
+
+    def test_geometric_stop_allows_only_joint_protective_recovery(self):
+        self.window.is_hardware_mode = True
+        self.node.hardware_armed = True
+        self.node.hardware_arm_epoch = 'arm-5'
+        self.node.system_is_ready = lambda: False
+        self.node.system_readiness_text = lambda: (
+            'NOT_READY: proximidad en STOP o inválida'
+        )
+        self.node.last_proximity = SimpleNamespace(
+            state='STOP',
+            reference_frame='world',
+            limiting_segment='wrist_2_to_tool',
+            minimum_clearance=0.049,
+            obstacle_radius=0.12,
+        )
+        self.node.proximity_received_at = time.monotonic()
+
+        self.window.jog_mode_button.setChecked(True)
+
+        self.assertTrue(self.window.jog_mode_button.isChecked())
+        self.assertTrue(self.window.protective_recovery_available())
+        self.assertIn('RETIRO PROTECTIVO', self.window.status_label.text())
+
+        self.node.last_proximity.limiting_segment = 'TF_UNAVAILABLE'
+        self.window.jog_mode_button.setChecked(False)
+        with patch('thesis_ui.joint_control_gui.QMessageBox.warning'):
+            self.window.jog_mode_button.setChecked(True)
+        self.assertFalse(self.window.jog_mode_button.isChecked())
 
     def test_velocity_violation_disables_point_command(self):
         self.window.duration_input.setValue(0.1)
@@ -721,6 +805,7 @@ class CartesianAdapterCallbackTests(unittest.TestCase):
         self.assertIsNone(node.active)
         self.assertIn('máximo', rejections[-1][1])
         self.assertEqual(output.messages, [])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -205,4 +205,3 @@ def test_tf_failure_publishes_stop_not_allow():
     assert len(publisher.messages) == 1
     assert publisher.messages[0].state == 'STOP'
     assert publisher.messages[0].limiting_segment == 'TF_UNAVAILABLE'
-

@@ -10,22 +10,24 @@ y, de forma controlada, frente al brazo físico.
 
 ## Estado de la tesis
 
-Estado al 18/10/2026: **simulación validada y sistema físico preparado para
-conexión; lectura física aún no validada**.
+Estado al 20/10/2026: **simulación validada y movimiento articular físico J1
+validado antes de integrar percepción RGB-D**.
 
-- La simulación cartesiana y articular tienen pruebas offline y validaciones en
-  Gazebo. La prueba integrada GUI → supervisor → Gazebo quedó demostrada para
-  X positivo; la validación completa X/Y/Z requiere resolver eventos
-  `TF_UNAVAILABLE`.
-- El adaptador físico es nativo ROS 2 y usa la API USB de Kinova. La salida
-  empieza deshabilitada (`hardware_output_enabled=false`) y el sistema inicia
-  desarmado (`armed=false`).
-- A-01, A-02a, A-03 y C-01 cuentan con cobertura offline. A-02b está bloqueada
-  porque todavía no existe un contrato completo para comparar TF y modelo
-  articulado con sello, posición y orientación.
-- La ruta cartesiana física permanece bloqueada hasta cerrar A-02b.
-- La cámara RGB-D no está conectada y su integración con el supervisor no está
-  validada. El Avance 3 no se declara terminado.
+- El JACO2 funciona mediante la ruta candidato → supervisor preventivo →
+  adaptador Kinova. El backend USB, feedback a 20 Hz, watchdog, TF y retorno a
+  `hold` fueron comprobados físicamente.
+- Dos ciclos J1 de +3° y retorno al origen terminaron dentro de 0.5° de error,
+  sin watchdog, órdenes obsoletas ni movimiento durante `hold`.
+- El armado inicia sin conservar JOG anteriores. Un STOP geométrico permite
+  únicamente una retirada supervisada y no desarma por un STOP histórico.
+- Existe una esfera virtual reproducible con escenarios `PARK`, `BLOCK_START`
+  e `INSERT_STOP`. PARK está calibrado aproximadamente a 0.40 m; los escenarios
+  STOP aún requieren su prueba física separada.
+- La Intel RealSense D435i está reconocida y puede visualizar color,
+  profundidad y nube de puntos en RViz. Todavía no alimenta la entrada de
+  obstáculos del supervisor.
+- La ruta cartesiana física y la integración RGB-D → obstáculos siguen
+  pendientes. Por ello no se declara terminado el Avance 3.
 
 La evidencia técnica está organizada en
 [`docs/codex_reports/`](docs/codex_reports/) y
@@ -76,31 +78,14 @@ compilación y no forman parte del repositorio.
 | Modo | Interfaz | Estado |
 | --- | --- | --- |
 | Simulación | GUI en `operation_mode=simulation` | Disponible para pruebas |
-| Hardware en lectura | GUI física sin armado | Preparado, pendiente de conexión |
-| Movimiento articular físico | GUI → supervisor → Kinova | Requiere preflight y autorización |
+| Hardware en lectura | GUI física sin armado | Validado |
+| Movimiento articular físico | GUI → supervisor → Kinova | J1 ±3° validado |
 | Movimiento cartesiano físico | Ruta cartesiana supervisada | Bloqueado por A-02b |
-| RGB-D conectado al supervisor | Cámara → obstáculo → supervisor | No validado |
+| Visualización RGB-D | D435i → RViz | Disponible |
+| RGB-D conectado al supervisor | Cámara → obstáculo → supervisor | Pendiente |
 
 Las rutas deben ejecutarse por separado. No se deben iniciar simultáneamente
 Gazebo y el adaptador físico en el mismo dominio ROS.
-
-## Ejecución en simulación
-
-```bash
-set +u
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-set -u
-
-ros2 launch thesis_simulation thesis_system.launch.py \
-  simulation_output_enabled:=true \
-  use_demo_obstacle:=true \
-  start_gui:=true \
-  start_rviz:=false
-```
-
-Este modo permite presentar la interfaz, observar la decisión del supervisor y
-probar el flujo de comandos sin conectar el brazo físico.
 
 ## Preparación física
 
@@ -122,24 +107,136 @@ Con el brazo conectado, el preflight debe confirmar USB, API Kinova,
 JointState, frecuencia, TF, proximidad, readiness, supervisor, ausencia de
 movimiento y `armed=false`. Si no devuelve `PASS`, no se habilita salida física.
 
-La primera prueba física prevista es articular: un solo joint, una dirección,
-velocidad mínima, desplazamiento pequeño, `ALLOW` previo, watchdog y STOP
-físico disponible. No se preparan primero trayectorias cartesianas, movimientos
-largos ni automatización de evasión.
+El protocolo validado comienza con un solo joint, velocidad reducida,
+desplazamiento pequeño, `ALLOW` previo, watchdog y parada física disponible.
+No se deben improvisar trayectorias cartesianas, movimientos largos ni
+automatización de evasión.
+
+## Comandos de ejecución
+
+Ejecuta primero esta preparación en cada terminal nueva:
+
+```bash
+cd ~/Escritorio/TESIS_2_IMPLEMENTATION
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+```
+
+Si VS Code fue instalado como Snap y aparece un conflicto con bibliotecas GTK o
+`libpthread`, abre una terminal normal del sistema. No hacen falta `sudo` ni
+paquetes adicionales.
+
+### Simulación completa
+
+```bash
+ros2 launch thesis_simulation thesis_system.launch.py \
+  simulation_output_enabled:=true \
+  use_demo_obstacle:=true \
+  start_gui:=true \
+  start_rviz:=true
+```
+
+Abre Gazebo, la GUI y RViz sin utilizar el USB del brazo.
+
+### JACO2 físico en observación
+
+```bash
+ros2 launch thesis_hardware jaco_physical_system.launch.py \
+  mock_hardware:=false \
+  hardware_output_enabled:=false \
+  use_demo_obstacle:=true \
+  demo_obstacle_scenario:=PARK \
+  start_gui:=true \
+  start_rviz:=true \
+  allow_gui_arm_control:=false
+```
+
+Conecta el brazo y publica su estado real, pero no permite armar ni mover.
+
+### JACO2 físico con movimiento supervisado
+
+```bash
+ros2 launch thesis_hardware jaco_physical_system.launch.py \
+  mock_hardware:=false \
+  hardware_output_enabled:=true \
+  use_demo_obstacle:=true \
+  demo_obstacle_scenario:=PARK \
+  demo_insert_stop_active:=false \
+  start_gui:=true \
+  start_rviz:=true \
+  allow_gui_arm_control:=true
+```
+
+Habilita el botón de armado, pero el launch siempre comienza con
+`armed=false`, `mode=hold` y salida 0 Hz. Úsalo únicamente con el área despejada,
+la parada de emergencia accesible y proximidad `ALLOW/READY`. No abras dos
+launches físicos a la vez: el bloqueo USB admite un solo dueño.
+
+### Reabrir solo la GUI física
+
+```bash
+ros2 run thesis_ui joint_gui --ros-args \
+  -r __node:=joint_control_gui_node \
+  -p use_sim_time:=false \
+  -p require_system_readiness:=true \
+  -p operation_mode:=hardware \
+  -p allow_hardware_arm_control:=true
+```
+
+Úsalo cuando el stack físico ya está activo y únicamente se cerró la ventana.
+
+### Reabrir solo el RViz del robot
+
+```bash
+rviz2 -d "$(ros2 pkg prefix --share thesis_description)/rviz/jaco.rviz"
+```
+
+Muestra el modelo medido, cápsulas, horizonte y esfera virtual sin iniciar otro
+adaptador USB.
+
+### RealSense D435i y RViz RGB-D
+
+En una terminal inicia color, profundidad alineada, RGB-D y nube de puntos:
+
+```bash
+ros2 launch realsense2_camera rs_launch.py \
+  enable_color:=true \
+  enable_depth:=true \
+  enable_rgbd:=true \
+  enable_sync:=true \
+  align_depth.enable:=true \
+  pointcloud.enable:=true
+```
+
+En otra terminal abre la configuración de nube de puntos:
+
+```bash
+rviz2 \
+  -d /opt/ros/humble/share/realsense2_camera/examples/pointcloud/rviz/pointcloud.rviz \
+  --ros-args -r __node:=rviz2_rgbd
+```
+
+Los tópicos principales son `/camera/camera/color/image_raw`,
+`/camera/camera/aligned_depth_to_color/image_raw`, `/camera/camera/rgbd` y
+`/camera/camera/depth/color/points`. Esta ejecución solo visualiza la cámara;
+no la conecta todavía al supervisor preventivo.
+
+Detén cualquier launch con `Ctrl+C`. Antes de reiniciar el stack físico,
+confirma que la sesión anterior terminó para no competir por el USB.
 
 ## Percepción RGB-D
 
-La cámara todavía no participa en la decisión preventiva. El contrato previsto
-es:
+La cámara ya funciona como fuente RGB-D independiente, pero todavía no
+participa en la decisión preventiva. El contrato pendiente es:
 
 ```text
 cámara → percepción → obstáculo válido → obstacle_input_bridge
 → proximity_monitor → safety_supervisor
 ```
 
-Antes de declararla validada faltan cámara real, calibración cámara→`world`,
-sellos de adquisición, incertidumbre, representación de obstáculos y pruebas
-reales de `ALLOW` y `STOP`.
+Antes de declararla integrada faltan calibración cámara→`world`, extracción de
+obstáculos, sellos de adquisición, incertidumbre y pruebas físicas de `ALLOW`,
+`REDUCTION` y `STOP`.
 
 ## Verificación offline
 
@@ -168,13 +265,14 @@ ctest --test-dir build/thesis_hardware_bridge \
 
 ## Limitaciones y siguiente etapa
 
-- La conexión física, la lectura real y el movimiento físico siguen pendientes.
+- El movimiento físico validado se limita a la ruta articular supervisada y a
+  desplazamientos pequeños; no cubre todavía control cartesiano.
 - A-02b debe definir y validar la coherencia TF-modelo antes de autorizar
   movimiento cartesiano.
-- `TF_UNAVAILABLE` observado en la validación integrada de Gazebo debe
-  investigarse por separado.
-- La RGB-D debe integrarse gradualmente y permanecer fail-closed ante datos
-  ausentes, vencidos o inconsistentes.
+- Los escenarios virtuales STOP están calibrados, pero su ensayo físico debe
+  ejecutarse como una etapa separada y controlada.
+- La RGB-D debe conectarse gradualmente al pipeline y permanecer fail-closed
+  ante datos ausentes, vencidos o inconsistentes.
 
 El detalle de cada decisión, prueba y bloqueo se conserva en los informes; este
 README resume el proyecto para presentación y consulta rápida.
