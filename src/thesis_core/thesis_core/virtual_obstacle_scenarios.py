@@ -93,7 +93,7 @@ def derive_physical_scenario_poses(
     j1_delta_deg=3.0,
     stop_distance=0.05,
     warning_distance=0.30,
-    park_clearance=0.40,
+    park_clearance=0.80,
 ):
     """Derive PARK/start/final poses from measured joints and capsules."""
     current = _finite_vector(measured_joints, 6, 'measured_joints')
@@ -130,11 +130,11 @@ def derive_physical_scenario_poses(
     # sample 24/24. Coordinates are therefore derived, not picked in RViz.
     block_start = capsule_offset_pose(
         prediction.positions[0], DISTAL_SEGMENT_INDEX,
-        effective_radius, stop_clearance, 195.0, 0.25,
+        effective_radius, stop_clearance, 120.0, -0.40,
     )
     insert_stop = capsule_offset_pose(
         prediction.positions[-1], DISTAL_SEGMENT_INDEX,
-        effective_radius, stop_clearance, 10.0, 0.35,
+        effective_radius, stop_clearance, 300.0, 0.20,
     )
     return ScenarioPoses(
         park=park,

@@ -185,6 +185,14 @@ class JointGuiNode(Node):
             self.readiness_callback,
             10,
         )
+        self.kinematic_tf_status = 'WAITING: sin validación FK-TF'
+        self.kinematic_tf_status_received_at = None
+        self.kinematic_tf_status_subscription = self.create_subscription(
+            String,
+            '/thesis/kinematic_tf_status',
+            self.kinematic_tf_status_callback,
+            10,
+        )
 
         self.current_positions = {}
         self.current_velocities = {}
@@ -485,6 +493,17 @@ class JointGuiNode(Node):
         self.system_readiness = str(msg.data)
         self.readiness_received_at = time.monotonic()
 
+    def kinematic_tf_status_callback(self, msg):
+        self.kinematic_tf_status = str(msg.data)
+        self.kinematic_tf_status_received_at = time.monotonic()
+
+    def kinematic_tf_is_valid(self):
+        return (
+            self.kinematic_tf_status.startswith('VALID ')
+            and self.kinematic_tf_status_received_at is not None
+            and time.monotonic() - self.kinematic_tf_status_received_at <= 1.0
+        )
+
     def system_readiness_text(self):
         """Return a waiting message if the readiness monitor goes silent."""
         if not self.require_system_readiness:
@@ -566,6 +585,7 @@ class JointGuiNode(Node):
                     '/thesis/execution_control'
                 ) > 0
             ),
+            'Coherencia FK-TF': self.kinematic_tf_is_valid(),
         }
         if self.operation_mode == 'hardware':
             return {
@@ -738,6 +758,7 @@ class JointControlWindow(QMainWindow):
             WheelIntention(0.25, step)
             for step in CARTESIAN_JOG_NOTCH_STEPS
         ]
+        self.cartesian_jog_intent_streaming = False
         self.pending_command_id = None
         self.pending_since = None
         self.shutdown_started = False
@@ -945,7 +966,7 @@ class JointControlWindow(QMainWindow):
             velocity_label.setStyleSheet('font-weight: bold; color: #166534;')
             self.jog_velocity_labels.append(velocity_label)
             jog_layout.addWidget(velocity_label, row, 3)
-        if self.is_hardware_mode:
+        if getattr(self.ros_node, 'cartesian_jog_publisher', None) is None:
             main_layout.addWidget(jog_group)
         else:
             manual_group = QGroupBox('Control manual continuo supervisado')
@@ -1611,13 +1632,14 @@ class JointControlWindow(QMainWindow):
         joint_jog_ready = (
             system_ready or self.protective_recovery_available()
         )
-        if self.is_hardware_mode and jog_active and (
+        if self.is_hardware_mode and manual_active and (
             not self.ros_node.hardware_armed
             or not self.ros_node.hardware_arm_epoch
         ):
             self.cancel_manual_jog_for_hardware_transition()
             jog_active = False
-            manual_active = cartesian_jog_active
+            cartesian_jog_active = False
+            manual_active = False
         self.refresh_cartesian_trajectory_status()
         trajectory_active = (
             self.cartesian_trajectory_pending_id is not None
@@ -2096,7 +2118,10 @@ class JointControlWindow(QMainWindow):
                 or (
                     self.cartesian_jog_mode_button is not None
                     and self.cartesian_jog_mode_button.isChecked()
-                    and control.command_id == 'cartesian_jog_continuous'
+                    and (
+                        control.command_id.startswith('jog-cartesian-')
+                        or control.command_id.startswith('jog:')
+                    )
                 )
                 or (
                     node.cartesian_trajectory_is_active()
@@ -2540,11 +2565,18 @@ class JointControlWindow(QMainWindow):
             return
         for intention in self.wheel_intentions:
             intention.clear()
+        for intention in self.cartesian_wheel_intentions:
+            intention.clear()
         self.jog_command_id = None
         if self.jog_mode_button.isChecked():
             self.jog_mode_button.setChecked(False)
         else:
             self.jog_intent_streaming = False
+        if (
+            self.cartesian_jog_mode_button is not None
+            and self.cartesian_jog_mode_button.isChecked()
+        ):
+            self.cartesian_jog_mode_button.setChecked(False)
 
     def eventFilter(self, watched, event):
         button = getattr(self, 'jog_mode_button', None)
@@ -2857,7 +2889,7 @@ class JointControlWindow(QMainWindow):
             self.status_label.setStyleSheet('color: #334155;')
 
     def toggle_cartesian_jog_mode(self, checked):
-        """Enable simulation-only Cartesian velocity control by wheel."""
+        """Enable supervised Cartesian velocity control by wheel."""
         for intention in self.cartesian_wheel_intentions:
             intention.clear()
         button = self.cartesian_jog_mode_button
@@ -2865,9 +2897,13 @@ class JointControlWindow(QMainWindow):
             return
         publisher = getattr(self.ros_node, 'cartesian_jog_publisher', None)
         if checked and (
-            self.is_hardware_mode
-            or not self.ros_node.state_is_ready()
+            not self.ros_node.state_is_ready()
+            or (self.is_hardware_mode and (
+                not self.ros_node.hardware_armed
+                or not self.ros_node.hardware_arm_epoch
+            ))
             or not self.system_is_ready()
+            or not self.ros_node.kinematic_tf_is_valid()
             or self.ros_node.execution_is_active()
             or self.ros_node.cartesian_trajectory_is_active()
             or self.cartesian_trajectory_pending_id is not None
@@ -2882,8 +2918,8 @@ class JointControlWindow(QMainWindow):
                 self,
                 'Control cartesiano continuo no disponible',
                 'Se requiere sistema READY, /joint_states reciente, el '
-                'adaptador JOG cartesiano conectado y ninguna trayectoria '
-                'activa.',
+                'adaptador JOG cartesiano conectado, coherencia FK-TF '
+                'válida y ninguna trayectoria activa.',
             )
             return
 
@@ -2925,7 +2961,7 @@ class JointControlWindow(QMainWindow):
         )
 
     def publish_cartesian_jog_intent(self, force_stop=False):
-        """Publish a generic velocity request for simulation-only IK."""
+        """Publish a generic world-frame Cartesian velocity request."""
         button = self.cartesian_jog_mode_button
         if button is None:
             return
@@ -2938,10 +2974,14 @@ class JointControlWindow(QMainWindow):
             self.active_cartesian_jog_velocity(index)
             for index in range(6)
         ]
+        has_motion = any(abs(value) > 1.0e-12 for value in velocities)
+        if not has_motion and not self.cartesian_jog_intent_streaming:
+            return
         self.ros_node.publish_cartesian_jog(
             velocities[:3],
             tuple(math.radians(value) for value in velocities[3:]),
         )
+        self.cartesian_jog_intent_streaming = has_motion
 
     def publish_jog_intent(self, force_hold=False):
         if not force_hold and not self.jog_mode_button.isChecked():

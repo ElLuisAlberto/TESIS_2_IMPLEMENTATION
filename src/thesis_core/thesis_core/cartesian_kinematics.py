@@ -28,6 +28,7 @@ __all__ = (
     'pose_error',
     'rotation_vector_between',
     'transform_from_translation_quaternion',
+    'yoshikawa_manipulability',
 )
 
 
@@ -154,6 +155,43 @@ def _numerical_jacobian(positions, current_transform, epsilon):
     )
 
 
+def _determinant(matrix):
+    values = [list(map(float, row)) for row in matrix]
+    determinant = 1.0
+    for column in range(len(values)):
+        pivot = max(
+            range(column, len(values)),
+            key=lambda row: abs(values[row][column]),
+        )
+        if abs(values[pivot][column]) < 1.0e-15:
+            return 0.0
+        if pivot != column:
+            values[column], values[pivot] = values[pivot], values[column]
+            determinant = -determinant
+        pivot_value = values[column][column]
+        determinant *= pivot_value
+        for row in range(column + 1, len(values)):
+            factor = values[row][column] / pivot_value
+            for item in range(column + 1, len(values)):
+                values[row][item] -= factor * values[column][item]
+    return determinant
+
+
+def yoshikawa_manipulability(positions):
+    positions = validate_position_limits(positions)
+    transform = end_effector_transform(positions)
+    jacobian = _numerical_jacobian(positions, transform, 1.0e-5)
+    product = tuple(
+        tuple(
+            sum(jacobian[row][item] * jacobian[column][item]
+                for item in range(6))
+            for column in range(6)
+        )
+        for row in range(6)
+    )
+    return math.sqrt(max(0.0, _determinant(product)))
+
+
 def _weighted_cost(position_error, orientation_error, position_weight):
     return math.sqrt(
         position_weight * position_weight * _norm(position_error) ** 2
@@ -170,6 +208,7 @@ def solve_inverse_kinematics(
     damping=0.04,
     maximum_joint_step_rad=0.15,
     position_weight=4.0,
+    minimum_manipulability=1.0e-4,
 ):
     """Solve a nearby six-dimensional pose with damped least squares."""
     target = tuple(float(value) for value in target_pose)
@@ -184,6 +223,7 @@ def solve_inverse_kinematics(
         damping=damping,
         maximum_joint_step_rad=maximum_joint_step_rad,
         position_weight=position_weight,
+        minimum_manipulability=minimum_manipulability,
     )
 
 
@@ -196,6 +236,7 @@ def solve_inverse_kinematics_transform(
     damping=0.04,
     maximum_joint_step_rad=0.15,
     position_weight=4.0,
+    minimum_manipulability=1.0e-4,
 ):
     """Solve a nearby homogeneous target with damped least squares."""
     seed = validate_position_limits(seed_positions)
@@ -221,6 +262,7 @@ def solve_inverse_kinematics_transform(
         damping,
         maximum_joint_step_rad,
         position_weight,
+        minimum_manipulability,
     )
     if not all(math.isfinite(value) and value > 0.0 for value in positive):
         raise ValueError('inverse-kinematics parameters must be positive')
@@ -254,6 +296,24 @@ def solve_inverse_kinematics_transform(
         jacobian = _numerical_jacobian(
             positions, current_transform, 1.0e-5
         )
+        product = tuple(
+            tuple(
+                sum(jacobian[row][item] * jacobian[column][item]
+                    for item in range(6))
+                for column in range(6)
+            )
+            for row in range(6)
+        )
+        manipulability = math.sqrt(max(0.0, _determinant(product)))
+        if manipulability < minimum_manipulability:
+            return IkResult(
+                False,
+                tuple(seed),
+                iteration,
+                position_norm,
+                orientation_norm,
+                f'singular configuration: manipulability={manipulability:.6g}',
+            )
         weighted_jacobian = tuple(
             tuple(
                 value * (position_weight if row < 3 else 1.0)

@@ -78,6 +78,9 @@ class FakeNode:
     def update_end_effector_pose(self):
         pass
 
+    def kinematic_tf_is_valid(self):
+        return True
+
     def connection_status(self):
         return {'Control preventivo': True, '/joint_states': True}
 
@@ -314,6 +317,28 @@ class GuiStateTests(unittest.TestCase):
         self.assertEqual(len(self.window.cartesian_jog_sliders), 6)
         self.assertEqual(len(self.window.cartesian_jog_speed_inputs), 6)
 
+    def test_hardware_mode_exposes_cartesian_tab_but_requires_arm_epoch(self):
+        node = FakeNode()
+        node.operation_mode = 'hardware'
+        window = JointControlWindow(node)
+        for timer in (
+            window.ros_timer, window.ui_timer,
+            window.preview_timer, window.jog_timer,
+        ):
+            timer.stop()
+        try:
+            self.assertEqual(window.manual_control_tabs.count(), 2)
+            with patch('thesis_ui.joint_control_gui.QMessageBox.warning'):
+                window.cartesian_jog_mode_button.setChecked(True)
+            self.assertFalse(window.cartesian_jog_mode_button.isChecked())
+
+            node.hardware_armed = True
+            node.hardware_arm_epoch = 'arm-9'
+            window.cartesian_jog_mode_button.setChecked(True)
+            self.assertTrue(window.cartesian_jog_mode_button.isChecked())
+        finally:
+            window.deleteLater()
+
     def test_cartesian_wheel_publishes_bounded_world_velocity(self):
         self.window.cartesian_jog_mode_button.setChecked(True)
         self.assertTrue(self.window.cartesian_jog_mode_button.isChecked())
@@ -394,6 +419,11 @@ class GuiStateTests(unittest.TestCase):
             (message.twist.linear.x, message.twist.linear.y,
              message.twist.linear.z),
             (0.0, 0.0, 0.0),
+        )
+        message_count = len(self.node.cartesian_jog_publisher.messages)
+        self.window.publish_cartesian_jog_intent()
+        self.assertEqual(
+            len(self.node.cartesian_jog_publisher.messages), message_count
         )
         self.assertEqual(
             (message.twist.angular.x, message.twist.angular.y,
@@ -638,13 +668,29 @@ class CartesianAdapterCallbackTests(unittest.TestCase):
             maximum_angular_ik_step_rad=math.radians(1.0),
             maximum_linear_speed_mps=0.15,
             maximum_angular_speed_radps=math.radians(30.0),
+            linear_deadzone_mps=0.001,
+            angular_deadzone_radps=math.radians(0.5),
+            maximum_linear_acceleration_mps2=0.20,
+            maximum_angular_acceleration_radps2=math.radians(60.0),
+            nominal_input_period_sec=0.05,
+            filtered_linear=(0.0, 0.0, 0.0),
+            filtered_angular=(0.0, 0.0, 0.0),
+            last_twist_monotonic=None,
             position_tolerance_m=0.0002,
             orientation_tolerance_rad=math.radians(0.1),
+            jog_command_id='jog-test',
+            admit_new_hardware_stream=lambda _stamp: True,
             warn_limited=lambda detail: warnings.append(detail),
             get_logger=self._logger,
         )
         node.publish_target = lambda stamp, positions: (
             CartesianJogAdapter.publish_target(node, stamp, positions)
+        )
+        node.reset_stream = lambda: CartesianJogAdapter.reset_stream(node)
+        node.publish_hold_and_reset = lambda stamp, positions: (
+            CartesianJogAdapter.publish_hold_and_reset(
+                node, stamp, positions
+            )
         )
         message = TwistStamped()
         message.header.stamp = TimeMessage(sec=2, nanosec=0)

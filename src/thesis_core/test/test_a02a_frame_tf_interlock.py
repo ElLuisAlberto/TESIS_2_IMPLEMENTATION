@@ -12,8 +12,11 @@ from thesis_core.proximity_monitor_node import ProximityMonitorNode
 from thesis_core.safety_supervisor_node import (
     SAFETY_REFERENCE_FRAME,
     SafetySupervisorNode,
+    kinematic_tf_position_error,
+    newest_synchronized_kinematic_sample,
     proximity_reference_frame_is_valid,
 )
+from thesis_core.jaco_kinematics import end_effector_transform, translation
 
 
 class _Logger:
@@ -68,6 +71,42 @@ def test_only_world_is_an_accepted_proximity_reference_frame():
     assert proximity_reference_frame_is_valid('world')
     assert not proximity_reference_frame_is_valid('')
     assert not proximity_reference_frame_is_valid('map')
+
+
+def test_fk_tf_position_error_detects_offset_above_tolerance():
+    joints = (0.0, 2.8, 3.4, 0.0, 0.2, 0.0)
+    model_position = translation(end_effector_transform(joints))
+    tf_position = (model_position[0] + 0.006, *model_position[1:])
+
+    assert kinematic_tf_position_error(joints, model_position) == 0.0
+    assert kinematic_tf_position_error(joints, tf_position) > 0.005
+
+
+def test_fk_tf_uses_newest_exact_transform_already_distributed():
+    newest_stamp = 10_000_000_000
+    previous_stamp = 9_950_000_000
+    joints = (0.0, 2.8, 3.4, 0.0, 0.2, 0.0)
+    position = translation(end_effector_transform(joints))
+
+    class DelayedTransformBuffer:
+        def lookup_transform(self, _target, _source, requested):
+            if requested.nanoseconds == newest_stamp:
+                raise TransformException('newest TF is still in transit')
+            assert requested.nanoseconds == previous_stamp
+            return _transform(*position)
+
+    stamp, selected_joints, tf_position = (
+        newest_synchronized_kinematic_sample(
+            ((previous_stamp, joints), (newest_stamp, joints)),
+            DelayedTransformBuffer(),
+            newest_stamp,
+            0.2,
+        )
+    )
+
+    assert stamp == previous_stamp
+    assert selected_joints == joints
+    assert tf_position == pytest.approx(position)
 
 
 @pytest.mark.parametrize('frame', ('', 'map'))

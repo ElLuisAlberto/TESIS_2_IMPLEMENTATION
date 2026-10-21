@@ -48,6 +48,77 @@ def validate_world_twist(
     return linear, angular
 
 
+def apply_twist_deadzone(linear, angular, linear_deadzone, angular_deadzone):
+    """Suppress sub-threshold Cartesian noise without changing larger input."""
+    linear_threshold = float(linear_deadzone)
+    angular_threshold = float(angular_deadzone)
+    if not all(
+        math.isfinite(value) and value >= 0.0
+        for value in (linear_threshold, angular_threshold)
+    ):
+        raise ValueError('Cartesian deadzones must be finite and non-negative')
+    filtered_linear = tuple(
+        0.0 if abs(float(value)) <= linear_threshold else float(value)
+        for value in linear
+    )
+    filtered_angular = tuple(
+        0.0 if abs(float(value)) <= angular_threshold else float(value)
+        for value in angular
+    )
+    vector_norm(filtered_linear)
+    vector_norm(filtered_angular)
+    return filtered_linear, filtered_angular
+
+
+def limit_twist_acceleration(
+    previous_linear,
+    previous_angular,
+    requested_linear,
+    requested_angular,
+    elapsed_sec,
+    maximum_linear_acceleration_mps2,
+    maximum_angular_acceleration_radps2,
+):
+    """Apply a vector-norm slew limit to a non-zero Cartesian request."""
+    elapsed = float(elapsed_sec)
+    linear_acceleration = float(maximum_linear_acceleration_mps2)
+    angular_acceleration = float(maximum_angular_acceleration_radps2)
+    if not all(
+        math.isfinite(value) and value > 0.0
+        for value in (elapsed, linear_acceleration, angular_acceleration)
+    ):
+        raise ValueError('Cartesian acceleration limits must be positive')
+
+    def limited(previous, requested, maximum_delta):
+        previous = tuple(float(value) for value in previous)
+        requested = tuple(float(value) for value in requested)
+        delta = tuple(
+            target - current
+            for current, target in zip(previous, requested)
+        )
+        norm = vector_norm(delta)
+        if norm <= maximum_delta:
+            return requested
+        scale = maximum_delta / norm
+        return tuple(
+            current + scale * change
+            for current, change in zip(previous, delta)
+        )
+
+    return (
+        limited(
+            previous_linear,
+            requested_linear,
+            linear_acceleration * elapsed,
+        ),
+        limited(
+            previous_angular,
+            requested_angular,
+            angular_acceleration * elapsed,
+        ),
+    )
+
+
 def bounded_integration_step(
     linear_velocity,
     angular_velocity,

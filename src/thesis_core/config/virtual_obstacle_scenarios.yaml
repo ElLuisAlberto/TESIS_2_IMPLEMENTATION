@@ -8,16 +8,16 @@ obstacle_demo_source:
     scenario: PARK
     insert_stop_active: false
 
-    # Reference state measured from the physical JACO2 on 2026-10-19:
-    # [-1.551814113493139, 2.7496557685950496, 4.1168651479621845,
-    #  5.844626591509698, 5.973422388148109, 2.0808752988032992]
-    # PARK is the first +X 0.01 m grid pose with at least 0.40 m current
-    # clearance and at least 0.375 m projected clearance for J1 +/-3 deg.
+    # Reference state measured from the physical JACO2 on 2026-10-20:
+    # [2.2334760271614935, 2.483514895586853, 1.0155264405650484,
+    #  5.740923098662012, 5.969486236056973, 2.079310957978987]
+    # PARK is the first +X 0.01 m grid pose with at least 0.80 m current
+    # clearance and at least 0.775 m projected clearance for J1 +/-3 deg.
     # STOP poses are derived on wrist_2_to_tool with an
     # effective sphere radius of 0.12 m and a positive surface clearance
     # target equal to 30% of the configured 0.05 m STOP distance.
-    park_pose: [0.59, 0.0, 0.65]
+    park_pose: [1.22, 0.0, 0.60]
     block_start_pose:
-      [-0.2541344553253112, 0.47314710635248247, 0.7877059751122166]
+      [0.017715572026672233, 0.24629707151187663, 0.5423259709067948]
     insert_stop_pose:
-      [0.19163771787018302, 0.5676933085630497, 0.8102059751122166]
+      [0.23442858697668922, -0.12962618026812636, 0.6773259709067948]

@@ -5,8 +5,11 @@ from collections import deque
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
+import tf2_ros
 
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from thesis_interfaces.msg import (
     CommandDecision,
     ExecutionControl,
@@ -31,7 +34,9 @@ from thesis_core.horizon_clearance import (
 )
 from thesis_core.jaco_kinematics import (
     CAPSULE_RADII,
+    end_effector_transform,
     minimum_sphere_clearance,
+    translation,
 )
 from thesis_core.joint_model import (
     JOINT_NAMES,
@@ -56,6 +61,47 @@ MIN_RUNTIME_REMAINING_SEC = 0.10
 RECENT_POINT_COMMAND_ID_CAPACITY = 256
 MAX_FUTURE_MESSAGE_TOLERANCE_SEC = 0.05
 SAFETY_REFERENCE_FRAME = 'world'
+
+
+def kinematic_tf_position_error(joint_positions, tf_position):
+    model_position = translation(end_effector_transform(joint_positions))
+    return math.sqrt(sum(
+        (model_value - tf_value) ** 2
+        for model_value, tf_value in zip(model_position, tf_position)
+    ))
+
+
+def newest_synchronized_kinematic_sample(
+    samples, tf_buffer, now_ns, maximum_age_sec
+):
+    """Return the newest fresh joint sample with its exact-stamp TF."""
+    last_error = None
+    for stamp_ns, joints in reversed(tuple(samples)):
+        age_sec = (int(now_ns) - int(stamp_ns)) / 1.0e9
+        if age_sec < -MAX_FUTURE_MESSAGE_TOLERANCE_SEC:
+            continue
+        if age_sec > float(maximum_age_sec):
+            break
+        try:
+            transform = tf_buffer.lookup_transform(
+                SAFETY_REFERENCE_FRAME,
+                'j2n6s300_end_effector',
+                Time(nanoseconds=int(stamp_ns)),
+            )
+        except tf2_ros.TransformException as exception:
+            last_error = exception
+            continue
+        tf_position = (
+            transform.transform.translation.x,
+            transform.transform.translation.y,
+            transform.transform.translation.z,
+        )
+        return int(stamp_ns), tuple(joints), tf_position
+    if last_error is not None:
+        raise last_error
+    raise tf2_ros.TransformException(
+        'No existe una muestra articular fresca con TF exacta disponible.'
+    )
 
 
 class RecentCommandIds:
@@ -229,6 +275,7 @@ class SafetySupervisorNode(Node):
         self.current_positions = {}
         self.last_state_receive_ns = None
         self.last_state_arrival_ns = None
+        self.kinematic_state_history = deque(maxlen=10)
         self.proximity_status = None
         self.last_proximity_receive_ns = None
         self.last_proximity_arrival_ns = None
@@ -249,6 +296,11 @@ class SafetySupervisorNode(Node):
         self.runtime_recovery_count = 0
         self.jog_recovery_count = 0
         self.last_jog_intent_monotonic = None
+        self.last_jog_message = None
+        self.kinematic_tf_valid = False
+        self.kinematic_tf_error_latched = False
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         recovery_required = int(self.get_parameter(
             'runtime_recovery_required_samples'
@@ -340,6 +392,9 @@ class SafetySupervisorNode(Node):
         self.timing_publisher = self.create_publisher(
             PipelineTiming, '/thesis/pipeline_timing', 100
         )
+        self.kinematic_tf_status_publisher = self.create_publisher(
+            String, '/thesis/kinematic_tf_status', 10
+        )
         self.timing_sequence = 0
 
         runtime_rate = float(
@@ -379,6 +434,10 @@ class SafetySupervisorNode(Node):
         self.jog_stability_timer = self.create_timer(
             0.05,
             self.jog_stability_watchdog_callback,
+        )
+        self.kinematic_tf_timer = self.create_timer(
+            1.0 / runtime_rate,
+            self.kinematic_tf_check_callback,
         )
 
         self.get_logger().info(
@@ -432,6 +491,9 @@ class SafetySupervisorNode(Node):
             self.current_positions = {}
             self.last_state_receive_ns = None
             self.last_state_arrival_ns = now_ns
+            history = getattr(self, 'kinematic_state_history', None)
+            if history is not None:
+                history.clear()
             self.get_logger().warning(
                 'Rejected JointState with zero, stale, or future source stamp'
             )
@@ -453,6 +515,86 @@ class SafetySupervisorNode(Node):
             int(msg.header.stamp.nanosec)
         )
         self.last_state_arrival_ns = now_ns
+        history = getattr(self, 'kinematic_state_history', None)
+        if history is not None and all(
+            name in positions for name in JOINT_NAMES
+        ):
+            history.append((
+                self.last_state_receive_ns,
+                tuple(positions[name] for name in JOINT_NAMES),
+            ))
+
+    def kinematic_tf_check_callback(self):
+        if not self.kinematic_state_history:
+            self._set_kinematic_tf_failure(
+                'KINEMATIC_STATE_UNAVAILABLE',
+                'No existe estado articular completo para validar FK-TF.',
+            )
+            return
+        try:
+            _, joints, tf_position = newest_synchronized_kinematic_sample(
+                self.kinematic_state_history,
+                self.tf_buffer,
+                self.get_clock().now().nanoseconds,
+                float(self.get_parameter('max_state_age_sec').value),
+            )
+            error = kinematic_tf_position_error(joints, tf_position)
+        except (ValueError, tf2_ros.TransformException) as exception:
+            self._set_kinematic_tf_failure(
+                'KINEMATIC_TF_UNAVAILABLE',
+                f'No se pudo validar FK-TF: {exception}',
+            )
+            return
+        tolerance = float(
+            self.get_parameter('kinematic_tf_tolerance_m').value
+        )
+        if error > tolerance:
+            self._set_kinematic_tf_failure(
+                'KINEMATIC_TF_MISMATCH',
+                f'Error FK-TF {error:.6f} m supera {tolerance:.6f} m.',
+            )
+            return
+        if self.kinematic_tf_error_latched:
+            self.get_logger().info(
+                f'Coherencia FK-TF recuperada: error={error:.6f} m.'
+            )
+        self.kinematic_tf_valid = True
+        self.kinematic_tf_error_latched = False
+        self.publish_kinematic_tf_status(
+            f'VALID error={error:.6f}m tolerance={tolerance:.6f}m'
+        )
+
+    def _set_kinematic_tf_failure(self, reason_code, reason):
+        self.kinematic_tf_valid = False
+        self.publish_kinematic_tf_status(
+            f'INVALID {reason_code}: {reason}'
+        )
+        if not self.kinematic_tf_error_latched:
+            self.get_logger().error(reason)
+        self.kinematic_tf_error_latched = True
+        if self.active_execution is not None:
+            self.publish_runtime_stop(
+                self.active_execution.command_id, reason_code, reason
+            )
+        elif (
+            self.last_jog_message is not None
+            and self.last_jog_intent_monotonic is not None
+            and time.monotonic() - self.last_jog_intent_monotonic
+            <= float(self.get_parameter('jog_command_timeout_sec').value)
+        ):
+            current = None
+            if all(name in self.current_positions for name in JOINT_NAMES):
+                current = tuple(
+                    self.current_positions[name] for name in JOINT_NAMES
+                )
+            self.publish_jog_stop(
+                self.last_jog_message, reason_code, reason, current
+            )
+
+    def publish_kinematic_tf_status(self, text):
+        message = String()
+        message.data = str(text)
+        self.kinematic_tf_status_publisher.publish(message)
 
     def proximity_status_callback(self, msg):
         now_ns = self.get_clock().now().nanoseconds
@@ -974,6 +1116,7 @@ class SafetySupervisorNode(Node):
             )
             return
         self.last_jog_intent_monotonic = time.monotonic()
+        self.last_jog_message = msg
         if self.active_execution is not None:
             self.publish_jog_stop(
                 msg,
@@ -1024,6 +1167,15 @@ class SafetySupervisorNode(Node):
             self.current_positions[name]
             for name in JOINT_NAMES
         )
+
+        if not self.kinematic_tf_valid:
+            self.publish_jog_stop(
+                msg,
+                'KINEMATIC_TF_INVALID',
+                'La coherencia FK-TF no está validada.',
+                current,
+            )
+            return
 
         state_age = (now_ns - self.last_state_receive_ns) / 1e9
         if state_age > float(
@@ -1220,6 +1372,13 @@ class SafetySupervisorNode(Node):
             return
 
         command_id = execution.command_id
+        if not self.kinematic_tf_valid:
+            self.publish_runtime_stop(
+                command_id,
+                'KINEMATIC_TF_INVALID',
+                'La coherencia FK-TF no está validada.',
+            )
+            return
         if not all(
             joint_name in self.current_positions
             for joint_name in JOINT_NAMES
@@ -1501,6 +1660,15 @@ class SafetySupervisorNode(Node):
         )
         self.last_prediction_speed_scale = 1.0
         self.last_prediction_reason_code = 'PREDICTION_ERROR'
+        if not self.kinematic_tf_valid:
+            self.publish_decision(
+                msg,
+                False,
+                'STOP',
+                'KINEMATIC_TF_INVALID',
+                'La coherencia FK-TF no está validada.',
+            )
+            return False
         if not bool(self.get_parameter('prediction_enabled').value):
             self.publish_decision(
                 msg,
