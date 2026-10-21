@@ -5,6 +5,7 @@ from thesis_core.cartesian_kinematics import (
     pose_error,
     solve_inverse_kinematics,
     solve_inverse_kinematics_transform,
+    yoshikawa_manipulability,
 )
 from thesis_core.jaco_kinematics import (
     end_effector_pose,
@@ -95,6 +96,19 @@ def test_far_unreachable_pose_is_not_reported_as_success():
     assert result.position_error_m > 0.10
 
 
+def test_singular_configuration_is_rejected_without_joint_motion():
+    singular = (0.0, math.pi, math.pi, 0.0, 0.0, 0.0)
+    target = [row[:] for row in end_effector_transform(singular)]
+    target[0][3] += 0.005
+
+    result = solve_inverse_kinematics_transform(singular, target)
+
+    assert yoshikawa_manipulability(singular) < 1.0e-4
+    assert not result.success
+    assert result.positions == singular
+    assert 'singular configuration' in result.detail
+
+
 def gazebo_initial_y_target():
     """Return a 20 mm Y target from the perturbed Gazebo initial state."""
     target = [
@@ -109,6 +123,7 @@ def test_initial_y_target_fails_with_two_tenths_millimetre_tolerance():
         GAZEBO_INITIAL_JOINTS,
         gazebo_initial_y_target(),
         position_tolerance_m=0.0002,
+        minimum_manipulability=1.0e-16,
     )
 
     assert not result.success
@@ -120,6 +135,7 @@ def test_initial_y_target_passes_with_half_millimetre_tolerance():
         GAZEBO_INITIAL_JOINTS,
         gazebo_initial_y_target(),
         position_tolerance_m=0.0005,
+        minimum_manipulability=1.0e-16,
     )
 
     assert result.success

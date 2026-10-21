@@ -317,6 +317,30 @@ def generate_launch_description():
             }],
         ),
         Node(
+            package='thesis_simulation',
+            executable='cartesian_command_adapter',
+            name='cartesian_command_adapter',
+            output='screen',
+            parameters=[{'use_sim_time': False}],
+        ),
+        Node(
+            package='thesis_simulation',
+            executable='cartesian_jog_adapter',
+            name='cartesian_jog_adapter',
+            output='screen',
+            parameters=[{
+                'use_sim_time': False,
+                'require_hardware_arm_epoch': True,
+            }],
+        ),
+        Node(
+            package='thesis_simulation',
+            executable='cartesian_trajectory_adapter',
+            name='cartesian_trajectory_adapter',
+            output='screen',
+            parameters=[{'use_sim_time': False}],
+        ),
+        Node(
             package='thesis_core',
             executable='horizon_preview',
             name='horizon_preview',

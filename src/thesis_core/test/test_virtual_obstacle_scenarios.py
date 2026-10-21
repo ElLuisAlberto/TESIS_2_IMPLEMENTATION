@@ -10,14 +10,19 @@ from thesis_core.virtual_obstacle_scenarios import select_scenario_center
 
 
 MEASURED_JOINTS = (
-    -1.551814113493139,
-    2.7496557685950496,
-    4.1168651479621845,
-    5.844626591509698,
-    5.973422388148109,
-    2.0808752988032992,
+    2.2334760271614935,
+    2.483514895586853,
+    1.0155264405650484,
+    5.740923098662012,
+    5.969486236056973,
+    2.079310957978987,
 )
 EFFECTIVE_RADIUS = 0.12
+REDUCTION_POSE = (
+    -0.021236321380452394,
+    0.3137637299440237,
+    0.5083259709067948,
+)
 
 
 def _horizon(center, delta_deg=3.0):
@@ -57,9 +62,9 @@ def test_calibrated_single_sphere_scenarios_have_unambiguous_states():
 
     park = _horizon(poses.park)
     reverse_park = _horizon(poses.park, -3.0)
-    assert 0.39 <= park.current.clearance <= 0.41
-    assert park.minimum.clearance > 0.375
-    assert reverse_park.minimum.clearance > 0.375
+    assert 0.80 <= park.current.clearance <= 0.82
+    assert park.minimum.clearance > 0.80
+    assert reverse_park.minimum.clearance > 0.80
     assert _decision(park).state == 'ALLOW'
     assert _decision(reverse_park).state == 'ALLOW'
 
@@ -90,19 +95,40 @@ def test_insert_stop_stays_parked_until_explicit_insertion():
     ) == poses.insert_stop
 
 
+def test_calibrated_reduction_probe_is_unambiguous():
+    geometry = _horizon(REDUCTION_POSE)
+
+    assert 0.09 < geometry.current.clearance < 0.11
+    assert 0.09 < geometry.minimum.clearance < 0.11
+    assert _decision(geometry).state == 'WARNING'
+
+    predictive = decide_preventive_state(SafetyPolicyInput(
+        current_clearance=geometry.current.clearance,
+        nominal_clearance=0.015,
+        supervised_clearance=0.020,
+        protective_margin=0.02,
+        stop_distance=0.05,
+        warning_distance=0.30,
+        minimum_scale=0.05,
+        candidate_scale=0.50,
+    ))
+    assert predictive.state == 'REDUCTION'
+    assert predictive.reason_code == 'PREDICTIVE_INTRUSION'
+
+
 def test_calibration_matches_committed_reproducible_poses():
     poses = derive_physical_scenario_poses(MEASURED_JOINTS)
     committed = ScenarioPoses(
-        park=(0.59, 0.0, 0.65),
+        park=(1.22, 0.0, 0.60),
         block_start=(
-            -0.2541344553253112,
-            0.47314710635248247,
-            0.7877059751122166,
+            0.017715572026672233,
+            0.24629707151187663,
+            0.5423259709067948,
         ),
         insert_stop=(
-            0.19163771787018302,
-            0.5676933085630497,
-            0.8102059751122166,
+            0.23442858697668922,
+            -0.12962618026812636,
+            0.6773259709067948,
         ),
     )
     for calculated, expected in zip(

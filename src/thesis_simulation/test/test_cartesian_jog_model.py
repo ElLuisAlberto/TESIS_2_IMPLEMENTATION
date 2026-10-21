@@ -1,18 +1,23 @@
 """Regression tests for continuous Cartesian velocity integration."""
 
 import math
+from types import SimpleNamespace
 
 import pytest
+from builtin_interfaces.msg import Time
 
 from thesis_core.cartesian_kinematics import (
     solve_inverse_kinematics_transform,
 )
 from thesis_core.jaco_kinematics import end_effector_transform
 from thesis_simulation.cartesian_jog_model import (
+    apply_twist_deadzone,
     bounded_integration_step,
     integrate_world_twist,
+    limit_twist_acceleration,
     validate_world_twist,
 )
+from thesis_simulation.cartesian_jog_adapter import CartesianJogAdapter
 
 
 IDENTITY = (
@@ -78,6 +83,50 @@ def test_high_velocity_shortens_only_the_local_ik_step():
         maximum_linear_step_m=0.005,
     )
     assert step == pytest.approx(1.0 / 30.0)
+
+
+def test_deadzone_and_acceleration_limit_cartesian_input():
+    linear, angular = apply_twist_deadzone(
+        (0.0005, -0.002, 0.0),
+        (math.radians(0.2), math.radians(-2.0), 0.0),
+        0.001,
+        math.radians(0.5),
+    )
+    assert linear == (0.0, -0.002, 0.0)
+    assert angular == (0.0, math.radians(-2.0), 0.0)
+
+    limited_linear, limited_angular = limit_twist_acceleration(
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+        (0.04, 0.0, 0.0),
+        (0.0, 0.0, math.radians(10.0)),
+        0.05,
+        0.20,
+        math.radians(60.0),
+    )
+    assert limited_linear == pytest.approx((0.01, 0.0, 0.0))
+    assert limited_angular == pytest.approx(
+        (0.0, 0.0, math.radians(3.0))
+    )
+
+
+def test_hardware_cartesian_jog_requires_fresh_arm_epoch():
+    adapter = SimpleNamespace(
+        require_hardware_arm_epoch=True,
+        hardware_armed=True,
+        arm_epoch='arm-4',
+        armed_at_ns=2_000_000_000,
+        jog_command_id=None,
+        stamp_nanoseconds=CartesianJogAdapter.stamp_nanoseconds,
+    )
+
+    assert not CartesianJogAdapter.admit_new_hardware_stream(
+        adapter, Time(sec=2, nanosec=0)
+    )
+    assert CartesianJogAdapter.admit_new_hardware_stream(
+        adapter, Time(sec=2, nanosec=1)
+    )
+    assert adapter.jog_command_id == 'jog:arm-4:2000000001'
 
 
 @pytest.mark.parametrize(

@@ -263,6 +263,25 @@ ctest --test-dir build/thesis_hardware_bridge \
   --output-on-failure -R '^test_bridge_logic$'
 ```
 
+Las pruebas focales de la ruta cartesiana, JOG continuo, GUI, sincronización
+FK-TF y escenarios de obstáculo virtual se ejecutan por separado:
+
+```bash
+python3 -m pytest -q \
+  src/thesis_core/test/test_cartesian_kinematics.py \
+  src/thesis_core/test/test_a02a_frame_tf_interlock.py \
+  src/thesis_core/test/test_virtual_obstacle_scenarios.py \
+  src/thesis_simulation/test/test_cartesian_jog_model.py \
+  src/thesis_ui/test/test_gui_state.py
+```
+
+La prueba de contrato de percepción RGB-D permanece independiente del brazo:
+
+```bash
+python3 -m pytest -q \
+  thesis_perception/test/test_perception_safety_contract.py
+```
+
 ## Limitaciones y siguiente etapa
 
 - El movimiento físico validado se limita a la ruta articular supervisada y a
