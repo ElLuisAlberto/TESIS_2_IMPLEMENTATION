@@ -1,0 +1,17 @@
+{
+  "rgb.png": "c144158cd2af3e5719a0fc510c27afa6d5e9d2e104bc0b3088d58e0a766f91f5",
+  "cloud_world_xyz.npz": "bc184fb6489cf9659d265a33f17630c62f73c0ec2c4a8b535e6db157242c2cea",
+  "metadata.json": "60ec3d073e754b6b837d51c59edd05be2b964be24ab60973029d8e497396f6d8",
+  "link_transforms_at_stamp.json": "8b2c5326ad5ddd62bab71ba309a2d91f9f88787ccad866e614dad1dde97a18bc",
+  "robot_description.urdf": "b2d9d0d5f1366915ebe70583b8ebb048a7c445b97353b6b9424148f5644352d2",
+  "collision_mesh_manifest.json": "e5e114fa8e7ec678f286c2d45599bb3665fa87eaf55a2d5af2f29eca4482b256",
+  "hashes.json": "755374283cbf43ecaf013be0093eee2612e853dab003e5304dd0b4dc63524f69",
+  "meshes/base.dae": "84d6c46a5cf934f8d9abd669928948857ef8eec0d537ea226e9e44cd72e5133c",
+  "meshes/hand_3finger.dae": "018d65704e40f198c2af21ce69de59b955f13c238875f0df229ac7f8436bb003",
+  "meshes/arm.dae": "34fbe87b12d0878546ad8f01541c61d4a54d204e52b03f3aa83955d47b5fc067",
+  "meshes/finger_distal.dae": "73f6662e0e9c47e43b9f3018069cf6285f40e163d3555a6928607f058ed7cffb",
+  "meshes/shoulder.dae": "c94f20e293244a5cf55b724cc19573fb5f4dd3e7fa3ba6fb17f1582bc9bf9963",
+  "meshes/finger_proximal.dae": "ce16acaa3571b4023c131c7310744fc28894c9703c9833a3d274bb38a704fa33",
+  "meshes/forearm.dae": "4da6f9148f2b3fd0d4fdfa13129f1a1f2080277a07598540636c4b9eccabc170",
+  "meshes/wrist.dae": "dd7f14d83ee829804b780d152adb878034d2fc3e142a3a2ea9ac26ed8e68c4a4"
+}

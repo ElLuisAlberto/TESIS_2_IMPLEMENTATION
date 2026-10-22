@@ -1,0 +1,22 @@
+purpose: session_only_observational_calibration_board
+not_for_safety: true
+dictionary: DICT_4X4_50
+squares_x: 7
+squares_y: 5
+square_length_m: 0.03
+marker_length_m: 0.022
+physical_pattern_width_m: 0.21
+physical_pattern_height_m: 0.15
+raster_width_px: 2100
+raster_height_px: 1500
+raster_dpi: 254
+pdf_page: A4 landscape
+pdf_pattern_width_mm: 210
+pdf_pattern_height_mm: 150
+charuco_inner_corner_count: 24
+board_frame_origin: upper-left outer corner of printed pattern
+board_frame_axes: x right, y down, z into printed sheet when viewed from front
+opencv_version: 4.5.4
+sha256:
+  charuco_board.png: e3f600ee00d8ef9010603f32e17613e9f08c9677ddea612508a1f890c6aa3ba2
+  charuco_board.pdf: 5b16b7a359889705ecbe87bc73d138457bf5ed5aed5dc5e43924c484aae4edf7

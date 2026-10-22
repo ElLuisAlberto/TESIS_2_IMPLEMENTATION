@@ -32,6 +32,21 @@ target_include_directories(pointcloud_preprocessor_node PRIVATE ${PCL_INCLUDE_DI
 target_link_libraries(pointcloud_preprocessor_node ${PCL_LIBRARIES})
 target_compile_definitions(pointcloud_preprocessor_node PRIVATE ${PCL_DEFINITIONS})
 
+add_executable(pointcloud_cluster_probe
+  src/pointcloud_cluster_probe.cpp
+)
+ament_target_dependencies(pointcloud_cluster_probe
+  pcl_conversions
+  rclcpp
+  sensor_msgs
+)
+target_include_directories(pointcloud_cluster_probe PRIVATE
+  include
+  ${PCL_INCLUDE_DIRS}
+)
+target_link_libraries(pointcloud_cluster_probe ${PCL_LIBRARIES})
+target_compile_definitions(pointcloud_cluster_probe PRIVATE ${PCL_DEFINITIONS})
+
 add_executable(obstacle_extractor_node
   src/obstacle_extractor_node.cpp
 )
@@ -58,6 +73,7 @@ ament_target_dependencies(perception_health_node
 
 install(TARGETS
   pointcloud_preprocessor_node
+  pointcloud_cluster_probe
   obstacle_extractor_node
   perception_health_node
   DESTINATION lib/${PROJECT_NAME}
@@ -71,6 +87,7 @@ install(DIRECTORY
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
   ament_lint_auto_find_test_dependencies()
@@ -78,6 +95,15 @@ if(BUILD_TESTING)
     test_perception_safety_contract
     test/test_perception_safety_contract.py
   )
+  ament_add_gtest(test_pointcloud_cluster_metrics
+    test/test_pointcloud_cluster_metrics.cpp
+  )
+  target_include_directories(test_pointcloud_cluster_metrics PRIVATE
+    include
+    ${PCL_INCLUDE_DIRS}
+  )
+  target_link_libraries(test_pointcloud_cluster_metrics ${PCL_LIBRARIES})
+  target_compile_definitions(test_pointcloud_cluster_metrics PRIVATE ${PCL_DEFINITIONS})
 endif()
 
 ament_package()

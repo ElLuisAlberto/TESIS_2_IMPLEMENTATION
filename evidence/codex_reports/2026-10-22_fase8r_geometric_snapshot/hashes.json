@@ -1,0 +1,13 @@
+{
+  "robot_description_sha256": "b2d9d0d5f1366915ebe70583b8ebb048a7c445b97353b6b9424148f5644352d2",
+  "collision_meshes_sha256": {
+    "meshes/base.dae": "84d6c46a5cf934f8d9abd669928948857ef8eec0d537ea226e9e44cd72e5133c",
+    "meshes/shoulder.dae": "c94f20e293244a5cf55b724cc19573fb5f4dd3e7fa3ba6fb17f1582bc9bf9963",
+    "meshes/arm.dae": "34fbe87b12d0878546ad8f01541c61d4a54d204e52b03f3aa83955d47b5fc067",
+    "meshes/forearm.dae": "4da6f9148f2b3fd0d4fdfa13129f1a1f2080277a07598540636c4b9eccabc170",
+    "meshes/wrist.dae": "dd7f14d83ee829804b780d152adb878034d2fc3e142a3a2ea9ac26ed8e68c4a4",
+    "meshes/hand_3finger.dae": "018d65704e40f198c2af21ce69de59b955f13c238875f0df229ac7f8436bb003",
+    "meshes/finger_proximal.dae": "ce16acaa3571b4023c131c7310744fc28894c9703c9833a3d274bb38a704fa33",
+    "meshes/finger_distal.dae": "73f6662e0e9c47e43b9f3018069cf6285f40e163d3555a6928607f058ed7cffb"
+  }
+}

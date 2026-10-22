@@ -1,0 +1,26 @@
+# Reversible visual-only hypothesis for one shadow session; not a calibration.
+extrinsic_candidate:
+  valid: true
+  accepted_for_session: true
+  session_only: true
+  not_for_safety: true
+  parent_frame: world
+  child_frame: d435i_link
+  camera_optical_frame: d435i_depth_optical_frame
+  # Human-readable visual hypothesis. These are the authoritative proposal values.
+  translation_xyz_m: [0.03, -0.68, 0.30]
+  rotation_rpy_deg: [0.0, -10.0, 90.0]
+  # Launch-contract representation of exactly the same proposal.
+  translation: [0.03, -0.68, 0.30]
+  quaternion_xyzw: [0.0616284167, -0.0616284167, 0.7044160264, 0.7044160264]
+  metrics:
+    status: visual_hypothesis_v2_not_calibrated
+    source: operator_visual_observation_model_left_cloud_right
+    calibration_error_px: null
+    sample_count: 0
+    final_extrinsic: false
+    reversible: true
+    notes: >-
+      x=0.03 m is a small frontal-offset hypothesis; y=-0.68 m represents the
+      camera to the right of JACO2; z=0.30 m is approximate height; yaw=+90 deg
+      aims the camera toward the arm. Visual-only and not for safety.

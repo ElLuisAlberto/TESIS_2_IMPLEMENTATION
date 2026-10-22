@@ -1,0 +1,25 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Image Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /camera/d435i/color/image_raw
+      Name: D435i RGB inspection
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF

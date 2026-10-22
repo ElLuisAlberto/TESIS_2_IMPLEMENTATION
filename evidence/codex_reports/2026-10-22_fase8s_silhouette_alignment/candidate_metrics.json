@@ -1,0 +1,74 @@
+{
+  "status": "BLOCKED_IMPLEMENTATION",
+  "reason": "T_world_d435i_link and fixed d435i_link-to-optical transform are absent from frozen 8R artifacts",
+  "reference_stamp_ns": 1792639154117031982,
+  "rgb_minus_cloud_ns": 0,
+  "camera_info_minus_cloud_ns": 0,
+  "collision_link_tfs": 13,
+  "collision_mesh_instances": 13,
+  "frozen_mesh_hashes_verified": 8,
+  "frozen_robot_description_sha256": "b2d9d0d5f1366915ebe70583b8ebb048a7c445b97353b6b9424148f5644352d2",
+  "world_from_color_optical_row_major": [
+    [
+      0.9998568769831608,
+      -0.014383917248849402,
+      -0.00890665335907732,
+      0.01505176790058613
+    ],
+    [
+      0.011231865020262227,
+      0.17066590309025148,
+      0.9852649363143681,
+      -0.6803179398673457
+    ],
+    [
+      -0.012651907273099991,
+      -0.9852239605526082,
+      0.17080303508833133,
+      0.2998892681116703
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "color_optical_from_world_row_major": [
+    [
+      0.9998568769831608,
+      0.011231865020262227,
+      -0.012651907273099991,
+      -0.0036142031623558626
+    ],
+    [
+      -0.014383917248849402,
+      0.17066590309025148,
+      -0.9852239605526082,
+      0.4117816714360937
+    ],
+    [
+      -0.00890665335907732,
+      0.9852649363143681,
+      0.17080303508833133,
+      0.6192054753921622
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "inverse_composition_max_abs_error": 2.220446049250313e-16,
+  "initial_world_from_d435i_link": null,
+  "projected_cloud_points": 1211,
+  "rgb_edge_pixels_depth_supported": 6151,
+  "depth_edge_pixels": 5760,
+  "edge_provenance": {
+    "red": "RGB Canny 80/160 within depth support",
+    "blue": "cloud-depth boundary or >0.08 m gradient"
+  },
+  "optimization_performed": false,
+  "candidate_applicable": false
+}

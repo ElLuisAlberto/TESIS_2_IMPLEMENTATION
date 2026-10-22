@@ -1,0 +1,30 @@
+# EXPERIMENTAL, TEMPORARY, SESSION-ONLY SHADOW COVERAGE HYPOTHESIS.
+# Not suitable for safety, supervisor, obstacle, control, or physical-output
+# paths. Derived from Fase 7S residual measurement; it does not replace fixed
+# support and reproducible marker calibration.
+# Capsule 2 deliberately remains 0.100 m because its required expansion was
+# ambiguous/excessive. This profile changes only wrist and tool coverage.
+shadow_coverage_metadata:
+  session_only: true
+  not_for_safety: true
+  profile_kind: shadow_coverage
+
+jaco_self_filter_node:
+  ros__parameters:
+    # Preserve the six model-frame capsule segments from coverage_v1 exactly.
+    capsule_start_frames:
+      - j2n6s300_link_base
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+    capsule_end_frames:
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+      - j2n6s300_end_effector
+    # Fase 7S-approved P95 coverage, conservatively ceiled to 0.001 m.
+    capsule_inner_radii_m: [0.105, 0.105, 0.100, 0.114, 0.123, 0.126]

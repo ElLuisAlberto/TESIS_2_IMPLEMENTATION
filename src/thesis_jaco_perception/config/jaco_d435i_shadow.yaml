@@ -1,0 +1,19 @@
+jaco_self_filter_node:
+  ros__parameters:
+    # These empty or invalid values are intentional: this file is a safe
+    # shadow configuration, not a physical camera calibration.
+    enabled: false
+    input_topic: /thesis/perception/points_world
+    expected_frame: world
+    camera_optical_frame: ""
+    capsule_start_frames: []
+    capsule_end_frames: []
+    capsule_inner_radii_m: []
+    epsilon_total_m: -1.0
+    max_cloud_age_sec: 0.5
+    tf_timeout_sec: 0.05
+
+    # Do not enable until the measured camera pose, real optical frame,
+    # inner radii, uncertainty and end-to-end latency are validated.
+    # Never copy thesis_core preventive capsule radii as inner radii here.
+    # This YAML does not represent a physical calibration.

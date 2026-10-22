@@ -1,0 +1,20 @@
+jaco_self_filter_node:
+  ros__parameters:
+    # Direct transcription of thesis_core/config/jaco_capsules.yaml.
+    # This profile names the model-frame origins used for the JACO2 geometry.
+    capsule_start_frames:
+      - j2n6s300_link_base
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+    capsule_end_frames:
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+      - j2n6s300_end_effector
+    # Source radii: thesis_core/config/jaco_capsules.yaml segment_radii.
+    capsule_inner_radii_m: [0.105, 0.105, 0.085, 0.075, 0.085, 0.090]

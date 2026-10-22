@@ -1,0 +1,8 @@
+{
+  "status": "NOT_RUN_MISSING_T_WORLD_D435I_LINK",
+  "runs": [],
+  "bounds": {
+    "translation_m_per_axis": 0.3,
+    "rotation_deg_per_axis": 25
+  }
+}

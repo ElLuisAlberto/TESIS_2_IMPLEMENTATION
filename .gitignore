@@ -2,6 +2,7 @@
 build/
 install/
 log/
+/Testing/
 
 # Python
 __pycache__/

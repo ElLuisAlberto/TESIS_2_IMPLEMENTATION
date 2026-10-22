@@ -1,0 +1,62 @@
+{
+  "white_area_px": 20152,
+  "components": [
+    8885,
+    3481,
+    4770,
+    3016
+  ],
+  "outside_band_px": 0,
+  "outside_silhouette_px": 9995,
+  "regions": {
+    "base_hombro": {
+      "projected_area_px": 1692,
+      "white_overlap_px": 1087
+    },
+    "brazo_superior": {
+      "projected_area_px": 2955,
+      "white_overlap_px": 2270
+    },
+    "antebrazo": {
+      "projected_area_px": 6367,
+      "white_overlap_px": 3466
+    },
+    "muneca": {
+      "projected_area_px": 7399,
+      "white_overlap_px": 2287
+    },
+    "efector": {
+      "projected_area_px": 12307,
+      "white_overlap_px": 2595
+    }
+  },
+  "covered_regions": [
+    "base_hombro",
+    "brazo_superior",
+    "antebrazo",
+    "muneca",
+    "efector"
+  ],
+  "tests": {
+    "nonempty": true,
+    "outside_band_lt_2_percent": true,
+    "outside_silhouette_le_5_percent": false,
+    "at_least_three_visible_regions": true
+  },
+  "status": "AUTO_MASK_NOT_TRUSTWORTHY",
+  "algorithm": "frozen collision triangle silhouette; eroded seed; local GrabCut; depth-supported component filter",
+  "dilation_px": 45,
+  "erosion_px": 8,
+  "cloud_support_radius_px": 6,
+  "depth_edge_threshold_m": 0.12,
+  "mesh_triangles": 89728,
+  "triangles_in_front": 89728,
+  "silhouette_area_px": 27970,
+  "band_area_px": 118648,
+  "seed_area_px": 7230,
+  "projected_cloud_points": 1211,
+  "depth_edge_rejected_points": 0,
+  "disconnected_components_removed": 0,
+  "frozen_robot_description_sha256": "b2d9d0d5f1366915ebe70583b8ebb048a7c445b97353b6b9424148f5644352d2",
+  "frozen_mesh_hashes_verified": 8
+}

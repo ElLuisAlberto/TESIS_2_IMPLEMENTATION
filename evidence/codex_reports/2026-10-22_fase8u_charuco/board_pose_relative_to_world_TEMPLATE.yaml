@@ -1,0 +1,24 @@
+# Evidencia física futura; esta plantilla NO es una pose válida ni operativa.
+session_only: true
+not_for_safety: true
+parent_frame: world
+child_frame: charuco_board
+board_origin: upper_left_outer_corner_of_printed_pattern
+board_axes: x_right_y_down_z_into_printed_sheet_from_front
+verified_square_length_m: REQUIRED
+verified_marker_length_m: REQUIRED
+verified_pattern_width_m: REQUIRED
+verified_pattern_height_m: REQUIRED
+tx_m: REQUIRED
+ty_m: REQUIRED
+tz_m: REQUIRED
+roll_rad: REQUIRED
+pitch_rad: REQUIRED
+yaw_rad: REQUIRED
+measurement_method: REQUIRED
+position_tolerance_m: REQUIRED
+orientation_tolerance_rad: REQUIRED
+measurement_date_and_operator: REQUIRED
+mount_description: REQUIRED
+world_origin_reference: REQUIRED
+world_axes_reference: REQUIRED

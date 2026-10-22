@@ -70,8 +70,8 @@ def test_fixed_camera_does_not_require_imu_by_default():
     assert 'default_value="false"' in enable_imu_declaration
 
 
-def test_standalone_preserves_source_frame_and_clock():
-    """Avoid fabricated geometry or simulated timestamps in standalone mode."""
+def test_standalone_preserves_source_frame_clock_and_depth_range():
+    """Keep standalone geometry isolated and reject the distant room background."""
     config = yaml.safe_load(
         (PACKAGE_ROOT / "config" / "perception.yaml").read_text(
             encoding="utf-8"
@@ -80,10 +80,23 @@ def test_standalone_preserves_source_frame_and_clock():
     preprocessor = config["pointcloud_preprocessor"]["ros__parameters"]
     assert preprocessor["target_frame"] == ""
     assert preprocessor["restamp_output"] is False
-    assert preprocessor["min_valid_range_m"] >= 0.0
-    assert preprocessor["max_valid_range_m"] > (
-        preprocessor["min_valid_range_m"]
+    assert preprocessor["min_valid_range_m"] == 0.10
+    assert preprocessor["max_valid_range_m"] == 1.5
+
+
+def test_processing_launches_default_to_the_calibrated_depth_range():
+    """Keep the 1.50 m sensor cutoff without terminal overrides."""
+    expected = (
+        'DeclareLaunchArgument("max_valid_range_m", default_value="1.5")'
     )
+    for launch_name in (
+        "perception_processing.launch.py",
+        "d435i_standalone.launch.py",
+    ):
+        launch_text = (PACKAGE_ROOT / "launch" / launch_name).read_text(
+            encoding="utf-8"
+        )
+        assert expected in launch_text
 
 
 def test_standalone_exposes_workspace_filter_arguments():

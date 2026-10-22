@@ -1,0 +1,18 @@
+# Hypothesis for one temporary shadow session; not a calibrated or final extrinsic.
+extrinsic_candidate:
+  valid: true
+  accepted_for_session: true
+  session_only: true
+  parent_frame: world
+  # Attach world only to the RealSense TF-tree root. The driver owns the
+  # internal d435i_link -> d435i_depth_frame -> d435i_depth_optical_frame chain.
+  child_frame: d435i_link
+  camera_optical_frame: d435i_depth_optical_frame
+  translation: [0.68, -0.03, 0.30]
+  quaternion_xyzw: [0.0, -0.0871557427, 0.0, 0.9961946981]
+  metrics:
+    status: approximate_not_calibrated
+    source: operator_visualization_hypothesis
+    calibration_error_px: null
+    sample_count: 0
+    final_extrinsic: false

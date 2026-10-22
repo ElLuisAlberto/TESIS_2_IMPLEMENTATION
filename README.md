@@ -10,8 +10,8 @@ y, de forma controlada, frente al brazo físico.
 
 ## Estado de la tesis
 
-Estado al 20/10/2026: **simulación validada y movimiento articular físico J1
-validado antes de integrar percepción RGB-D**.
+Estado al 22/10/2026: **simulación y movimiento articular físico J1 validados;
+percepción RGB-D en observación, todavía fuera de la decisión preventiva**.
 
 - El JACO2 funciona mediante la ruta candidato → supervisor preventivo →
   adaptador Kinova. El backend USB, feedback a 20 Hz, watchdog, TF y retorno a
@@ -23,9 +23,15 @@ validado antes de integrar percepción RGB-D**.
 - Existe una esfera virtual reproducible con escenarios `PARK`, `BLOCK_START`
   e `INSERT_STOP`. PARK está calibrado aproximadamente a 0.40 m; los escenarios
   STOP aún requieren su prueba física separada.
-- La Intel RealSense D435i está reconocida y puede visualizar color,
-  profundidad y nube de puntos en RViz. Todavía no alimenta la entrada de
-  obstáculos del supervisor.
+- La Intel RealSense D435i entrega RGB, profundidad y nube. Se prepararon un
+  preprocesamiento de corto alcance y filtros sombra de cápsulas y mallas para
+  distinguir el brazo de posibles puntos externos, sin conectarlos al
+  supervisor ni habilitar salida física.
+- Las capturas sincronizadas y la cadena TF de cámara se verificaron, pero el
+  ajuste extrínseco basado en bordes se rechazó: se alineaba con el fondo y
+  el robot rojo. Hay un tablero ChArUco y un detector offline preparados para
+  una calibración temporal con referencia física; faltan su montaje y pose
+  medida respecto de `world`.
 - La ruta cartesiana física y la integración RGB-D → obstáculos siguen
   pendientes. Por ello no se declara terminado el Avance 3.
 
@@ -67,7 +73,10 @@ adaptador de simulación; en hardware la única ruta de salida pasa por
 | `src/thesis_ui` | Interfaz para simulación y hardware |
 | `src/thesis_telemetry` | Registro de decisiones y ejecución |
 | `src/thesis_validation` | Validadores y escenarios |
+| `src/thesis_jaco_perception` | Auto-filtrado diagnóstico de cápsulas y mallas, aislado del supervisor |
+| `thesis_perception` | Cámara D435i, preprocesamiento y extracción de obstáculos |
 | `tools/physical` | Preflight físico y protocolo articular |
+| `tools/perception` | Capturas diagnósticas y análisis offline de calibración |
 | `tools/realsense_d435i_test` | Pruebas independientes de la cámara |
 
 Los directorios `build/`, `install/` y `log/` son artefactos locales de
@@ -82,6 +91,8 @@ compilación y no forman parte del repositorio.
 | Movimiento articular físico | GUI → supervisor → Kinova | J1 ±3° validado |
 | Movimiento cartesiano físico | Ruta cartesiana supervisada | Bloqueado por A-02b |
 | Visualización RGB-D | D435i → RViz | Disponible |
+| Auto-filtrado sombra JACO2 | D435i → cápsulas/mallas → diagnóstico | Experimental, sin uso preventivo |
+| Extrínseca D435i → `world` | ChArUco sobre base del JACO2 | Pendiente de pose física medida y captura válida |
 | RGB-D conectado al supervisor | Cámara → obstáculo → supervisor | Pendiente |
 
 Las rutas deben ejecutarse por separado. No se deben iniciar simultáneamente
@@ -226,17 +237,25 @@ confirma que la sesión anterior terminó para no competir por el USB.
 
 ## Percepción RGB-D
 
-La cámara ya funciona como fuente RGB-D independiente, pero todavía no
-participa en la decisión preventiva. El contrato pendiente es:
+La cámara ya funciona como fuente RGB-D independiente y los filtros sombra
+publican resultados diagnósticos en una sesión de sólo lectura. Esto **no**
+demuestra que la nube externa esté libre de puntos del brazo ni autoriza usarla
+para seguridad: persisten residuos sobre el brazo y no hay una extrínseca
+validada. La prueba de alineación de silueta de [Fase 8T](docs/codex_reports/2026-10-22_fase8t_cadena_tf_y_candidato_extrinseco.md)
+se rechazó. La [Fase 8U](docs/codex_reports/2026-10-22_fase8u_preparacion_charuco_temporal.md)
+dejó preparado el tablero ChArUco; la captura siguiente espera la pose del
+tablero medida por el operador.
+
+El contrato de integración aún pendiente es:
 
 ```text
 cámara → percepción → obstáculo válido → obstacle_input_bridge
 → proximity_monitor → safety_supervisor
 ```
 
-Antes de declararla integrada faltan calibración cámara→`world`, extracción de
-obstáculos, sellos de adquisición, incertidumbre y pruebas físicas de `ALLOW`,
-`REDUCTION` y `STOP`.
+Antes de declararla integrada faltan calibración cámara→`world` con referencia
+física, validación del auto-filtrado y de la extracción de obstáculos, sellos de
+adquisición, incertidumbre y pruebas físicas de `ALLOW`, `REDUCTION` y `STOP`.
 
 ## Verificación offline
 
@@ -292,6 +311,9 @@ python3 -m pytest -q \
   ejecutarse como una etapa separada y controlada.
 - La RGB-D debe conectarse gradualmente al pipeline y permanecer fail-closed
   ante datos ausentes, vencidos o inconsistentes.
+- Los filtros de cápsulas y mallas son diagnósticos de sesión, no una fuente de
+  `obstacle_input` ni una garantía de espacio libre. La calibración ChArUco
+  requiere primero imprimir, fijar y medir el tablero; no hay candidato activo.
 
 El detalle de cada decisión, prueba y bloqueo se conserva en los informes; este
 README resume el proyecto para presentación y consulta rápida.

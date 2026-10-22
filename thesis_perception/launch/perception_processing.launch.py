@@ -169,7 +169,7 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_voxel", default_value="true"),
         DeclareLaunchArgument("voxel_leaf_size", default_value="0.02"),
         DeclareLaunchArgument("min_valid_range_m", default_value="0.10"),
-        DeclareLaunchArgument("max_valid_range_m", default_value="10.0"),
+        DeclareLaunchArgument("max_valid_range_m", default_value="1.5"),
         DeclareLaunchArgument("min_x", default_value="-1.5"),
         DeclareLaunchArgument("max_x", default_value="1.5"),
         DeclareLaunchArgument("min_y", default_value="-1.5"),

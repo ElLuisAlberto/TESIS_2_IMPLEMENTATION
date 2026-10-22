@@ -1,0 +1,12 @@
+d435i_calibration_candidate:
+  ros__parameters:
+    session_only: true
+    detector_available: false
+    explicit_final_acceptance: false
+    parent_frame: world
+    camera_frame: d435i_color_optical_frame
+    child_frame: d435i_depth_optical_frame
+    min_samples: 20
+    max_reprojection_error_px: 1.0
+    max_translation_dispersion_m: 0.003
+    max_rotation_dispersion_deg: 0.5

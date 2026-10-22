@@ -1,0 +1,28 @@
+# EXPERIMENTAL, SESSION-ONLY SHADOW COVERAGE HYPOTHESIS.
+# Not a calibrated model, not a safety envelope, and never for supervisor,
+# obstacle, control, or physical-output paths. Use only when explicitly passed
+# as shadow_coverage_profile_file to the isolated shadow-session launch.
+shadow_coverage_metadata:
+  session_only: true
+  not_for_safety: true
+  profile_kind: shadow_coverage
+
+jaco_self_filter_node:
+  ros__parameters:
+    # Preserve the current six model-frame capsule segments exactly.
+    capsule_start_frames:
+      - j2n6s300_link_base
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+    capsule_end_frames:
+      - j2n6s300_link_1
+      - j2n6s300_link_2
+      - j2n6s300_link_3
+      - j2n6s300_link_4
+      - j2n6s300_link_5
+      - j2n6s300_end_effector
+    # Visual-coverage hypothesis only: +0.015 m on capsules 2..5.
+    capsule_inner_radii_m: [0.105, 0.105, 0.100, 0.090, 0.100, 0.105]

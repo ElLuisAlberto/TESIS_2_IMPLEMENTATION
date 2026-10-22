@@ -1,0 +1,103 @@
+{
+  "status": "GEOMETRIC_SNAPSHOT_READY",
+  "reference_stamp_ns": 1792639154117031982,
+  "rgb_stamp_ns": 1792639154117031982,
+  "camera_info_stamp_ns": 1792639154117031982,
+  "rgb_minus_cloud_ns": 0,
+  "camera_info_minus_cloud_ns": 0,
+  "sync_limit_ns": 33000000,
+  "cloud_frame": "world",
+  "rgb_frame": "d435i_color_optical_frame",
+  "rgb_encoding": "rgb8",
+  "rgb_width": 640,
+  "rgb_height": 480,
+  "camera_info_k": [
+    605.437255859375,
+    0.0,
+    322.9783935546875,
+    0.0,
+    605.5026245117188,
+    251.43527221679688,
+    0.0,
+    0.0,
+    1.0
+  ],
+  "camera_info_d": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "camera_info_p": [
+    605.437255859375,
+    0.0,
+    322.9783935546875,
+    0.0,
+    0.0,
+    605.5026245117188,
+    251.43527221679688,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+  ],
+  "camera_info_distortion_model": "plumb_bob",
+  "world_to_depth_optical_at_cloud_stamp": {
+    "target_frame": "world",
+    "source_frame": "d435i_depth_optical_frame",
+    "returned_stamp_ns": 1792639154117031982,
+    "translation_m": [
+      0.03,
+      -0.68,
+      0.3
+    ],
+    "quaternion_xyzw": [
+      -0.6427876097037833,
+      7.285838599102591e-17,
+      -6.245004513516507e-17,
+      0.7660444431045086
+    ]
+  },
+  "color_optical_from_world_at_cloud_stamp": {
+    "target_frame": "d435i_color_optical_frame",
+    "source_frame": "world",
+    "returned_stamp_ns": 1792639154117031982,
+    "translation_m": [
+      -0.0036142031623558626,
+      0.4117816714360937,
+      0.6192054753921622
+    ],
+    "quaternion_xyzw": [
+      0.643892059821477,
+      -0.0012238278840793206,
+      -0.008370409412314601,
+      0.7650695744770118
+    ]
+  },
+  "world_to_color_optical_at_cloud_stamp": {
+    "target_frame": "world",
+    "source_frame": "d435i_color_optical_frame",
+    "returned_stamp_ns": 1792639154117031982,
+    "translation_m": [
+      0.01505176790058613,
+      -0.6803179398673457,
+      0.2998892681116703
+    ],
+    "quaternion_xyzw": [
+      -0.643892059821477,
+      0.0012238278840793206,
+      0.008370409412314601,
+      0.7650695744770118
+    ]
+  },
+  "world_xyz_points": 1211,
+  "collision_mesh_count": 13,
+  "collision_link_count": 13,
+  "provenance": {
+    "mesh_node_pid": 110060,
+    "mesh_node_start_unix_s": 1792635554.72,
+    "mesh_parameter_file": "/tmp/launch_params_1mvt_im_"
+  }
+}

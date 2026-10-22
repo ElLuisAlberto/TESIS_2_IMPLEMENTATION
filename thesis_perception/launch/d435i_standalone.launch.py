@@ -80,8 +80,8 @@ def generate_launch_description():
                     "temporal_filter.enable": LaunchConfiguration(
                         "enable_temporal_filter"
                     ),
-                    "depth_module.depth_profile": "640,480,15",
-                    "rgb_camera.color_profile": "640,480,15",
+                    "depth_module.depth_profile": "640,480,30",
+                    "rgb_camera.color_profile": "640,480,30",
                 }.items(),
             ),
         ],
@@ -176,9 +176,9 @@ def generate_launch_description():
         DeclareLaunchArgument("restamp_output", default_value="false"),
         DeclareLaunchArgument("enable_crop", default_value="false"),
         DeclareLaunchArgument("enable_voxel", default_value="true"),
-        DeclareLaunchArgument("voxel_leaf_size", default_value="0.02"),
+        DeclareLaunchArgument("voxel_leaf_size", default_value="0.01"),
         DeclareLaunchArgument("min_valid_range_m", default_value="0.10"),
-        DeclareLaunchArgument("max_valid_range_m", default_value="10.0"),
+        DeclareLaunchArgument("max_valid_range_m", default_value="1.5"),
         DeclareLaunchArgument("min_x", default_value="-1.5"),
         DeclareLaunchArgument("max_x", default_value="1.5"),
         DeclareLaunchArgument("min_y", default_value="-1.5"),

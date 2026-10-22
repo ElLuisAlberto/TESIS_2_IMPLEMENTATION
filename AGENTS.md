@@ -4,6 +4,10 @@
 - Preservar todos los cambios existentes.
 - No borrar ni sobrescribir archivos modificados sin autorización.
 - No usar `sudo` ni instalar paquetes sin autorización.
+- Codex puede acceder al repositorio, editar archivos, compilar y ejecutar comandos desde su terminal integrada.
+- Si una aplicación gráfica, como RViz, falla porque la terminal integrada hereda el entorno Snap de VS Code, diagnosticar primero sin modificar el sistema.
+- Si se requiere probar una aplicación fuera de ese entorno, generar un bloque exacto para que el operador lo ejecute desde una terminal nativa abierta con `Ctrl+Alt+T`; no interpretar esta limitación como falta de acceso al repositorio.
+- No solicitar una terminal nativa para tareas que puedan realizarse de forma segura desde la terminal integrada.
 - Se permite activar `hardware_output` y enviar comandos al Kinova Jaco2 físico únicamente cuando el usuario haya confirmado que es operador autorizado, el área está despejada y la parada de emergencia es accesible.
 - Antes de la primera prueba física, verificar el estado de conexión, diagnóstico, armado y disponibilidad del sistema sin enviar movimiento.
 - Para movimientos físicos, comenzar con desplazamientos mínimos y velocidad reducida; solicitar confirmación del operador antes de cada etapa que pueda mover el brazo.

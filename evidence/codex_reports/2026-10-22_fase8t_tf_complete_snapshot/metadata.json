@@ -1,0 +1,180 @@
+{
+  "status": "TF_COMPLETE_SNAPSHOT_READY",
+  "reference_stamp_ns": 1792640495707376953,
+  "rgb_stamp_ns": 1792640495707376953,
+  "camera_info_stamp_ns": 1792640495707376953,
+  "rgb_minus_cloud_ns": 0,
+  "camera_info_minus_cloud_ns": 0,
+  "sync_limit_ns": 33000000,
+  "cloud_frame": "world",
+  "rgb_frame": "d435i_color_optical_frame",
+  "rgb_encoding": "rgb8",
+  "rgb_width": 640,
+  "rgb_height": 480,
+  "camera_info_k": [
+    605.437255859375,
+    0.0,
+    322.9783935546875,
+    0.0,
+    605.5026245117188,
+    251.43527221679688,
+    0.0,
+    0.0,
+    1.0
+  ],
+  "camera_info_d": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "camera_info_p": [
+    605.437255859375,
+    0.0,
+    322.9783935546875,
+    0.0,
+    0.0,
+    605.5026245117188,
+    251.43527221679688,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+  ],
+  "camera_info_distortion_model": "plumb_bob",
+  "world_xyz_points": 1244,
+  "tf_at_cloud_stamp": {
+    "world_depth": {
+      "target_frame": "world",
+      "source_frame": "d435i_depth_optical_frame",
+      "returned_stamp_ns": 1792640495707376953,
+      "translation_m": [
+        0.03,
+        -0.68,
+        0.3
+      ],
+      "quaternion_xyzw": [
+        -0.6427876097037833,
+        7.285838599102591e-17,
+        -6.245004513516507e-17,
+        0.7660444431045086
+      ]
+    },
+    "color_world": {
+      "target_frame": "d435i_color_optical_frame",
+      "source_frame": "world",
+      "returned_stamp_ns": 1792640495707376953,
+      "translation_m": [
+        -0.0036142031623558626,
+        0.4117816714360937,
+        0.6192054753921622
+      ],
+      "quaternion_xyzw": [
+        0.643892059821477,
+        -0.0012238278840793206,
+        -0.008370409412314601,
+        0.7650695744770118
+      ]
+    },
+    "world_color": {
+      "target_frame": "world",
+      "source_frame": "d435i_color_optical_frame",
+      "returned_stamp_ns": 1792640495707376953,
+      "translation_m": [
+        0.01505176790058613,
+        -0.6803179398673457,
+        0.2998892681116703
+      ],
+      "quaternion_xyzw": [
+        -0.643892059821477,
+        0.0012238278840793206,
+        0.008370409412314601,
+        0.7650695744770118
+      ]
+    },
+    "world_camera_link": {
+      "target_frame": "world",
+      "source_frame": "d435i_link",
+      "returned_stamp_ns": 1792640495707376953,
+      "translation_m": [
+        0.03,
+        -0.68,
+        0.3
+      ],
+      "quaternion_xyzw": [
+        0.06162841670036272,
+        -0.06162841670036272,
+        0.7044160264041459,
+        0.704416026404146
+      ]
+    },
+    "camera_link_color": {
+      "target_frame": "d435i_link",
+      "source_frame": "d435i_color_optical_frame",
+      "returned_stamp_ns": 1792640495707376953,
+      "translation_m": [
+        -0.0003323380369693041,
+        0.014948232099413872,
+        -5.3839943575439975e-05
+      ],
+      "quaternion_xyzw": [
+        -0.4993399736989435,
+        0.5020958518075844,
+        -0.4934243934402856,
+        0.5050660493658636
+      ]
+    },
+    "color_camera_link": {
+      "target_frame": "d435i_color_optical_frame",
+      "source_frame": "d435i_link",
+      "returned_stamp_ns": 1792640495707376953,
+      "translation_m": [
+        0.014948262751430654,
+        -0.0002698483485252235,
+        0.00019902962411935633
+      ],
+      "quaternion_xyzw": [
+        0.4993399736989435,
+        -0.5020958518075844,
+        0.4934243934402856,
+        0.5050660493658636
+      ]
+    },
+    "camera_link_world": {
+      "target_frame": "d435i_link",
+      "source_frame": "world",
+      "returned_stamp_ns": 1792640495707376953,
+      "translation_m": [
+        0.6175748187668393,
+        0.030000000000000138,
+        -0.4135230866893714
+      ],
+      "quaternion_xyzw": [
+        -0.06162841670036272,
+        0.06162841670036272,
+        -0.7044160264041459,
+        0.704416026404146
+      ]
+    }
+  },
+  "composition_check": {
+    "translation_error_m": 3.469446951953614e-18,
+    "rotation_error_rad": 1.5089367911699086e-16
+  },
+  "geometry_source": "8R frozen collision meshes and robot_description",
+  "geometry_hashes": {
+    "robot_description_sha256": "b2d9d0d5f1366915ebe70583b8ebb048a7c445b97353b6b9424148f5644352d2",
+    "collision_meshes_sha256": {
+      "meshes/base.dae": "84d6c46a5cf934f8d9abd669928948857ef8eec0d537ea226e9e44cd72e5133c",
+      "meshes/shoulder.dae": "c94f20e293244a5cf55b724cc19573fb5f4dd3e7fa3ba6fb17f1582bc9bf9963",
+      "meshes/arm.dae": "34fbe87b12d0878546ad8f01541c61d4a54d204e52b03f3aa83955d47b5fc067",
+      "meshes/forearm.dae": "4da6f9148f2b3fd0d4fdfa13129f1a1f2080277a07598540636c4b9eccabc170",
+      "meshes/wrist.dae": "dd7f14d83ee829804b780d152adb878034d2fc3e142a3a2ea9ac26ed8e68c4a4",
+      "meshes/hand_3finger.dae": "018d65704e40f198c2af21ce69de59b955f13c238875f0df229ac7f8436bb003",
+      "meshes/finger_proximal.dae": "ce16acaa3571b4023c131c7310744fc28894c9703c9833a3d274bb38a704fa33",
+      "meshes/finger_distal.dae": "73f6662e0e9c47e43b9f3018069cf6285f40e163d3555a6928607f058ed7cffb"
+    }
+  }
+}

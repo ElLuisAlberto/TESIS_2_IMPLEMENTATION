@@ -14,7 +14,9 @@ pointcloud_preprocessor:
     # Sensor-level sanity interval applied before voxelization. It is
     # independent from the workspace crop calibrated later.
     min_valid_range_m: 0.10
-    max_valid_range_m: 10.0
+    # Retornos más lejanos pertenecen al fondo del salón y no se entregan
+    # al extractor de obstáculos.
+    max_valid_range_m: 1.5
     min_x: -1.5
     max_x: 1.5
     min_y: -1.5

@@ -1,0 +1,11 @@
+# Invalid by design. A final extrinsic requires a later explicit acceptance.
+d435i_extrinsic_final:
+  ros__parameters:
+    valid: false
+    session_only: true
+    parent_frame: ""
+    child_frame: ""
+    translation: []
+    quaternion_xyzw: []
+    sample_count: 0
+    metrics: {}
